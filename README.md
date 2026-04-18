@@ -193,7 +193,7 @@ MIT License
 
 ## 联系方式
 
-- 作者：Your Name
-- 邮箱：<your.email@example.com>
-- 项目地址：<https://github.com/yourusername/txt-cleaning>
+- 作者：handy
+- 邮箱：mikelon@aliyun.com
+- 项目地址：https://github.com/handy-h/txtCleaning.git
 
