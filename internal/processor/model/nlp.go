@@ -201,7 +201,7 @@ func detectDuplicates(result NLPResult) NLPResult {
 
 // CalculateSimilarity 计算文本相似度
 func CalculateSimilarity(a, b string) int {
-	return levenshtein.Distance(a, b)
+	return levenshtein.ComputeDistance(a, b)
 }
 
 // AnalyzeText 分析文本

@@ -19,7 +19,7 @@ func ListVersions(c *gin.Context) {
 	fileId := c.Param("id")
 
 	// 检查文件是否存在
-	filePath := filepath.Join(config.AppConfig.DataDir, "uploads", fileId)
+	filePath := filepath.Join(config.AppConfigInstance.DataDir, "uploads", fileId)
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "文件不存在"})
 		return
@@ -52,7 +52,7 @@ func GetVersion(c *gin.Context) {
 	version := c.Param("version")
 
 	// 检查文件是否存在
-	filePath := filepath.Join(config.AppConfig.DataDir, "uploads", fileId)
+	filePath := filepath.Join(config.AppConfigInstance.DataDir, "uploads", fileId)
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "文件不存在"})
 		return
@@ -74,7 +74,7 @@ func RestoreVersion(c *gin.Context) {
 	version := c.Param("version")
 
 	// 检查文件是否存在
-	filePath := filepath.Join(config.AppConfig.DataDir, "uploads", fileId)
+	filePath := filepath.Join(config.AppConfigInstance.DataDir, "uploads", fileId)
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "文件不存在"})
 		return
@@ -102,7 +102,7 @@ func DeleteVersion(c *gin.Context) {
 	version := c.Param("version")
 
 	// 检查文件是否存在
-	filePath := filepath.Join(config.AppConfig.DataDir, "uploads", fileId)
+	filePath := filepath.Join(config.AppConfigInstance.DataDir, "uploads", fileId)
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "文件不存在"})
 		return

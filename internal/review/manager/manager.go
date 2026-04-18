@@ -195,7 +195,7 @@ func (m *Manager) GetApprovedSuggestions(sessionID string) ([]preprocess.Change,
 
 // saveSession 保存会话到磁盘
 func (m *Manager) saveSession(session *ReviewSession) error {
-	sessionPath := filepath.Join(config.AppConfig.DataDir, "reviews", session.ID+'.json')
+	sessionPath := filepath.Join(config.AppConfigInstance.DataDir, "reviews", session.ID+".json")
 
 	// 确保目录存在
 	if err := os.MkdirAll(filepath.Dir(sessionPath), 0755); err != nil {
@@ -214,7 +214,7 @@ func (m *Manager) saveSession(session *ReviewSession) error {
 
 // loadSession 从磁盘加载会话
 func (m *Manager) loadSession(sessionID string) (*ReviewSession, error) {
-	sessionPath := filepath.Join(config.AppConfig.DataDir, "reviews", sessionID+'.json')
+	sessionPath := filepath.Join(config.AppConfigInstance.DataDir, "reviews", sessionID+".json")
 
 	// 读取文件
 	data, err := os.ReadFile(sessionPath)

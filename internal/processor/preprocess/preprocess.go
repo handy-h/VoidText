@@ -4,7 +4,6 @@ import (
 	"regexp"
 	"strings"
 
-	"golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/simplifiedchinese"
 	"golang.org/x/text/transform"
 )
@@ -51,7 +50,7 @@ func Preprocess(content string) PreprocessResult {
 func normalizeEncoding(result PreprocessResult) PreprocessResult {
 	// 尝试从GBK转换为UTF-8
 	detector := simplifiedchinese.GBK.NewDecoder()
-	transformer := transform.NewReader(strings.NewReader(result.Content), detector)
+	_ = transform.NewReader(strings.NewReader(result.Content), detector)
 
 	// 这里简化处理，实际项目中需要更复杂的编码检测和转换
 	return result

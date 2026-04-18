@@ -25,13 +25,13 @@ func main() {
 
 	// 启动服务器
 	srv := &http.Server{
-		Addr:    fmt.Sprintf(":%d", config.AppConfig.Port),
+		Addr:    fmt.Sprintf(":%d", config.AppConfigInstance.Port),
 		Handler: server,
 	}
 
 	// 在goroutine中启动服务器
 	go func() {
-		log.Printf("Server started on port %d", config.AppConfig.Port)
+		log.Printf("Server started on port %d", config.AppConfigInstance.Port)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Failed to start server: %v", err)
 		}

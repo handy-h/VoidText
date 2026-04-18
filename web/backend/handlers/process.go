@@ -11,6 +11,7 @@ import (
 
 	"txt-cleaning/internal/config"
 	"txt-cleaning/internal/processor"
+	"txt-cleaning/internal/processor/preprocess"
 	"txt-cleaning/internal/review/manager"
 )
 
@@ -30,7 +31,7 @@ func StartProcessing(c *gin.Context) {
 	}
 
 	// 检查文件是否存在
-	filePath := filepath.Join(config.AppConfig.DataDir, "uploads", req.FileId)
+	filePath := filepath.Join(config.AppConfigInstance.DataDir, "uploads", req.FileId)
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "文件不存在"})
 		return
@@ -268,12 +269,33 @@ func SaveProgress(c *gin.Context) {
 		return
 	}
 
+	// 获取审核会话中已批准的建议
+	session, err := reviewMgr.GetSession(reviewSessionId)
+	if err == nil && session != nil {
+		approvedSuggestions := []preprocess.Change{}
+		for _, item := range session.Items {
+			if item.Status == manager.StatusApproved {
+				approvedSuggestions = append(approvedSuggestions, item.Suggestion)
+			}
+		}
+
+		if len(approvedSuggestions) > 0 {
+			fileId := status["fileId"].(string)
+			filePath := filepath.Join(config.AppConfigInstance.DataDir, "uploads", fileId)
+
+			content, err := os.ReadFile(filePath)
+			if err == nil {
+				updatedContent := processor.ApplyAllSuggestions(string(content), approvedSuggestions)
+				os.WriteFile(filePath, []byte(updatedContent), 0644)
+			}
+		}
+	}
+
 	// 创建版本备份
 	fileId := status["fileId"].(string)
-	filePath := filepath.Join(config.AppConfig.DataDir, "uploads", fileId)
+	filePath := filepath.Join(config.AppConfigInstance.DataDir, "uploads", fileId)
 	content, err := os.ReadFile(filePath)
 	if err == nil {
-		// 创建版本
 		versionManager.CreateVersion(fileId, string(content), "保存审核进度")
 	}
 

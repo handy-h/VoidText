@@ -33,7 +33,7 @@ func NewRuleManager() *RuleManager {
 
 // LoadRules 加载规则
 func (rm *RuleManager) LoadRules() error {
-	rulesPath := filepath.Join(config.AppConfig.DataDir, "rules.json")
+	rulesPath := filepath.Join(config.AppConfigInstance.DataDir, "rules.json")
 
 	// 检查文件是否存在
 	if _, err := os.Stat(rulesPath); os.IsNotExist(err) {
@@ -72,7 +72,7 @@ func (rm *RuleManager) LoadRules() error {
 
 // SaveRules 保存规则
 func (rm *RuleManager) SaveRules() error {
-	rulesPath := filepath.Join(config.AppConfig.DataDir, "rules.json")
+	rulesPath := filepath.Join(config.AppConfigInstance.DataDir, "rules.json")
 
 	// 序列化
 	data, err := json.MarshalIndent(rm.rules, "", "  ")

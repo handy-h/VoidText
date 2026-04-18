@@ -22,8 +22,8 @@ func UploadFile(c *gin.Context) {
 	}
 
 	// 检查文件大小
-	if file.Size > config.AppConfig.MaxFileSize {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": fmt.Sprintf("文件大小超过限制 (最大 %dMB)", config.AppConfig.MaxFileSize/(1024*1024))})
+	if file.Size > config.AppConfigInstance.MaxFileSize {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": fmt.Sprintf("文件大小超过限制 (最大 %dMB)", config.AppConfigInstance.MaxFileSize/(1024*1024))})
 		return
 	}
 
@@ -35,7 +35,7 @@ func UploadFile(c *gin.Context) {
 
 	// 生成唯一文件名
 	fileId := fmt.Sprintf("%d_%s", time.Now().UnixNano(), file.Filename)
-	filePath := filepath.Join(config.AppConfig.DataDir, "uploads", fileId)
+	filePath := filepath.Join(config.AppConfigInstance.DataDir, "uploads", fileId)
 
 	// 保存文件
 	if err := c.SaveUploadedFile(file, filePath); err != nil {
@@ -49,7 +49,7 @@ func UploadFile(c *gin.Context) {
 
 // ListFiles 列出所有文件
 func ListFiles(c *gin.Context) {
-	uploadsDir := filepath.Join(config.AppConfig.DataDir, "uploads")
+	uploadsDir := filepath.Join(config.AppConfigInstance.DataDir, "uploads")
 
 	// 读取上传目录
 	files, err := os.ReadDir(uploadsDir)
@@ -82,7 +82,7 @@ func ListFiles(c *gin.Context) {
 // GetFile 获取文件内容
 func GetFile(c *gin.Context) {
 	fileId := c.Param("id")
-	filePath := filepath.Join(config.AppConfig.DataDir, "uploads", fileId)
+	filePath := filepath.Join(config.AppConfigInstance.DataDir, "uploads", fileId)
 
 	// 检查文件是否存在
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
@@ -103,7 +103,7 @@ func GetFile(c *gin.Context) {
 // DeleteFile 删除文件
 func DeleteFile(c *gin.Context) {
 	fileId := c.Param("id")
-	filePath := filepath.Join(config.AppConfig.DataDir, "uploads", fileId)
+	filePath := filepath.Join(config.AppConfigInstance.DataDir, "uploads", fileId)
 
 	// 检查文件是否存在
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {

@@ -3,8 +3,6 @@ package postprocess
 import (
 	"regexp"
 	"strings"
-
-	"txt-cleaning/internal/processor/preprocess"
 )
 
 // PostprocessResult 后处理结果
@@ -95,7 +93,7 @@ func normalizePunctuation(result PostprocessResult) PostprocessResult {
 		"?": "？",
 		"!": "！",
 		"'": "'",
-		"\"": """,
+		"\"": "\"",
 	}
 
 	for en, zh := range punctuationMap {

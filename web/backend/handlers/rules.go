@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"txt-cleaning/internal/config"
 	"txt-cleaning/internal/processor"
 	"txt-cleaning/internal/processor/rules"
 )
@@ -71,9 +72,9 @@ func DeleteRule(c *gin.Context) {
 func GetExternalConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"config": {
-			"url": config.AppConfig.ExternalAPIURL,
-			"key": config.AppConfig.ExternalAPIKey,
+		"config": gin.H{
+			"url": config.AppConfigInstance.ExternalAPIURL,
+			"key": config.AppConfigInstance.ExternalAPIKey,
 		},
 	})
 }
@@ -92,8 +93,8 @@ func UpdateExternalConfig(c *gin.Context) {
 	}
 
 	// 更新配置
-	config.AppConfig.ExternalAPIURL = req.URL
-	config.AppConfig.ExternalAPIKey = req.Key
+	config.AppConfigInstance.ExternalAPIURL = req.URL
+	config.AppConfigInstance.ExternalAPIKey = req.Key
 
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "配置保存成功"})
 }
