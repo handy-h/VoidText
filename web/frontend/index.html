@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>小说文本清洗工具</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>小说文本清洗工具</h1>
+        </header>
+
+        <main>
+            <!-- 文件上传部分 -->
+            <section id="upload-section">
+                <h2>上传文件</h2>
+                <form id="upload-form">
+                    <input type="file" id="file-input" accept=".txt">
+                    <button type="submit">上传并处理</button>
+                </form>
+            </section>
+
+            <!-- 处理状态部分 -->
+            <section id="status-section" style="display: none;">
+                <h2>处理状态</h2>
+                <div id="status-message"></div>
+                <div id="progress-bar">
+                    <div id="progress-fill"></div>
+                </div>
+            </section>
+
+            <!-- 审核部分 -->
+            <section id="review-section" style="display: none;">
+                <h2>审核修改建议</h2>
+                <div id="suggestions-list"></div>
+                <div id="review-actions">
+                    <button id="approve-all">全部通过</button>
+                    <button id="reject-all">全部拒绝</button>
+                    <button id="save-progress">保存进度</button>
+                </div>
+            </section>
+
+            <!-- 版本管理部分 -->
+            <section id="versions-section" style="display: none;">
+                <h2>版本管理</h2>
+                <div id="versions-list"></div>
+            </section>
+
+            <!-- 自定义规则部分 -->
+            <section id="rules-section">
+                <h2>自定义清理规则</h2>
+                <form id="rule-form">
+                    <input type="text" id="rule-name" placeholder="规则名称">
+                    <input type="text" id="rule-pattern" placeholder="正则表达式">
+                    <input type="text" id="rule-replacement" placeholder="替换内容">
+                    <button type="submit">添加规则</button>
+                </form>
+                <div id="rules-list"></div>
+            </section>
+
+            <!-- 外部API配置部分 -->
+            <section id="external-config-section">
+                <h2>外部API配置</h2>
+                <form id="external-config-form">
+                    <input type="text" id="api-url" placeholder="API URL">
+                    <input type="text" id="api-key" placeholder="API Key">
+                    <button type="submit">保存配置</button>
+                </form>
+            </section>
+        </main>
+
+        <footer>
+            <p>© 2026 小说文本清洗工具</p>
+        </footer>
+    </div>
+
+    <script src="/static/js/main.js"></script>
+</body>
+</html>
