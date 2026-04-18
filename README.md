@@ -25,7 +25,7 @@
 
 1. 克隆项目
    ```bash
-   git clone https://github.com/yourusername/txt-cleaning.git
+   git clone https://github.com:handy-h/txtCleaning.git
    cd txt-cleaning
    ```
 2. 构建Docker镜像
@@ -43,7 +43,7 @@
 
 1. 克隆项目
    ```bash
-   git clone https://github.com/yourusername/txt-cleaning.git
+   git clone https://github.com:handy-h/txtCleaning.git
    cd txt-cleaning
    ```
 2. 安装依赖
