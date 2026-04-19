@@ -12,31 +12,30 @@ import (
 
 // AppConfig 应用配置
 type AppConfig struct {
-	Port       int
-	DataDir    string
-	ModelsDir  string
-	MaxFileSize      int64
-	BackupKeepDays   int
+	Port           int
+	DataDir        string
+	MaxFileSize    int64
+	BackupKeepDays int
 
-	EnableBasicCleaning  bool
-	BasicCleaningTool    string
-	TraditionalToSimple  bool
+	EnableBasicCleaning bool
+	BasicCleaningTool   string
+	TraditionalToSimple bool
 
-	EnableVectorDetection      bool
-	VectorModelName            string
-	VectorModelType            string
-	VectorSimilarityThreshold  float64
-	VectorModelURL             string
-	VectorModelApiKey          string
+	EnableVectorDetection     bool
+	VectorModelName           string
+	VectorModelType           string
+	VectorSimilarityThreshold float64
+	VectorModelURL            string
+	VectorModelApiKey         string
 
-	EnableModelRepair    bool
-	RepairModelName      string
-	RepairModelType      string
-	LLMApiURL            string
-	LLMApiKey            string
-	CompletionModelName  string
+	EnableModelRepair     bool
+	RepairModelName       string
+	RepairModelType       string
+	LLMApiURL             string
+	LLMApiKey             string
+	CompletionModelName   string
 	CompletionTemperature float64
-	CompletionMaxTokens  int
+	CompletionMaxTokens   int
 
 	NameSeparators string
 }
@@ -48,29 +47,28 @@ func Load() error {
 	_ = godotenv.Load()
 
 	cfg := AppConfig{
-		Port:              getEnvInt("PORT", 8080),
-		DataDir:           getEnvStr("DATA_DIR", "./data"),
-		ModelsDir:         getEnvStr("MODELS_DIR", "./models"),
-		MaxFileSize:       getEnvInt64("MAX_FILE_SIZE", 100*1024*1024),
-		BackupKeepDays:    getEnvInt("BACKUP_KEEP_DAYS", 7),
-		EnableBasicCleaning:    getEnvBool("ENABLE_BASIC_CLEANING", true),
-		BasicCleaningTool:      getEnvStr("BASIC_CLEANING_TOOL", "regex"),
-		TraditionalToSimple:    getEnvBool("TRADITIONAL_TO_SIMPLE", false),
-		EnableVectorDetection:  getEnvBool("ENABLE_VECTOR_DETECTION", true),
-		VectorModelName:        getEnvStr("VECTOR_MODEL_NAME", "all-MiniLM-L6-v2"),
-		VectorModelType:        getEnvStr("VECTOR_MODEL_TYPE", "local"),
+		Port:                      getEnvInt("PORT", 8080),
+		DataDir:                   getEnvStr("DATA_DIR", "./data"),
+		MaxFileSize:               getEnvInt64("MAX_FILE_SIZE", 100*1024*1024),
+		BackupKeepDays:            getEnvInt("BACKUP_KEEP_DAYS", 7),
+		EnableBasicCleaning:       getEnvBool("ENABLE_BASIC_CLEANING", true),
+		BasicCleaningTool:         getEnvStr("BASIC_CLEANING_TOOL", "regex"),
+		TraditionalToSimple:       getEnvBool("TRADITIONAL_TO_SIMPLE", false),
+		EnableVectorDetection:     getEnvBool("ENABLE_VECTOR_DETECTION", true),
+		VectorModelName:           getEnvStr("VECTOR_MODEL_NAME", "all-MiniLM-L6-v2"),
+		VectorModelType:           getEnvStr("VECTOR_MODEL_TYPE", "local"),
 		VectorSimilarityThreshold: getEnvFloat("VECTOR_SIMILARITY_THRESHOLD", 0.95),
-		VectorModelURL:         getEnvStr("VECTOR_MODEL_URL", ""),
-		VectorModelApiKey:      getEnvStr("VECTOR_MODEL_API_KEY", ""),
-		EnableModelRepair:      getEnvBool("ENABLE_MODEL_REPAIR", true),
-		RepairModelName:        getEnvStr("REPAIR_MODEL_NAME", "gpt-3.5-turbo-instruct"),
-		RepairModelType:        getEnvStr("REPAIR_MODEL_TYPE", "api"),
-		LLMApiURL:              getEnvStr("LLM_API_URL", ""),
-		LLMApiKey:              getEnvStr("LLM_API_KEY", ""),
-		CompletionModelName:    getEnvStr("COMPLETION_MODEL_NAME", "gpt-3.5-turbo-instruct"),
-		CompletionTemperature:  getEnvFloat("COMPLETION_TEMPERATURE", 0.3),
-		CompletionMaxTokens:    getEnvInt("COMPLETION_MAX_TOKENS", 2048),
-		NameSeparators:         getEnvStr("NAME_SEPARATORS", "-|—|·|·|_| "),
+		VectorModelURL:            getEnvStr("VECTOR_MODEL_URL", ""),
+		VectorModelApiKey:         getEnvStr("VECTOR_MODEL_API_KEY", ""),
+		EnableModelRepair:         getEnvBool("ENABLE_MODEL_REPAIR", true),
+		RepairModelName:           getEnvStr("REPAIR_MODEL_NAME", "gpt-3.5-turbo-instruct"),
+		RepairModelType:           getEnvStr("REPAIR_MODEL_TYPE", "api"),
+		LLMApiURL:                 getEnvStr("LLM_API_URL", ""),
+		LLMApiKey:                 getEnvStr("LLM_API_KEY", ""),
+		CompletionModelName:       getEnvStr("COMPLETION_MODEL_NAME", "gpt-3.5-turbo-instruct"),
+		CompletionTemperature:     getEnvFloat("COMPLETION_TEMPERATURE", 0.3),
+		CompletionMaxTokens:       getEnvInt("COMPLETION_MAX_TOKENS", 2048),
+		NameSeparators:            getEnvStr("NAME_SEPARATORS", "-|—|·|·|_| "),
 	}
 
 	if cfg.VectorModelURL == "" {
@@ -95,7 +93,6 @@ func Load() error {
 	ensureDir(filepath.Join(cfg.DataDir, "uploads"))
 	ensureDir(filepath.Join(cfg.DataDir, "backups"))
 	ensureDir(filepath.Join(cfg.DataDir, "temp"))
-	ensureDir(cfg.ModelsDir)
 
 	return nil
 }
@@ -106,8 +103,12 @@ func (c *AppConfig) GetNameSeparators() []string {
 	var result []string
 	for _, p := range parts {
 		trimmed := strings.TrimSpace(p)
-		if trimmed != "" {
-			result = append(result, trimmed)
+		if trimmed != "" || p == " " {
+			if p == " " {
+				result = append(result, " ")
+			} else {
+				result = append(result, trimmed)
+			}
 		}
 	}
 	return result

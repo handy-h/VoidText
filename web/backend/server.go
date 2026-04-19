@@ -29,7 +29,6 @@ func NewServer() *gin.Engine {
 	{
 		api.POST("/files/upload", handlers.UploadFile)
 		api.GET("/files", handlers.ListFiles)
-		api.GET("/files/pending", handlers.ListPendingFiles)
 		api.GET("/files/:md5", handlers.GetFile)
 		api.GET("/files/:md5/content", handlers.GetFileContent)
 		api.GET("/files/:md5/download", handlers.DownloadFile)
@@ -37,7 +36,6 @@ func NewServer() *gin.Engine {
 		api.POST("/files/:md5/resume", handlers.ResumeFile)
 		api.PUT("/files/:md5/rules", handlers.UpdateFileRules)
 
-		api.POST("/process", handlers.StartProcessing)
 		api.POST("/files/:md5/run", handlers.RunAllSteps)
 		api.GET("/files/:md5/status", handlers.GetFileStatus)
 		api.GET("/files/:md5/review-items", handlers.GetReviewItems)
@@ -53,9 +51,6 @@ func NewServer() *gin.Engine {
 		api.GET("/rules", handlers.ListRules)
 		api.POST("/rules", handlers.AddRule)
 		api.DELETE("/rules/:id", handlers.DeleteRule)
-
-		api.GET("/config/external", handlers.GetExternalConfig)
-		api.PUT("/config/external", handlers.UpdateExternalConfig)
 	}
 
 	return r

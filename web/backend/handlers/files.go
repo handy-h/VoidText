@@ -261,17 +261,6 @@ func ListFiles(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "files": records})
 }
 
-// ListPendingFiles 列出待处理文件
-func ListPendingFiles(c *gin.Context) {
-	records, err := database.ListPendingFiles()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "读取待处理文件列表失败: " + err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"success": true, "files": records})
-}
-
 // GetFile 获取文件详情
 func GetFile(c *gin.Context) {
 	md5 := c.Param("md5")
