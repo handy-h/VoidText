@@ -73,18 +73,21 @@ func GetExternalConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"config": gin.H{
-			"url": config.AppConfigInstance.ExternalAPIURL,
-			"key": config.AppConfigInstance.ExternalAPIKey,
+			"vectorUrl":    config.AppConfigInstance.VectorModelURL,
+			"vectorKey":    config.AppConfigInstance.VectorModelApiKey,
+			"llmUrl":       config.AppConfigInstance.LLMApiURL,
+			"llmKey":       config.AppConfigInstance.LLMApiKey,
 		},
 	})
 }
 
 // UpdateExternalConfig 更新外部API配置
 func UpdateExternalConfig(c *gin.Context) {
-	// 获取配置参数
 	var req struct {
-		URL string `json:"url"`
-		Key string `json:"key"`
+		VectorURL string `json:"vectorUrl"`
+		VectorKey string `json:"vectorKey"`
+		LLMURL    string `json:"llmUrl"`
+		LLMKey    string `json:"llmKey"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -92,9 +95,10 @@ func UpdateExternalConfig(c *gin.Context) {
 		return
 	}
 
-	// 更新配置
-	config.AppConfigInstance.ExternalAPIURL = req.URL
-	config.AppConfigInstance.ExternalAPIKey = req.Key
+	config.AppConfigInstance.VectorModelURL = req.VectorURL
+	config.AppConfigInstance.VectorModelApiKey = req.VectorKey
+	config.AppConfigInstance.LLMApiURL = req.LLMURL
+	config.AppConfigInstance.LLMApiKey = req.LLMKey
 
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "配置保存成功"})
 }

@@ -1,6 +1,7 @@
 package processor
 
 import (
+	"fmt"
 	"strings"
 	"txt-cleaning/internal/config"
 	"txt-cleaning/internal/external"
@@ -15,10 +16,10 @@ type ModelRepairer struct {
 
 // ModelRepairResult 模型修复结果
 type ModelRepairResult struct {
-	Content     string   `json:"content"`
-	Original    string   `json:"original"`
-	Changes     []preprocess.Change `json:"changes"`
-	Stats       map[string]int `json:"stats"`
+	Content  string              `json:"content"`
+	Original string              `json:"original"`
+	Changes  []preprocess.Change `json:"changes"`
+	Stats    map[string]int      `json:"stats"`
 }
 
 // NewModelRepairer 创建模型修复器
@@ -44,17 +45,17 @@ func (mr *ModelRepairer) RepairText(content string) ModelRepairResult {
 	}
 
 	// 按段落分割文本
-	paragraphs := mr.splitIntoParagraphs(content)
-	
+	paragraphs := mr.SplitIntoParagraphs(content)
+
 	if len(paragraphs) == 0 {
 		return result
 	}
 
 	// 修复每个段落
 	repairedParagraphs := []string{}
-	
+
 	for _, paragraph := range paragraphs {
-		repaired, changes := mr.repairParagraph(paragraph)
+		repaired, changes := mr.RepairParagraph(paragraph)
 		repairedParagraphs = append(repairedParagraphs, repaired)
 		result.Changes = append(result.Changes, changes...)
 	}
@@ -67,11 +68,11 @@ func (mr *ModelRepairer) RepairText(content string) ModelRepairResult {
 	return result
 }
 
-// splitIntoParagraphs 将文本分割为段落
-func (mr *ModelRepairer) splitIntoParagraphs(content string) []string {
+// SplitIntoParagraphs 将文本分割为段落
+func (mr *ModelRepairer) SplitIntoParagraphs(content string) []string {
 	// 按换行符分割
 	paragraphs := strings.Split(content, "\n")
-	
+
 	// 过滤空段落
 	filtered := []string{}
 	for _, p := range paragraphs {
@@ -80,12 +81,12 @@ func (mr *ModelRepairer) splitIntoParagraphs(content string) []string {
 			filtered = append(filtered, p)
 		}
 	}
-	
+
 	return filtered
 }
 
-// repairParagraph 修复单个段落
-func (mr *ModelRepairer) repairParagraph(paragraph string) (string, []preprocess.Change) {
+// RepairParagraph 修复单个段落
+func (mr *ModelRepairer) RepairParagraph(paragraph string) (string, []preprocess.Change) {
 	// 如果段落太短，直接返回
 	if len(paragraph) < 10 {
 		return paragraph, []preprocess.Change{}
@@ -109,6 +110,7 @@ func (mr *ModelRepairer) repairWithAPI(paragraph string) (string, []preprocess.C
 
 	resp, err := api.GenerateChatCompletion(systemPrompt, userPrompt, 0, -1)
 	if err != nil || resp == nil || len(resp.Choices) == 0 {
+		fmt.Printf("[LLM修复] API调用失败，回退到本地修复: %v\n", err)
 		return mr.repairLocally(paragraph)
 	}
 
@@ -139,20 +141,20 @@ func (mr *ModelRepairer) buildRepairPrompt(text string) string {
 // repairLocally 本地修复（简化实现）
 func (mr *ModelRepairer) repairLocally(paragraph string) (string, []preprocess.Change) {
 	changes := []preprocess.Change{}
-	
+
 	// 常见错别字映射表
 	typoMap := map[string]string{
 		"图书管": "图书馆",
-		"及了":   "极了",
-		"在次":   "再次",
-		"哪么":   "那么",
-		"因该":   "应该",
-		"以经":   "已经",
-		"好象":   "好像",
-		"做车":   "坐车",
-		"的士":   "的士", // 保留
-		"他":     "他",   // 保留
-		"她":     "她",   // 保留
+		"及了":  "极了",
+		"在次":  "再次",
+		"哪么":  "那么",
+		"因该":  "应该",
+		"以经":  "已经",
+		"好象":  "好像",
+		"做车":  "坐车",
+		"的士":  "的士", // 保留
+		"他":   "他",  // 保留
+		"她":   "她",  // 保留
 	}
 
 	// 应用错别字修正
@@ -167,7 +169,7 @@ func (mr *ModelRepairer) repairLocally(paragraph string) (string, []preprocess.C
 				Replacement: correct,
 				Position:    position,
 			})
-			
+
 			// 应用修正
 			repaired = strings.Replace(repaired, typo, correct, 1)
 		}
@@ -179,34 +181,103 @@ func (mr *ModelRepairer) repairLocally(paragraph string) (string, []preprocess.C
 // compareTexts 比较两个文本，生成变更记录
 func (mr *ModelRepairer) compareTexts(original, repaired string) []preprocess.Change {
 	changes := []preprocess.Change{}
-	
-	// 简化实现：使用字符串差异检测
-	// 实际项目中应该使用更精确的文本比较算法
-	
+
 	if original == repaired {
 		return changes
 	}
 
-	// 如果文本长度变化不大，尝试逐字符比较
-	if len(original) == len(repaired) {
-		for i := 0; i < len(original); i++ {
-			if original[i] != repaired[i] {
+	origRunes := []rune(original)
+	repRunes := []rune(repaired)
+
+	if len(origRunes) == len(repRunes) {
+		byteOffset := 0
+		for i := 0; i < len(origRunes); i++ {
+			if origRunes[i] != repRunes[i] {
+				origStr := string(origRunes[i])
+				repStr := string(repRunes[i])
+
+				j := i + 1
+				for j < len(origRunes) && origRunes[j] != repRunes[j] {
+					origStr += string(origRunes[j])
+					repStr += string(repRunes[j])
+					j++
+				}
+
 				changes = append(changes, preprocess.Change{
 					Type:        "character_correction",
-					Original:    string(original[i]),
-					Replacement: string(repaired[i]),
-					Position:    i,
+					Original:    origStr,
+					Replacement: repStr,
+					Position:    byteOffset,
+				})
+				i = j - 1
+			}
+			byteOffset += len(string(origRunes[i]))
+		}
+	} else {
+		minLen := len(origRunes)
+		if len(repRunes) < minLen {
+			minLen = len(repRunes)
+		}
+
+		byteOffset := 0
+		i := 0
+		for i < minLen {
+			if origRunes[i] != repRunes[i] {
+				origChunk := string(origRunes[i])
+				repChunk := string(repRunes[i])
+
+				j := i + 1
+				oob := j < len(origRunes)
+				rob := j < len(repRunes)
+				for oob && rob && origRunes[j] != repRunes[j] {
+					origChunk += string(origRunes[j])
+					repChunk += string(repRunes[j])
+					j++
+					oob = j < len(origRunes)
+					rob = j < len(repRunes)
+				}
+
+				changes = append(changes, preprocess.Change{
+					Type:        "character_correction",
+					Original:    origChunk,
+					Replacement: repChunk,
+					Position:    byteOffset,
+				})
+				byteOffset += len(string(origRunes[i]))
+				i = j
+			} else {
+				byteOffset += len(string(origRunes[i]))
+				i++
+			}
+		}
+
+		if len(origRunes) > minLen {
+			remaining := ""
+			for k := minLen; k < len(origRunes); k++ {
+				remaining += string(origRunes[k])
+			}
+			if remaining != "" {
+				changes = append(changes, preprocess.Change{
+					Type:        "text_deletion",
+					Original:    remaining,
+					Replacement: "",
+					Position:    byteOffset,
+				})
+			}
+		} else if len(repRunes) > minLen {
+			remaining := ""
+			for k := minLen; k < len(repRunes); k++ {
+				remaining += string(repRunes[k])
+			}
+			if remaining != "" {
+				changes = append(changes, preprocess.Change{
+					Type:        "text_insertion",
+					Original:    "",
+					Replacement: remaining,
+					Position:    byteOffset,
 				})
 			}
 		}
-	} else {
-		// 文本长度不同，记录整体变更
-		changes = append(changes, preprocess.Change{
-			Type:        "text_revision",
-			Original:    original,
-			Replacement: repaired,
-			Position:    0,
-		})
 	}
 
 	return changes
@@ -215,10 +286,10 @@ func (mr *ModelRepairer) compareTexts(original, repaired string) []preprocess.Ch
 // detectCommonTypos 检测常见错别字
 func (mr *ModelRepairer) detectCommonTypos(text string) []preprocess.Change {
 	changes := []preprocess.Change{}
-	
+
 	// 常见错别字模式
 	typoPatterns := map[string]string{
-		"管": "馆",   // 图书管 -> 图书馆
+		"管":  "馆",  // 图书管 -> 图书馆
 		"及了": "极了", // 高兴及了 -> 高兴极了
 		"在次": "再次", // 在次见面 -> 再次见面
 		"哪么": "那么", // 哪么好 -> 那么好

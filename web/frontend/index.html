@@ -1,81 +1,229 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>小说文本清洗工具</title>
-    <link rel="stylesheet" href="/static/css/style.css">
-</head>
-<body>
-    <div class="container">
-        <header>
-            <h1>小说文本清洗工具</h1>
-        </header>
+    <link rel="stylesheet" href="/static/css/style.css?v=4" />
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <h1>小说文本清洗工具</h1>
+        <nav>
+          <button class="nav-btn active" onclick="showSection('file-list')">
+            文件列表
+          </button>
+          <button class="nav-btn" onclick="showSection('upload')">
+            上传文件
+          </button>
+        </nav>
+      </header>
 
-        <main>
-            <!-- 文件上传部分 -->
-            <section id="upload-section">
-                <h2>上传文件</h2>
-                <form id="upload-form">
-                    <input type="file" id="file-input" accept=".txt">
-                    <button type="submit">上传并处理</button>
-                </form>
-            </section>
+      <main>
+        <!-- 文件列表 -->
+        <section id="file-list-section">
+          <div class="section-header">
+            <h2>待处理文件</h2>
+            <button class="btn-primary" onclick="refreshFileList()">
+              刷新
+            </button>
+          </div>
+          <div id="file-list-container"></div>
+        </section>
 
-            <!-- 处理状态部分 -->
-            <section id="status-section" style="display: none;">
-                <h2>处理状态</h2>
-                <div id="status-message"></div>
-                <div id="progress-bar">
-                    <div id="progress-fill"></div>
-                </div>
-            </section>
+        <!-- 上传文件 -->
+        <section id="upload-section" style="display: none">
+          <h2>上传文件</h2>
+          <div class="upload-area" id="upload-area">
+            <input
+              type="file"
+              id="file-input"
+              accept=".txt"
+              onchange="handleFileUpload(event)"
+            />
+            <p>拖拽或点击上传 .txt 文件</p>
+          </div>
+          <div id="upload-result" style="display: none"></div>
+        </section>
 
-            <!-- 审核部分 -->
-            <section id="review-section" style="display: none;">
-                <h2>审核修改建议</h2>
-                <div id="suggestions-list"></div>
-                <div id="review-actions">
-                    <button id="approve-all">全部通过</button>
-                    <button id="reject-all">全部拒绝</button>
-                    <button id="save-progress">保存进度</button>
-                </div>
-            </section>
+        <!-- 规则配置 -->
+        <section id="rules-config-section" style="display: none">
+          <h2>规则配置</h2>
+          <div class="rules-form">
+            <div class="form-group">
+              <label
+                ><input type="checkbox" id="rule-basic-cleaning" checked />
+                启用基础清洗</label
+              >
+            </div>
+            <div class="form-group">
+              <label
+                ><input type="checkbox" id="rule-traditional-simple" />
+                繁体转简体</label
+              >
+            </div>
+            <div class="form-group">
+              <label
+                ><input type="checkbox" id="rule-vector-detection" checked />
+                启用向量检测</label
+              >
+            </div>
+            <div class="form-group">
+              <label
+                >相似度阈值:
+                <input
+                  type="number"
+                  id="rule-similarity"
+                  value="0.95"
+                  min="0"
+                  max="1"
+                  step="0.01"
+              /></label>
+            </div>
+            <div class="form-group">
+              <label
+                ><input type="checkbox" id="rule-model-repair" checked />
+                启用LLM修复</label
+              >
+            </div>
+            <div class="form-group">
+              <label>错别字映射 (每行一个: 错字=正字)</label>
+              <textarea
+                id="rule-typo-map"
+                rows="5"
+                placeholder="例如:&#10;的的地=的&#10;做坐=坐"
+              ></textarea>
+            </div>
+            <div class="form-group">
+              <label>广告黑名单正则 (每行一个)</label>
+              <textarea
+                id="rule-ad-blacklist"
+                rows="3"
+                placeholder="例如:&#10;更多精彩请关注.*&#10;扫码关注.*"
+              ></textarea>
+            </div>
+            <div class="form-actions">
+              <button class="btn-primary" onclick="saveRulesAndProcess()">
+                保存并开始处理
+              </button>
+              <button class="btn-secondary" onclick="showSection('file-list')">
+                取消
+              </button>
+            </div>
+          </div>
+        </section>
 
-            <!-- 版本管理部分 -->
-            <section id="versions-section" style="display: none;">
-                <h2>版本管理</h2>
-                <div id="versions-list"></div>
-            </section>
+        <!-- 处理进度 -->
+        <section id="processing-section" style="display: none">
+          <h2>处理进度</h2>
+          <div class="processing-info">
+            <div id="file-info-display"></div>
+            <div class="steps-progress">
+              <div class="step-item" data-step="cleaning">
+                <span class="step-icon">1</span>
+                <span class="step-label">基础清洗</span>
+              </div>
+              <div class="step-connector"></div>
+              <div class="step-item" data-step="indexing">
+                <span class="step-icon">2</span>
+                <span class="step-label">向量检测</span>
+              </div>
+              <div class="step-connector"></div>
+              <div class="step-item" data-step="llm_fix">
+                <span class="step-icon">3</span>
+                <span class="step-label">LLM修复</span>
+              </div>
+              <div class="step-connector"></div>
+              <div class="step-item" data-step="review">
+                <span class="step-icon">4</span>
+                <span class="step-label">人工审核</span>
+              </div>
+              <div class="step-connector"></div>
+              <div class="step-item" data-step="finalizing">
+                <span class="step-icon">5</span>
+                <span class="step-label">生成文件</span>
+              </div>
+            </div>
+            <div class="progress-bar-container">
+              <div class="progress-bar" id="overall-progress"></div>
+              <span id="progress-text">0%</span>
+            </div>
+            <div id="processing-message"></div>
+            <div id="current-action" class="current-action"></div>
+            <div class="processing-actions">
+              <button class="btn-secondary" onclick="downloadCurrentVersion()">
+                下载当前版本
+              </button>
+              <button class="btn-secondary" onclick="showSection('file-list')">
+                返回列表
+              </button>
+            </div>
+          </div>
+        </section>
 
-            <!-- 自定义规则部分 -->
-            <section id="rules-section">
-                <h2>自定义清理规则</h2>
-                <form id="rule-form">
-                    <input type="text" id="rule-name" placeholder="规则名称">
-                    <input type="text" id="rule-pattern" placeholder="正则表达式">
-                    <input type="text" id="rule-replacement" placeholder="替换内容">
-                    <button type="submit">添加规则</button>
-                </form>
-                <div id="rules-list"></div>
-            </section>
+        <!-- 审核界面 -->
+        <section id="review-section" style="display: none">
+          <div class="section-header">
+            <h2>审核修改建议</h2>
+            <div class="review-progress-info">
+              <span id="review-progress-text">0/0</span>
+              <button class="btn-secondary" onclick="downloadCurrentVersion()">
+                下载当前版本
+              </button>
+            </div>
+          </div>
+          <div class="review-filters">
+            <select id="review-status-filter" onchange="loadReviewItems()">
+              <option value="pending">待审核</option>
+              <option value="all">全部</option>
+              <option value="approved">已通过</option>
+              <option value="rejected">已拒绝</option>
+              <option value="edited">已编辑</option>
+            </select>
+            <button class="btn-secondary" onclick="batchApproveAll()">
+              全部通过
+            </button>
+            <button class="btn-secondary" onclick="batchRejectAll()">
+              全部拒绝
+            </button>
+          </div>
+          <div id="review-items-list"></div>
+          <div class="review-actions">
+            <button
+              class="btn-primary"
+              id="finalize-btn"
+              onclick="finalizeFile()"
+              style="display: none"
+            >
+              完成审核并生成文件
+            </button>
+            <button class="btn-secondary" onclick="showSection('file-list')">
+              返回列表
+            </button>
+          </div>
+        </section>
 
-            <!-- 外部API配置部分 -->
-            <section id="external-config-section">
-                <h2>外部API配置</h2>
-                <form id="external-config-form">
-                    <input type="text" id="api-url" placeholder="API URL">
-                    <input type="text" id="api-key" placeholder="API Key">
-                    <button type="submit">保存配置</button>
-                </form>
-            </section>
-        </main>
+        <!-- 完成界面 -->
+        <section id="completed-section" style="display: none">
+          <h2>处理完成</h2>
+          <div id="completed-info"></div>
+          <div class="completed-actions">
+            <button class="btn-primary" onclick="downloadFinalFile()">
+              下载最终文件
+            </button>
+            <button class="btn-secondary" onclick="viewReport()">
+              查看报告
+            </button>
+            <button class="btn-secondary" onclick="showSection('file-list')">
+              返回列表
+            </button>
+          </div>
+        </section>
+      </main>
 
-        <footer>
-            <p>© 2026 小说文本清洗工具</p>
-        </footer>
+      <div id="feedback" class="feedback" style="display: none"></div>
     </div>
-
-    <script src="/static/js/main.js"></script>
-</body>
+    <script src="/static/js/main.js?v=4"></script>
+  </body>
 </html>

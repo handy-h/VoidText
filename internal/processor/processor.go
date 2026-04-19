@@ -151,19 +151,26 @@ func GetSuggestions(content string) []preprocess.Change {
 
 // ApplySuggestion 应用单个修改建议
 func ApplySuggestion(content string, suggestion preprocess.Change) string {
+	if suggestion.Original == "" && suggestion.Replacement == "" {
+		return content
+	}
+
 	if suggestion.Original == "" {
 		return content
 	}
+
 	if suggestion.Position >= 0 && suggestion.Position < len(content) {
 		expectedEnd := suggestion.Position + len(suggestion.Original)
 		if expectedEnd <= len(content) && content[suggestion.Position:expectedEnd] == suggestion.Original {
 			return content[:suggestion.Position] + suggestion.Replacement + content[expectedEnd:]
 		}
 	}
-	result := strings.ReplaceAll(content, suggestion.Original, suggestion.Replacement)
-	if result != content {
-		return result
+
+	idx := strings.Index(content, suggestion.Original)
+	if idx >= 0 {
+		return content[:idx] + suggestion.Replacement + content[idx+len(suggestion.Original):]
 	}
+
 	if suggestion.Type == "duplicate_paragraph" || suggestion.Type == "advertisement" {
 		origTrimmed := strings.TrimSpace(suggestion.Original)
 		origRunes := []rune(origTrimmed)

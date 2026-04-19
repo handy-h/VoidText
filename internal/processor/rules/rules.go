@@ -2,6 +2,7 @@ package rules
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -11,12 +12,12 @@ import (
 
 // Rule 自定义规则
 type Rule struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Pattern      string `json:"pattern"`
-	Replacement  string `json:"replacement"`
-	Description  string `json:"description"`
-	Enabled      bool   `json:"enabled"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Pattern     string `json:"pattern"`
+	Replacement string `json:"replacement"`
+	Description string `json:"description"`
+	Enabled     bool   `json:"enabled"`
 }
 
 // RuleManager 规则管理器
@@ -103,7 +104,7 @@ func (rm *RuleManager) GetRule(id string) (Rule, error) {
 func (rm *RuleManager) AddRule(rule Rule) error {
 	// 生成ID
 	if rule.ID == "" {
-		rule.ID = string(len(rm.rules) + 1)
+		rule.ID = fmt.Sprintf("%d", len(rm.rules)+1)
 	}
 
 	// 添加规则

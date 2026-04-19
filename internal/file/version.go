@@ -2,6 +2,7 @@ package file
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -41,7 +42,7 @@ func (vm *VersionManager) CreateVersion(fileID, content, note string) (Version, 
 	}
 
 	// 生成新版本号
-	version := string(len(currentVersions) + 1)
+	version := fmt.Sprintf("%d", len(currentVersions)+1)
 
 	// 创建版本
 	newVersion := Version{
@@ -113,7 +114,7 @@ func (vm *VersionManager) RestoreVersion(fileID, version string) (string, error)
 	}
 
 	// 保存恢复操作
-	_, err = vm.CreateVersion(fileID, targetVersion.Content, "恢复到版本 " + version)
+	_, err = vm.CreateVersion(fileID, targetVersion.Content, "恢复到版本 "+version)
 	if err != nil {
 		return "", err
 	}

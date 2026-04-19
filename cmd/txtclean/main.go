@@ -11,14 +11,19 @@ import (
 	"time"
 
 	"txt-cleaning/internal/config"
+	"txt-cleaning/internal/database"
 	"txt-cleaning/web/backend"
 )
 
 func main() {
-	// 加载配置
 	if err := config.Load(); err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
+
+	if err := database.Init(config.AppConfigInstance.DataDir); err != nil {
+		log.Fatalf("Failed to init database: %v", err)
+	}
+	defer database.Close()
 
 	// 初始化Web服务
 	server := backend.NewServer()

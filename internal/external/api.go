@@ -27,9 +27,9 @@ func NewAPI() *API {
 		client: &http.Client{
 			Timeout: 60 * time.Second,
 		},
-		baseURL:               config.AppConfigInstance.ExternalAPIURL,
-		apiKey:                config.AppConfigInstance.ExternalAPIKey,
-		embeddingModelName:    config.AppConfigInstance.EmbeddingModelName,
+		baseURL:               config.AppConfigInstance.LLMApiURL,
+		apiKey:                config.AppConfigInstance.LLMApiKey,
+		embeddingModelName:    config.AppConfigInstance.VectorModelName,
 		completionModelName:   config.AppConfigInstance.CompletionModelName,
 		completionTemperature: config.AppConfigInstance.CompletionTemperature,
 		completionMaxTokens:   config.AppConfigInstance.CompletionMaxTokens,
