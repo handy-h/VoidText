@@ -1,7 +1,7 @@
 package processor
 
 import (
-	"fmt"
+	"log"
 	"strings"
 	"txt-cleaning/internal/config"
 	"txt-cleaning/internal/external"
@@ -110,7 +110,7 @@ func (mr *ModelRepairer) repairWithAPI(paragraph string) (string, []preprocess.C
 
 	resp, err := api.GenerateChatCompletion(systemPrompt, userPrompt, 0, -1)
 	if err != nil || resp == nil || len(resp.Choices) == 0 {
-		fmt.Printf("[LLM修复] API调用失败，回退到本地修复: %v\n", err)
+		log.Printf("[LLM修复] API调用失败，回退到本地修复: 段落长度=%d, 错误=%v", len(paragraph), err)
 		return mr.repairLocally(paragraph)
 	}
 
@@ -121,6 +121,7 @@ func (mr *ModelRepairer) repairWithAPI(paragraph string) (string, []preprocess.C
 	}
 
 	changes := mr.compareTexts(paragraph, repairedText)
+	log.Printf("[LLM修复] 成功: 输入长度=%d, 输出长度=%d, 修改数=%d", len(paragraph), len(repairedText), len(changes))
 
 	return repairedText, changes
 }

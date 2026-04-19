@@ -6,7 +6,7 @@
 # 默认配置
 APP_NAME="txtCleaning"
 APP_BINARY="./txtclean"
-LOG_DIR="./logs"
+LOG_DIR="/mnt/ssd/txtCleaning/log"
 PID_FILE="./pid.txt"
 
 # 解析参数

@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -44,7 +45,26 @@ var AppConfigInstance AppConfig
 
 // Load 加载配置
 func Load() error {
-	_ = godotenv.Load()
+	// 优先从可执行文件所在目录加载 .env
+	execPath, err := os.Executable()
+	if err == nil {
+		envPath := filepath.Join(filepath.Dir(execPath), ".env")
+		log.Printf("尝试从可执行文件目录加载配置: %s", envPath)
+		if loadErr := godotenv.Load(envPath); loadErr != nil {
+			log.Printf("从可执行文件目录加载失败: %v，尝试从工作目录加载", loadErr)
+			if loadErr2 := godotenv.Load(); loadErr2 != nil {
+				log.Printf("从工作目录加载也失败: %v", loadErr2)
+			}
+		}
+	} else {
+		log.Printf("获取可执行文件路径失败: %v，尝试从工作目录加载", err)
+		if loadErr := godotenv.Load(); loadErr != nil {
+			log.Printf("从工作目录加载失败: %v", loadErr)
+		}
+	}
+
+	// 打印实际加载的环境变量值
+	log.Printf("DATA_DIR=%s", os.Getenv("DATA_DIR"))
 
 	cfg := AppConfig{
 		Port:                      getEnvInt("PORT", 8080),

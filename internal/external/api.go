@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -127,10 +128,12 @@ type APIError struct {
 // GenerateEmbedding 生成文本嵌入
 func (api *API) GenerateEmbedding(texts []string) (*EmbeddingResponse, error) {
 	if api.baseURL == "" || api.apiKey == "" {
+		log.Printf("[向量模型] API未配置，跳过调用")
 		return nil, nil
 	}
 
 	url := api.baseURL + "/embeddings"
+	startTime := time.Now()
 
 	req := EmbeddingRequest{
 		Input: texts,
@@ -152,14 +155,27 @@ func (api *API) GenerateEmbedding(texts []string) (*EmbeddingResponse, error) {
 
 	resp, err := api.client.Do(httpReq)
 	if err != nil {
+		log.Printf("[向量模型] 调用失败: URL=%s, Model=%s, 耗时=%v, 错误=%v",
+			url, api.embeddingModelName, time.Since(startTime), err)
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		var apiErr APIError
+		json.NewDecoder(resp.Body).Decode(&apiErr)
+		log.Printf("[向量模型] 调用失败: URL=%s, Model=%s, HTTP状态=%d, 耗时=%v, 错误=%s",
+			url, api.embeddingModelName, resp.StatusCode, time.Since(startTime), apiErr.Error.Message)
+		return nil, fmt.Errorf("API error (%d): %s", resp.StatusCode, apiErr.Error.Message)
+	}
 
 	var embeddingResp EmbeddingResponse
 	if err := json.NewDecoder(resp.Body).Decode(&embeddingResp); err != nil {
 		return nil, err
 	}
+
+	log.Printf("[向量模型] 调用成功: URL=%s, Model=%s, 文本数=%d, 耗时=%v",
+		url, api.embeddingModelName, len(texts), time.Since(startTime))
 
 	return &embeddingResp, nil
 }
@@ -233,6 +249,7 @@ func (api *API) GenerateChatCompletion(systemPrompt, userPrompt string, maxToken
 	}
 
 	url := api.baseURL + "/chat/completions"
+	startTime := time.Now()
 
 	messages := []ChatMessage{}
 	if systemPrompt != "" {
@@ -262,6 +279,8 @@ func (api *API) GenerateChatCompletion(systemPrompt, userPrompt string, maxToken
 
 	resp, err := api.client.Do(httpReq)
 	if err != nil {
+		log.Printf("[文本修复] 调用失败: URL=%s, Model=%s, 耗时=%v, 错误=%v",
+			url, api.completionModelName, time.Since(startTime), err)
 		return nil, err
 	}
 	defer resp.Body.Close()
@@ -269,6 +288,8 @@ func (api *API) GenerateChatCompletion(systemPrompt, userPrompt string, maxToken
 	if resp.StatusCode != http.StatusOK {
 		var apiErr APIError
 		json.NewDecoder(resp.Body).Decode(&apiErr)
+		log.Printf("[文本修复] 调用失败: URL=%s, Model=%s, HTTP状态=%d, 耗时=%v, 错误=%s",
+			url, api.completionModelName, resp.StatusCode, time.Since(startTime), apiErr.Error.Message)
 		return nil, fmt.Errorf("API error (%d): %s", resp.StatusCode, apiErr.Error.Message)
 	}
 
@@ -276,6 +297,10 @@ func (api *API) GenerateChatCompletion(systemPrompt, userPrompt string, maxToken
 	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
 		return nil, err
 	}
+
+	log.Printf("[文本修复] 调用成功: URL=%s, Model=%s, 输入长度=%d, 输出长度=%d, Token=%d, 耗时=%v",
+		url, api.completionModelName, len(userPrompt), len(chatResp.Choices[0].Message.Content),
+		chatResp.Usage.TotalTokens, time.Since(startTime))
 
 	return &chatResp, nil
 }
