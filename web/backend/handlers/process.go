@@ -4,57 +4,13 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
-	"txt-cleaning/internal/config"
 	"txt-cleaning/internal/database"
 	"txt-cleaning/internal/processor"
 )
-
-// StartProcessing 开始处理文件（分步执行）
-func StartProcessing(c *gin.Context) {
-	var req struct {
-		FileMd5 string `json:"fileMd5"`
-		Step    string `json:"step"`
-	}
-
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "无效的请求参数"})
-		return
-	}
-
-	record, err := database.GetFileByMd5(req.FileMd5)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "查询文件记录失败"})
-		return
-	}
-	if record == nil {
-		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "文件不存在"})
-		return
-	}
-
-	step := req.Step
-	if step == "" {
-		step = processor.StepCleaning
-	}
-
-	result, err := processor.ProcessStep(req.FileMd5, step)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "处理失败: " + err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"success":     true,
-		"currentStep": result.CurrentStep,
-		"nextStep":    result.NextStep,
-		"progress":    result.Progress,
-		"message":     result.Message,
-	})
-}
 
 // RunAllSteps 异步执行所有步骤直到审核或完成
 func RunAllSteps(c *gin.Context) {
@@ -552,7 +508,3 @@ func buildReportHTML(data gin.H) string {
 
 	return html
 }
-
-// Ensure config and unused imports are handled
-var _ = config.AppConfigInstance
-var _ = strconv.Itoa

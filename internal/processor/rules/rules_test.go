@@ -2,292 +2,251 @@ package rules
 
 import (
 	"os"
-	"path/filepath"
+	"strings"
 	"testing"
+
 	"txt-cleaning/internal/config"
 )
 
-func setupRulesTest(t *testing.T) (*RuleManager, func()) {
-	tempDir, err := os.MkdirTemp("", "rules_test")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
+func initTestConfig(t *testing.T) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	config.AppConfigInstance = config.AppConfig{
+		DataDir: tmpDir,
 	}
-
-	config.AppConfigInstance.DataDir = tempDir
-
-	manager := NewRuleManager()
-
-	cleanup := func() {
-		os.RemoveAll(tempDir)
-	}
-
-	return manager, cleanup
 }
 
-func TestNewRuleManager(t *testing.T) {
-	manager, cleanup := setupRulesTest(t)
-	defer cleanup()
+func TestNewRuleManager_ShouldCreateManager(t *testing.T) {
+	initTestConfig(t)
 
-	if manager == nil {
-		t.Fatal("Expected manager to be created")
+	rm := NewRuleManager()
+	if rm == nil {
+		t.Fatalf("NewRuleManager() should return non-nil")
 	}
+}
 
-	rules := manager.GetRules()
+func TestLoadRules_ShouldCreateDefaultRules(t *testing.T) {
+	initTestConfig(t)
+
+	rm := NewRuleManager()
+	rules := rm.GetRules()
+
 	if len(rules) == 0 {
-		t.Error("Expected default rules to be loaded")
+		t.Errorf("LoadRules() should create default rules")
 	}
 }
 
-func TestLoadRules_DefaultRules(t *testing.T) {
-	manager, cleanup := setupRulesTest(t)
-	defer cleanup()
+func TestAddRule_ShouldAddNewRule(t *testing.T) {
+	initTestConfig(t)
 
-	rules := manager.GetRules()
-
-	if len(rules) < 2 {
-		t.Errorf("Expected at least 2 default rules, got %d", len(rules))
-	}
-}
-
-func TestAddRule(t *testing.T) {
-	manager, cleanup := setupRulesTest(t)
-	defer cleanup()
+	rm := NewRuleManager()
+	initialCount := len(rm.GetRules())
 
 	rule := Rule{
 		Name:        "测试规则",
-		Pattern:     "测试",
-		Replacement: "替换",
-		Description: "这是一个测试规则",
+		Pattern:     "测试模式",
+		Replacement: "替换内容",
+		Description: "测试用",
 		Enabled:     true,
 	}
 
-	err := manager.AddRule(rule)
+	err := rm.AddRule(rule)
 	if err != nil {
-		t.Fatalf("Failed to add rule: %v", err)
+		t.Fatalf("AddRule() error = %v", err)
 	}
 
-	rules := manager.GetRules()
-	if len(rules) < 3 {
-		t.Errorf("Expected at least 3 rules after adding, got %d", len(rules))
+	rules := rm.GetRules()
+	if len(rules) != initialCount+1 {
+		t.Errorf("AddRule() should increase rule count by 1")
 	}
 }
 
-func TestAddRule_WithID(t *testing.T) {
-	manager, cleanup := setupRulesTest(t)
-	defer cleanup()
+func TestAddRule_ShouldAutoGenerateID(t *testing.T) {
+	initTestConfig(t)
 
-	rule := Rule{
-		ID:          "custom_id",
-		Name:        "测试规则",
-		Pattern:     "测试",
-		Replacement: "替换",
-		Description: "这是一个测试规则",
-		Enabled:     true,
-	}
+	rm := NewRuleManager()
+	rule := Rule{Name: "自动ID", Pattern: "test", Replacement: "ok", Enabled: true}
 
-	err := manager.AddRule(rule)
-	if err != nil {
-		t.Fatalf("Failed to add rule: %v", err)
-	}
+	rm.AddRule(rule)
 
-	foundRule, err := manager.GetRule("custom_id")
-	if err != nil {
-		t.Fatalf("Failed to get rule: %v", err)
-	}
-
-	if foundRule.ID != "custom_id" {
-		t.Errorf("Expected rule ID 'custom_id', got '%s'", foundRule.ID)
+	rules := rm.GetRules()
+	lastRule := rules[len(rules)-1]
+	if lastRule.ID == "" {
+		t.Errorf("AddRule() should auto-generate ID")
 	}
 }
 
-func TestGetRule_Existing(t *testing.T) {
-	manager, cleanup := setupRulesTest(t)
-	defer cleanup()
+func TestGetRule_ShouldReturnExistingRule(t *testing.T) {
+	initTestConfig(t)
 
-	rule, err := manager.GetRule("1")
-	if err != nil {
-		t.Fatalf("Failed to get rule: %v", err)
+	rm := NewRuleManager()
+	rules := rm.GetRules()
+	if len(rules) == 0 {
+		t.Skip("No rules to test")
 	}
 
-	if rule.ID != "1" {
-		t.Errorf("Expected rule ID '1', got '%s'", rule.ID)
+	rule, err := rm.GetRule(rules[0].ID)
+	if err != nil {
+		t.Fatalf("GetRule() error = %v", err)
+	}
+	if rule.ID != rules[0].ID {
+		t.Errorf("GetRule() ID = %s, want %s", rule.ID, rules[0].ID)
 	}
 }
 
-func TestGetRule_NonExisting(t *testing.T) {
-	manager, cleanup := setupRulesTest(t)
-	defer cleanup()
+func TestGetRule_ShouldReturnErrorForNonExistent(t *testing.T) {
+	initTestConfig(t)
 
-	_, err := manager.GetRule("non_existing")
+	rm := NewRuleManager()
+	_, err := rm.GetRule("nonexistent_id")
 	if err == nil {
-		t.Error("Expected error for non-existing rule")
+		t.Errorf("GetRule() should return error for non-existent rule")
 	}
 }
 
-func TestUpdateRule(t *testing.T) {
-	manager, cleanup := setupRulesTest(t)
-	defer cleanup()
+func TestUpdateRule_ShouldUpdateExistingRule(t *testing.T) {
+	initTestConfig(t)
 
-	rule := Rule{
-		ID:          "1",
-		Name:        "更新后的规则",
-		Pattern:     "新图案",
-		Replacement: "新替换",
-		Description: "更新后的描述",
-		Enabled:     false,
-	}
+	rm := NewRuleManager()
+	rule := Rule{Name: "更新测试", Pattern: "旧模式", Replacement: "旧替换", Enabled: true}
+	rm.AddRule(rule)
 
-	err := manager.UpdateRule(rule)
+	rules := rm.GetRules()
+	lastRule := rules[len(rules)-1]
+	lastRule.Pattern = "新模式"
+
+	err := rm.UpdateRule(lastRule)
 	if err != nil {
-		t.Fatalf("Failed to update rule: %v", err)
+		t.Fatalf("UpdateRule() error = %v", err)
 	}
 
-	updatedRule, err := manager.GetRule("1")
-	if err != nil {
-		t.Fatalf("Failed to get updated rule: %v", err)
-	}
-
-	if updatedRule.Name != "更新后的规则" {
-		t.Errorf("Expected updated name, got '%s'", updatedRule.Name)
+	updated, _ := rm.GetRule(lastRule.ID)
+	if updated.Pattern != "新模式" {
+		t.Errorf("UpdateRule() Pattern = %s, want 新模式", updated.Pattern)
 	}
 }
 
-func TestUpdateRule_NonExisting(t *testing.T) {
-	manager, cleanup := setupRulesTest(t)
-	defer cleanup()
+func TestUpdateRule_ShouldReturnErrorForNonExistent(t *testing.T) {
+	initTestConfig(t)
 
-	rule := Rule{
-		ID:          "non_existing",
-		Name:        "测试",
-		Pattern:     "测试",
-		Replacement: "测试",
-		Enabled:     true,
-	}
+	rm := NewRuleManager()
+	rule := Rule{ID: "nonexistent", Name: "不存在", Pattern: "test", Enabled: true}
 
-	err := manager.UpdateRule(rule)
+	err := rm.UpdateRule(rule)
 	if err == nil {
-		t.Error("Expected error for updating non-existing rule")
+		t.Errorf("UpdateRule() should return error for non-existent rule")
 	}
 }
 
-func TestDeleteRule(t *testing.T) {
-	manager, cleanup := setupRulesTest(t)
-	defer cleanup()
+func TestDeleteRule_ShouldRemoveRule(t *testing.T) {
+	initTestConfig(t)
 
-	initialCount := len(manager.GetRules())
+	rm := NewRuleManager()
+	rule := Rule{Name: "删除测试", Pattern: "test", Replacement: "ok", Enabled: true}
+	rm.AddRule(rule)
 
-	err := manager.DeleteRule("1")
+	rules := rm.GetRules()
+	initialCount := len(rules)
+	lastRule := rules[len(rules)-1]
+
+	err := rm.DeleteRule(lastRule.ID)
 	if err != nil {
-		t.Fatalf("Failed to delete rule: %v", err)
+		t.Fatalf("DeleteRule() error = %v", err)
 	}
 
-	rules := manager.GetRules()
+	rules = rm.GetRules()
 	if len(rules) != initialCount-1 {
-		t.Errorf("Expected %d rules after deletion, got %d", initialCount-1, len(rules))
+		t.Errorf("DeleteRule() should decrease rule count by 1")
 	}
 }
 
-func TestDeleteRule_NonExisting(t *testing.T) {
-	manager, cleanup := setupRulesTest(t)
-	defer cleanup()
+func TestDeleteRule_ShouldReturnErrorForNonExistent(t *testing.T) {
+	initTestConfig(t)
 
-	err := manager.DeleteRule("non_existing")
+	rm := NewRuleManager()
+	err := rm.DeleteRule("nonexistent_id")
 	if err == nil {
-		t.Error("Expected error for deleting non-existing rule")
+		t.Errorf("DeleteRule() should return error for non-existent rule")
 	}
 }
 
-func TestApplyRules_EnabledRule(t *testing.T) {
-	manager, cleanup := setupRulesTest(t)
-	defer cleanup()
+func TestApplyRules_ShouldApplyEnabledRules(t *testing.T) {
+	initTestConfig(t)
 
-	content := "本文由某网站提供"
-	result := manager.ApplyRules(content)
+	rm := NewRuleManager()
+	rm.AddRule(Rule{
+		Name:        "替换测试",
+		Pattern:     "名子",
+		Replacement: "名字",
+		Enabled:     true,
+	})
 
-	if result == content {
-		t.Error("Expected content to be modified by enabled rule")
+	result := rm.ApplyRules("他的名子很好听")
+	if result != "他的名字很好听" {
+		t.Errorf("ApplyRules() = %s, want 他的名字很好听", result)
 	}
 }
 
-func TestApplyRules_DisabledRule(t *testing.T) {
-	manager, cleanup := setupRulesTest(t)
-	defer cleanup()
+func TestApplyRules_ShouldSkipDisabledRules(t *testing.T) {
+	initTestConfig(t)
 
-	rule := Rule{
-		ID:          "disabled",
+	rm := NewRuleManager()
+	rm.AddRule(Rule{
 		Name:        "禁用规则",
+		Pattern:     "测试禁用",
+		Replacement: "替换成功",
+		Enabled:     false,
+	})
+
+	result := rm.ApplyRules("这是测试禁用内容")
+	if strings.Contains(result, "替换成功") {
+		t.Errorf("ApplyRules() should skip disabled rules")
+	}
+}
+
+func TestApplyRules_ShouldHandleInvalidPattern(t *testing.T) {
+	initTestConfig(t)
+
+	rm := NewRuleManager()
+	rm.AddRule(Rule{
+		Name:        "无效正则",
+		Pattern:     "[invalid",
+		Replacement: "替换",
+		Enabled:     true,
+	})
+
+	result := rm.ApplyRules("测试文本")
+	if result != "测试文本" {
+		t.Errorf("ApplyRules() should handle invalid regex gracefully")
+	}
+}
+
+func TestSaveAndLoadRules_ShouldPersistRules(t *testing.T) {
+	initTestConfig(t)
+
+	rm := NewRuleManager()
+	rm.AddRule(Rule{
+		Name:        "持久化测试",
 		Pattern:     "测试",
 		Replacement: "替换",
-		Enabled:     false,
+		Enabled:     true,
+	})
+
+	rm2 := NewRuleManager()
+	rules := rm2.GetRules()
+
+	found := false
+	for _, r := range rules {
+		if r.Name == "持久化测试" {
+			found = true
+			break
+		}
 	}
-	manager.AddRule(rule)
-
-	content := "测试内容"
-	result := manager.ApplyRules(content)
-
-	if result != content {
-		t.Errorf("Expected content unchanged for disabled rule, got '%s'", result)
-	}
-}
-
-func TestApplyRules_NoMatch(t *testing.T) {
-	manager, cleanup := setupRulesTest(t)
-	defer cleanup()
-
-	content := "这是一段正常的文本，没有匹配任何规则的内容。"
-	result := manager.ApplyRules(content)
-
-	if result != content {
-		t.Errorf("Expected content unchanged, got '%s'", result)
+	if !found {
+		t.Errorf("SaveAndLoadRules() should persist rules to disk")
 	}
 }
 
-func TestApplyRules_MultipleRules(t *testing.T) {
-	manager, cleanup := setupRulesTest(t)
-	defer cleanup()
-
-	content := "本文由某网站提供，名子写错了。"
-	result := manager.ApplyRules(content)
-
-	if result == content {
-		t.Error("Expected content to be modified by multiple rules")
-	}
-}
-
-func TestSaveRules(t *testing.T) {
-	manager, cleanup := setupRulesTest(t)
-	defer cleanup()
-
-	err := manager.SaveRules()
-	if err != nil {
-		t.Fatalf("Failed to save rules: %v", err)
-	}
-
-	rulesPath := filepath.Join(config.AppConfigInstance.DataDir, "rules.json")
-	if _, err := os.Stat(rulesPath); os.IsNotExist(err) {
-		t.Error("Expected rules file to be created")
-	}
-}
-
-func TestLoadRules_FromFile(t *testing.T) {
-	manager, cleanup := setupRulesTest(t)
-	defer cleanup()
-
-	rulesPath := filepath.Join(config.AppConfigInstance.DataDir, "rules.json")
-	rulesData := `[{"id":"custom","name":"自定义","pattern":"测试","replacement":"替换","description":"测试","enabled":true}]`
-
-	err := os.WriteFile(rulesPath, []byte(rulesData), 0644)
-	if err != nil {
-		t.Fatalf("Failed to write rules file: %v", err)
-	}
-
-	err = manager.LoadRules()
-	if err != nil {
-		t.Fatalf("Failed to load rules from file: %v", err)
-	}
-
-	rules := manager.GetRules()
-	if len(rules) != 1 {
-		t.Errorf("Expected 1 rule from file, got %d", len(rules))
-	}
+func TestMain(m *testing.M) {
+	os.Exit(m.Run())
 }

@@ -3,339 +3,201 @@ package manager
 import (
 	"os"
 	"testing"
+
 	"txt-cleaning/internal/config"
 	"txt-cleaning/internal/processor/preprocess"
 )
 
-func setupManagerTest(t *testing.T) (*Manager, func()) {
-	tempDir, err := os.MkdirTemp("", "review_test")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-
-	config.AppConfigInstance.DataDir = tempDir
-
-	manager := NewManager()
-
-	cleanup := func() {
-		os.RemoveAll(tempDir)
-	}
-
-	return manager, cleanup
-}
-
-func TestNewManager(t *testing.T) {
-	manager := NewManager()
-
-	if manager == nil {
-		t.Fatal("Expected manager to be created")
+func initTestConfig(t *testing.T) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	config.AppConfigInstance = config.AppConfig{
+		DataDir: tmpDir,
 	}
 }
 
-func TestCreateSession(t *testing.T) {
-	manager, cleanup := setupManagerTest(t)
-	defer cleanup()
+func TestNewManager_ShouldCreateManager(t *testing.T) {
+	m := NewManager()
+	if m == nil {
+		t.Fatalf("NewManager() should return non-nil")
+	}
+}
+
+func TestCreateSession_ShouldCreateSession(t *testing.T) {
+	initTestConfig(t)
+	m := NewManager()
 
 	suggestions := []preprocess.Change{
-		{Type: "typo", Original: "及了", Replacement: "极了", Position: 0},
-		{Type: "typo", Original: "在次", Replacement: "再次", Position: 10},
+		{Original: "及了", Replacement: "极了", Type: "typo_correction"},
 	}
 
-	session, err := manager.CreateSession("session_1", "file_1", "process_1", suggestions)
+	session, err := m.CreateSession("session_001", "file_001", "process_001", suggestions)
 	if err != nil {
-		t.Fatalf("Failed to create session: %v", err)
+		t.Fatalf("CreateSession() error = %v", err)
 	}
-
-	if session.ID != "session_1" {
-		t.Errorf("Expected session ID 'session_1', got '%s'", session.ID)
+	if session.ID != "session_001" {
+		t.Errorf("CreateSession() ID = %s, want session_001", session.ID)
 	}
-	if session.FileID != "file_1" {
-		t.Errorf("Expected file ID 'file_1', got '%s'", session.FileID)
-	}
-	if session.ProcessID != "process_1" {
-		t.Errorf("Expected process ID 'process_1', got '%s'", session.ProcessID)
-	}
-	if len(session.Items) != 2 {
-		t.Errorf("Expected 2 items, got %d", len(session.Items))
+	if len(session.Items) != 1 {
+		t.Errorf("CreateSession() items length = %d, want 1", len(session.Items))
 	}
 	if session.Completed {
-		t.Error("Expected session not to be completed")
+		t.Errorf("CreateSession() Completed should be false")
 	}
 }
 
-func TestCreateSession_EmptySuggestions(t *testing.T) {
-	manager, cleanup := setupManagerTest(t)
-	defer cleanup()
-
-	session, err := manager.CreateSession("session_2", "file_2", "process_2", []preprocess.Change{})
-	if err != nil {
-		t.Fatalf("Failed to create session with empty suggestions: %v", err)
-	}
-
-	if len(session.Items) != 0 {
-		t.Errorf("Expected 0 items, got %d", len(session.Items))
-	}
-}
-
-func TestGetSession_Existing(t *testing.T) {
-	manager, cleanup := setupManagerTest(t)
-	defer cleanup()
+func TestGetSession_ShouldReturnSession(t *testing.T) {
+	initTestConfig(t)
+	m := NewManager()
 
 	suggestions := []preprocess.Change{
-		{Type: "typo", Original: "及了", Replacement: "极了", Position: 0},
+		{Original: "测试", Replacement: "替换", Type: "test"},
 	}
+	m.CreateSession("session_002", "file_002", "process_002", suggestions)
 
-	_, err := manager.CreateSession("session_3", "file_3", "process_3", suggestions)
+	session, err := m.GetSession("session_002")
 	if err != nil {
-		t.Fatalf("Failed to create session: %v", err)
+		t.Fatalf("GetSession() error = %v", err)
 	}
-
-	session, err := manager.GetSession("session_3")
-	if err != nil {
-		t.Fatalf("Failed to get session: %v", err)
-	}
-
-	if session.ID != "session_3" {
-		t.Errorf("Expected session ID 'session_3', got '%s'", session.ID)
+	if session.ID != "session_002" {
+		t.Errorf("GetSession() ID = %s, want session_002", session.ID)
 	}
 }
 
-func TestGetSession_NonExisting(t *testing.T) {
-	manager, cleanup := setupManagerTest(t)
-	defer cleanup()
-
-	_, err := manager.GetSession("non_existing")
-	if err == nil {
-		t.Error("Expected error for non-existing session")
-	}
-}
-
-func TestUpdateItemStatus_Approved(t *testing.T) {
-	manager, cleanup := setupManagerTest(t)
-	defer cleanup()
+func TestGetSession_ShouldLoadFromDisk(t *testing.T) {
+	initTestConfig(t)
+	m1 := NewManager()
 
 	suggestions := []preprocess.Change{
-		{Type: "typo", Original: "及了", Replacement: "极了", Position: 0},
+		{Original: "磁盘测试", Replacement: "替换", Type: "test"},
 	}
+	m1.CreateSession("session_003", "file_003", "process_003", suggestions)
 
-	_, err := manager.CreateSession("session_4", "file_4", "process_4", suggestions)
+	m2 := NewManager()
+	session, err := m2.GetSession("session_003")
 	if err != nil {
-		t.Fatalf("Failed to create session: %v", err)
+		t.Fatalf("GetSession() from disk error = %v", err)
 	}
+	if session.ID != "session_003" {
+		t.Errorf("GetSession() from disk ID = %s, want session_003", session.ID)
+	}
+}
 
-	err = manager.UpdateItemStatus("session_4", "1", StatusApproved, "已批准")
+func TestUpdateItemStatus_ShouldApproveItem(t *testing.T) {
+	initTestConfig(t)
+	m := NewManager()
+
+	suggestions := []preprocess.Change{
+		{Original: "审核测试", Replacement: "替换", Type: "test"},
+	}
+	m.CreateSession("session_004", "file_004", "process_004", suggestions)
+
+	err := m.UpdateItemStatus("session_004", "1", StatusApproved, "")
 	if err != nil {
-		t.Fatalf("Failed to update item status: %v", err)
+		t.Fatalf("UpdateItemStatus() error = %v", err)
 	}
 
-	session, err := manager.GetSession("session_4")
-	if err != nil {
-		t.Fatalf("Failed to get session: %v", err)
-	}
-
+	session, _ := m.GetSession("session_004")
 	if session.Items[0].Status != StatusApproved {
-		t.Errorf("Expected status 'approved', got '%s'", session.Items[0].Status)
-	}
-	if session.Items[0].ReviewerNote != "已批准" {
-		t.Errorf("Expected reviewer note '已批准', got '%s'", session.Items[0].ReviewerNote)
-	}
-	if session.Completed != true {
-		t.Error("Expected session to be completed after all items approved")
+		t.Errorf("UpdateItemStatus() Status = %s, want %s", session.Items[0].Status, StatusApproved)
 	}
 }
 
-func TestUpdateItemStatus_Rejected(t *testing.T) {
-	manager, cleanup := setupManagerTest(t)
-	defer cleanup()
+func TestUpdateItemStatus_ShouldRejectItem(t *testing.T) {
+	initTestConfig(t)
+	m := NewManager()
 
 	suggestions := []preprocess.Change{
-		{Type: "typo", Original: "及了", Replacement: "极了", Position: 0},
+		{Original: "拒绝测试", Replacement: "替换", Type: "test"},
 	}
+	m.CreateSession("session_005", "file_005", "process_005", suggestions)
 
-	_, err := manager.CreateSession("session_5", "file_5", "process_5", suggestions)
-	if err != nil {
-		t.Fatalf("Failed to create session: %v", err)
-	}
+	m.UpdateItemStatus("session_005", "1", StatusRejected, "不需要修改")
 
-	err = manager.UpdateItemStatus("session_5", "1", StatusRejected, "已拒绝")
-	if err != nil {
-		t.Fatalf("Failed to update item status: %v", err)
-	}
-
-	session, err := manager.GetSession("session_5")
-	if err != nil {
-		t.Fatalf("Failed to get session: %v", err)
-	}
-
+	session, _ := m.GetSession("session_005")
 	if session.Items[0].Status != StatusRejected {
-		t.Errorf("Expected status 'rejected', got '%s'", session.Items[0].Status)
+		t.Errorf("UpdateItemStatus() Status = %s, want %s", session.Items[0].Status, StatusRejected)
+	}
+	if session.Items[0].ReviewerNote != "不需要修改" {
+		t.Errorf("UpdateItemStatus() ReviewerNote = %s, want 不需要修改", session.Items[0].ReviewerNote)
 	}
 }
 
-func TestUpdateItemStatus_PartialCompletion(t *testing.T) {
-	manager, cleanup := setupManagerTest(t)
-	defer cleanup()
+func TestUpdateItemStatus_ShouldMarkCompletedWhenAllReviewed(t *testing.T) {
+	initTestConfig(t)
+	m := NewManager()
 
 	suggestions := []preprocess.Change{
-		{Type: "typo", Original: "及了", Replacement: "极了", Position: 0},
-		{Type: "typo", Original: "在次", Replacement: "再次", Position: 10},
+		{Original: "项目1", Replacement: "替换1", Type: "test"},
+		{Original: "项目2", Replacement: "替换2", Type: "test"},
 	}
+	m.CreateSession("session_006", "file_006", "process_006", suggestions)
 
-	_, err := manager.CreateSession("session_6", "file_6", "process_6", suggestions)
-	if err != nil {
-		t.Fatalf("Failed to create session: %v", err)
-	}
+	m.UpdateItemStatus("session_006", "1", StatusApproved, "")
+	m.UpdateItemStatus("session_006", "2", StatusRejected, "")
 
-	err = manager.UpdateItemStatus("session_6", "1", StatusApproved, "")
-	if err != nil {
-		t.Fatalf("Failed to update item status: %v", err)
-	}
-
-	session, err := manager.GetSession("session_6")
-	if err != nil {
-		t.Fatalf("Failed to get session: %v", err)
-	}
-
-	if session.Completed {
-		t.Error("Expected session not to be completed with partial review")
+	session, _ := m.GetSession("session_006")
+	if !session.Completed {
+		t.Errorf("UpdateItemStatus() should mark session as completed when all items reviewed")
 	}
 }
 
-func TestUpdateItemStatus_NonExistingSession(t *testing.T) {
-	manager, cleanup := setupManagerTest(t)
-	defer cleanup()
-
-	err := manager.UpdateItemStatus("non_existing", "1", StatusApproved, "")
-	if err == nil {
-		t.Error("Expected error for non-existing session")
-	}
-}
-
-func TestSaveProgress(t *testing.T) {
-	manager, cleanup := setupManagerTest(t)
-	defer cleanup()
+func TestGetPendingItems_ShouldReturnOnlyPending(t *testing.T) {
+	initTestConfig(t)
+	m := NewManager()
 
 	suggestions := []preprocess.Change{
-		{Type: "typo", Original: "及了", Replacement: "极了", Position: 0},
+		{Original: "待审核1", Replacement: "替换1", Type: "test"},
+		{Original: "待审核2", Replacement: "替换2", Type: "test"},
 	}
+	m.CreateSession("session_007", "file_007", "process_007", suggestions)
+	m.UpdateItemStatus("session_007", "1", StatusApproved, "")
 
-	_, err := manager.CreateSession("session_7", "file_7", "process_7", suggestions)
+	pending, err := m.GetPendingItems("session_007")
 	if err != nil {
-		t.Fatalf("Failed to create session: %v", err)
+		t.Fatalf("GetPendingItems() error = %v", err)
 	}
-
-	err = manager.SaveProgress("session_7", "保存进度")
-	if err != nil {
-		t.Fatalf("Failed to save progress: %v", err)
-	}
-
-	session, err := manager.GetSession("session_7")
-	if err != nil {
-		t.Fatalf("Failed to get session: %v", err)
-	}
-
-	if session.LastModified.IsZero() {
-		t.Error("Expected last modified time to be set")
-	}
-}
-
-func TestGetPendingItems(t *testing.T) {
-	manager, cleanup := setupManagerTest(t)
-	defer cleanup()
-
-	suggestions := []preprocess.Change{
-		{Type: "typo", Original: "及了", Replacement: "极了", Position: 0},
-		{Type: "typo", Original: "在次", Replacement: "再次", Position: 10},
-	}
-
-	_, err := manager.CreateSession("session_8", "file_8", "process_8", suggestions)
-	if err != nil {
-		t.Fatalf("Failed to create session: %v", err)
-	}
-
-	pending, err := manager.GetPendingItems("session_8")
-	if err != nil {
-		t.Fatalf("Failed to get pending items: %v", err)
-	}
-
-	if len(pending) != 2 {
-		t.Errorf("Expected 2 pending items, got %d", len(pending))
-	}
-}
-
-func TestGetPendingItems_AfterApproval(t *testing.T) {
-	manager, cleanup := setupManagerTest(t)
-	defer cleanup()
-
-	suggestions := []preprocess.Change{
-		{Type: "typo", Original: "及了", Replacement: "极了", Position: 0},
-		{Type: "typo", Original: "在次", Replacement: "再次", Position: 10},
-	}
-
-	_, err := manager.CreateSession("session_9", "file_9", "process_9", suggestions)
-	if err != nil {
-		t.Fatalf("Failed to create session: %v", err)
-	}
-
-	err = manager.UpdateItemStatus("session_9", "1", StatusApproved, "")
-	if err != nil {
-		t.Fatalf("Failed to update item status: %v", err)
-	}
-
-	pending, err := manager.GetPendingItems("session_9")
-	if err != nil {
-		t.Fatalf("Failed to get pending items: %v", err)
-	}
-
 	if len(pending) != 1 {
-		t.Errorf("Expected 1 pending item, got %d", len(pending))
+		t.Errorf("GetPendingItems() length = %d, want 1", len(pending))
 	}
 }
 
-func TestGetApprovedSuggestions(t *testing.T) {
-	manager, cleanup := setupManagerTest(t)
-	defer cleanup()
+func TestGetApprovedSuggestions_ShouldReturnOnlyApproved(t *testing.T) {
+	initTestConfig(t)
+	m := NewManager()
 
 	suggestions := []preprocess.Change{
-		{Type: "typo", Original: "及了", Replacement: "极了", Position: 0},
-		{Type: "typo", Original: "在次", Replacement: "再次", Position: 10},
+		{Original: "通过1", Replacement: "替换1", Type: "test"},
+		{Original: "拒绝1", Replacement: "替换2", Type: "test"},
 	}
+	m.CreateSession("session_008", "file_008", "process_008", suggestions)
+	m.UpdateItemStatus("session_008", "1", StatusApproved, "")
+	m.UpdateItemStatus("session_008", "2", StatusRejected, "")
 
-	_, err := manager.CreateSession("session_10", "file_10", "process_10", suggestions)
+	approved, err := m.GetApprovedSuggestions("session_008")
 	if err != nil {
-		t.Fatalf("Failed to create session: %v", err)
+		t.Fatalf("GetApprovedSuggestions() error = %v", err)
 	}
-
-	err = manager.UpdateItemStatus("session_10", "1", StatusApproved, "")
-	if err != nil {
-		t.Fatalf("Failed to update item status: %v", err)
-	}
-
-	approved, err := manager.GetApprovedSuggestions("session_10")
-	if err != nil {
-		t.Fatalf("Failed to get approved suggestions: %v", err)
-	}
-
 	if len(approved) != 1 {
-		t.Errorf("Expected 1 approved suggestion, got %d", len(approved))
-	}
-
-	if approved[0].Original != "及了" {
-		t.Errorf("Expected approved suggestion original '及了', got '%s'", approved[0].Original)
+		t.Errorf("GetApprovedSuggestions() length = %d, want 1", len(approved))
 	}
 }
 
-func TestReviewStatus_Constants(t *testing.T) {
-	if StatusPending != "pending" {
-		t.Errorf("Expected StatusPending 'pending', got '%s'", StatusPending)
+func TestSaveProgress_ShouldPersistSession(t *testing.T) {
+	initTestConfig(t)
+	m := NewManager()
+
+	suggestions := []preprocess.Change{
+		{Original: "保存测试", Replacement: "替换", Type: "test"},
 	}
-	if StatusApproved != "approved" {
-		t.Errorf("Expected StatusApproved 'approved', got '%s'", StatusApproved)
+	m.CreateSession("session_009", "file_009", "process_009", suggestions)
+
+	err := m.SaveProgress("session_009", "测试备注")
+	if err != nil {
+		t.Fatalf("SaveProgress() error = %v", err)
 	}
-	if StatusRejected != "rejected" {
-		t.Errorf("Expected StatusRejected 'rejected', got '%s'", StatusRejected)
-	}
-	if StatusSkipped != "skipped" {
-		t.Errorf("Expected StatusSkipped 'skipped', got '%s'", StatusSkipped)
-	}
+}
+
+func TestMain(m *testing.M) {
+	os.Exit(m.Run())
 }

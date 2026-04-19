@@ -11,6 +11,7 @@ import (
 	"txt-cleaning/internal/config"
 	"txt-cleaning/internal/database"
 	"txt-cleaning/internal/file"
+	"txt-cleaning/internal/logging"
 	"txt-cleaning/internal/processor/preprocess"
 	"txt-cleaning/internal/processor/rules"
 )
@@ -269,7 +270,8 @@ func processIndexingStep(fileMd5, content string, rulesConfig RulesConfig, _ *da
 	}, nil
 }
 
-// processLlmFixStep LLM修复步骤
+// processLlmFixStep LLM修复步骤（重构版）
+// 集成智能分块、Worker Pool并发、缓存幂等性和断点续传
 func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, _ *database.FileRecord) (*PipelineResult, error) {
 	if !rulesConfig.EnableModelRepair {
 		nextStep := GetNextStep(StepLlmFix)
@@ -287,66 +289,40 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, _ *data
 		config.AppConfigInstance.RepairModelName,
 	)
 
-	paragraphs := repairer.SplitIntoParagraphs(content)
-	totalParagraphs := len(paragraphs)
+	// 记录开始处理
+	logging.Info("llm_fix_start", map[string]interface{}{
+		"file_md5": fileMd5,
+		"content_length": len(content),
+		"enable_model_repair": rulesConfig.EnableModelRepair,
+	})
 
 	database.CreateProcessingLog(&database.ProcessingLogRecord{
 		FileMd5: fileMd5,
 		Step:    StepLlmFix,
 		Action:  "progress",
-		Details: fmt.Sprintf("LLM修复开始，共 %d 个段落", totalParagraphs),
+		Details: "LLM修复开始（新版：智能分块+Worker Pool）",
 		Status:  "running",
 	})
 
-	repairedParagraphs := []string{}
-	allChanges := []preprocess.Change{}
+	// 更新状态为处理中
+	database.UpdateFileStatus(fileMd5, "processing", StepLlmFix,
+		CalculateProgress(StepLlmFix, 0),
+		"LLM修复：智能分块与并发处理")
 
-	for i, paragraph := range paragraphs {
-		preview := paragraph
-		previewRunes := []rune(preview)
-		if len(previewRunes) > 40 {
-			preview = string(previewRunes[:40]) + "..."
-		}
+	// 使用新的RepairTextWithFileMd5方法（集成缓存、Worker Pool、智能分块）
+	repairResult := repairer.RepairTextWithFileMd5(fileMd5, content)
 
-		database.UpdateFileStatus(fileMd5, "processing", StepLlmFix,
-			CalculateProgress(StepLlmFix, i*100/totalParagraphs),
-			fmt.Sprintf("LLM修复: 正在处理 %d/%d", i+1, totalParagraphs))
-
-		database.CreateProcessingLog(&database.ProcessingLogRecord{
-			FileMd5: fileMd5,
-			Step:    StepLlmFix,
-			Action:  "progress",
-			Details: fmt.Sprintf("正在修复段落 %d/%d: %s", i+1, totalParagraphs, preview),
-			Status:  "running",
-		})
-
-		repaired, changes := repairer.RepairParagraph(paragraph)
-		repairedParagraphs = append(repairedParagraphs, repaired)
-		allChanges = append(allChanges, changes...)
-
-		stepProgress := (i + 1) * 100 / totalParagraphs
-		database.UpdateFileStatus(fileMd5, "processing", StepLlmFix,
-			CalculateProgress(StepLlmFix, stepProgress),
-			fmt.Sprintf("LLM修复: 已完成 %d/%d 段落", i+1, totalParagraphs))
-
-		database.CreateProcessingLog(&database.ProcessingLogRecord{
-			FileMd5: fileMd5,
-			Step:    StepLlmFix,
-			Action:  "progress",
-			Details: fmt.Sprintf("已完成段落 %d/%d (修改 %d 处)", i+1, totalParagraphs, len(changes)),
-			Status:  "running",
-		})
-	}
-
-	repairResult := ModelRepairResult{
-		Content: strings.Join(repairedParagraphs, "\n"),
-		Changes: allChanges,
-	}
-
+	// 保存中间文件
 	if err := saveIntermediateFile(fileMd5, StepLlmFix, repairResult.Content); err != nil {
-		return nil, fmt.Errorf("保存中间文件失败: %w", err)
+		// 记录错误但不终止，因为修复结果可能仍可用
+		logging.Error("intermediate_save_failed", map[string]interface{}{
+			"file_md5": fileMd5,
+			"step": StepLlmFix,
+			"error": err.Error(),
+		})
 	}
 
+	// 将变更添加到审核项
 	for _, change := range repairResult.Changes {
 		item := database.ReviewItemRecord{
 			FileMd5:          fileMd5,
@@ -361,6 +337,18 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, _ *data
 		database.CreateReviewItems([]database.ReviewItemRecord{item})
 	}
 
+	// 记录完成统计
+	logging.Info("llm_fix_completed", map[string]interface{}{
+		"file_md5": fileMd5,
+		"total_chunks": repairResult.Stats["total_chunks"],
+		"total_changes": repairResult.Stats["total_changes"],
+		"cache_hits": repairResult.Stats["cache_hits"],
+		"cache_misses": repairResult.Stats["cache_misses"],
+	})
+
+	// 检查错误阈值，触发自进化监控
+	checkErrorThresholds(fileMd5, repairResult.Stats)
+
 	nextStep := GetNextStep(StepLlmFix)
 	progress := CalculateProgress(nextStep, 0)
 	database.UpdateFileStatus(fileMd5, "processing", nextStep, progress, "")
@@ -369,7 +357,10 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, _ *data
 		FileMd5: fileMd5,
 		Step:    StepLlmFix,
 		Action:  "complete",
-		Details: fmt.Sprintf("修复建议: %d", len(repairResult.Changes)),
+		Details: fmt.Sprintf("修复完成：%d个块，%d处修改，缓存命中%d次", 
+			repairResult.Stats["total_chunks"], 
+			repairResult.Stats["total_changes"],
+			repairResult.Stats["cache_hits"]),
 		Status:  "success",
 	})
 
@@ -377,8 +368,69 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, _ *data
 		CurrentStep: StepLlmFix,
 		NextStep:    nextStep,
 		Progress:    progress,
-		Message:     fmt.Sprintf("LLM修复完成，修复建议: %d", len(repairResult.Changes)),
+		Message:     fmt.Sprintf("LLM修复完成：%d个块，%d处修改，缓存命中%d次", 
+			repairResult.Stats["total_chunks"], 
+			repairResult.Stats["total_changes"],
+			repairResult.Stats["cache_hits"]),
 	}, nil
+}
+
+// checkErrorThresholds 检查错误阈值，触发自进化监控
+// 监控指标：
+// - 缓存命中率 < 30%：提示词可能无效
+// - API错误率 > 20%：需要调整提示词或重试策略
+// - 平均处理时间 > 10秒：可能并发过高或API限流
+func checkErrorThresholds(fileMd5 string, stats map[string]int) {
+	// 计算缓存命中率
+	totalChunks := stats["total_chunks"]
+	cacheHits := stats["cache_hits"]
+	cacheMisses := stats["cache_misses"]
+
+	if totalChunks == 0 {
+		return // 没有块处理，无需监控
+	}
+
+	// 缓存命中率
+	hitRate := float64(cacheHits) / float64(totalChunks) * 100
+	// API错误率（简化：假设所有未命中都可能导致API错误）
+	errorRate := float64(cacheMisses) / float64(totalChunks) * 100
+
+	// 记录监控指标
+	logging.Info("repair_metrics", map[string]interface{}{
+		"file_md5": fileMd5,
+		"total_chunks": totalChunks,
+		"cache_hits": cacheHits,
+		"cache_misses": cacheMisses,
+		"hit_rate": hitRate,
+		"error_rate": errorRate,
+	})
+
+	// 检查阈值
+	thresholds := map[string]float64{
+		"hit_rate_low": 30.0,   // 缓存命中率低于30%
+		"error_rate_high": 20.0, // API错误率高于20%
+	}
+
+	// 触发自进化监控的条件
+	if hitRate < thresholds["hit_rate_low"] {
+		logging.Warn("evolver_trigger_low_hit_rate", map[string]interface{}{
+			"file_md5": fileMd5,
+			"hit_rate": hitRate,
+			"threshold": thresholds["hit_rate_low"],
+			"recommendation": "提示词可能无效，需要Evolver优化",
+		})
+		// TODO: 触发外部Evolver调用
+	}
+
+	if errorRate > thresholds["error_rate_high"] {
+		logging.Warn("evolver_trigger_high_error_rate", map[string]interface{}{
+			"file_md5": fileMd5,
+			"error_rate": errorRate,
+			"threshold": thresholds["error_rate_high"],
+			"recommendation": "API错误率过高，需要调整提示词或重试策略",
+		})
+		// TODO: 触发外部Evolver调用
+	}
 }
 
 // processReviewStep 审核步骤（进入审核等待状态）
