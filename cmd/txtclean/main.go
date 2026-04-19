@@ -11,27 +11,32 @@ import (
 	"time"
 
 	"txt-cleaning/internal/config"
+	"txt-cleaning/internal/database"
 	"txt-cleaning/web/backend"
 )
 
 func main() {
-	// 加载配置
 	if err := config.Load(); err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
+
+	if err := database.Init(config.AppConfigInstance.DataDir); err != nil {
+		log.Fatalf("Failed to init database: %v", err)
+	}
+	defer database.Close()
 
 	// 初始化Web服务
 	server := backend.NewServer()
 
 	// 启动服务器
 	srv := &http.Server{
-		Addr:    fmt.Sprintf(":%d", config.AppConfig.Port),
+		Addr:    fmt.Sprintf(":%d", config.AppConfigInstance.Port),
 		Handler: server,
 	}
 
 	// 在goroutine中启动服务器
 	go func() {
-		log.Printf("Server started on port %d", config.AppConfig.Port)
+		log.Printf("Server started on port %d", config.AppConfigInstance.Port)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Failed to start server: %v", err)
 		}

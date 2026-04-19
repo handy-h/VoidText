@@ -1,199 +1,140 @@
 # 小说文本清洗工具
 
-使用Trae AI生成的一个基于Go语言的小说文本清洗工具，用于解决小说txt文档中的错别字、乱码、广告内容、重复或缺失片段等问题。
+基于 Go 语言的小说文本清洗工具，用于解决小说 TXT 文档中的错别字、乱码、广告内容、重复或缺失片段等问题。
 
 ## 功能特性
 
-- **文本预处理**：编码规范化、广告内容识别与移除、特殊字符处理、空白字符规范化
-- **NLP分析**：错别字检测与纠正、乱码识别与修复、重复内容检测
-- **人工审核**：修改建议生成、交互式审核界面、单次/批量修改选项
-- **版本管理**：多版本备份、版本恢复、备份清理
-- **自定义规则**：支持用户自定义正则表达式清理规则
-- **外部API集成**：支持调用外部模型API进行更高级的文本处理
-- **Web界面**：直观的Web操作界面，支持文件上传、处理状态查看、审核操作等
+- **五步处理流水线**：基础清洗 → 向量检测 → LLM修复 → 人工审核 → 生成文件
+- **文件生命周期管理**：MD5 唯一标识、状态追踪（pending/processing/completed/failed）、进度恢复
+- **版本链管理**：自动维护原始文件与中间版本的父子关系，任何版本可追溯
+- **基础文本清洗**：编码检测与转换（GBK/UTF-8）、广告移除、特殊字符处理、繁体转简体
+- **向量检测去重**：基于向量相似度的重复段落检测与移除
+- **LLM修复**：调用外部 LLM 纠正错别字和语法错误，支持本地字典兜底
+- **人工审核**：逐条审核修改建议，支持通过/拒绝/编辑/恢复/批量操作
+- **自定义规则**：每个文件可独立配置规则（错别字映射、广告黑名单等）
+- **处理报告**：生成包含审核统计、版本历史、处理日志的完整报告
+- **SQLite持久化**：所有数据本地存储，无需外部数据库依赖
 
-## 技术栈
+## 环境依赖
 
-- **后端**：Go语言、Gin框架
-- **前端**：HTML、CSS、JavaScript
-- **本地NLP**：prose/v2、levenshtein
-- **容器化**：Docker
+- **Go**: 1.21+
+- **SQLite**: 无需单独安装（使用 modernc.org/sqlite 驱动）
+- **外部服务**（可选）:
+  - 阿里云 DashScope API 或 DeepSeek API（用于 LLM 修复）
+  - 向量模型 API（用于语义相似度检测，可选本地计算）
 
-## 安装与部署
+## 系统初始化
 
-### 方法一：使用Docker（推荐）
+### 1. 克隆项目
 
-1. 克隆项目
-   ```bash
-   git clone https://github.com:handy-h/txtCleaning.git
-   cd txt-cleaning
-   ```
-2. 构建Docker镜像
-   ```bash
-   docker build -t txtcleaning .
-   ```
-3. 运行容器
-   ```bash
-   docker run -d -p 8080:8080 -v ./data:/app/data --name txtcleaning txtcleaning
-   ```
-4. 访问应用
-   打开浏览器，访问 `http://localhost:8080`
+```bash
+git clone https://github.com/handy-h/txtCleaning.git
+cd txtCleaning
+```
 
-### 方法二：本地运行
+### 2. 配置环境变量
 
-1. 克隆项目
-   ```bash
-   git clone https://github.com:handy-h/txtCleaning.git
-   cd txt-cleaning
-   ```
-2. 安装依赖
-   ```bash
-   go mod tidy
-   ```
-3. 构建项目
-   ```bash
-   go build -o txtclean ./cmd/txtclean
-   ```
-4. 运行应用
-   ```bash
-   ./txtclean
-   ```
-5. 访问应用
-   打开浏览器，访问 `http://localhost:8080`
+```bash
+cp .env.template .env
+```
+
+编辑 `.env` 文件，配置以下必要项：
+
+```env
+# 服务端口
+PORT=8080
+
+# 数据目录
+DATA_DIR=./data
+
+# LLM API 配置（必填，否则无法使用 LLM 修复）
+LLM_API_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+LLM_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+COMPLETION_MODEL_NAME=qwen-max-2025-01-25
+```
+
+### 3. 编译项目
+
+```bash
+# 编译 Linux/macOS
+go build -o txtclean ./cmd/txtclean/
+
+# 编译 ARM64（树莓派）
+GOOS=linux GOARCH=arm64 go build -o txtclean ./cmd/txtclean/
+```
+
+### 4. 运行服务
+
+```bash
+# 直接运行
+./txtclean
+
+# 或使用启动脚本（支持后台运行）
+chmod +x scripts/raspberrypi-start.sh
+./scripts/raspberrypi-start.sh
+```
+
+### 5. 访问应用
+
+打开浏览器，访问 `http://localhost:8080`
 
 ## 使用指南
 
-### 1. 上传文件
+### 上传文件
 
-- 在首页点击「选择文件」按钮，选择要处理的txt文件
-- 点击「上传并处理」按钮开始处理
+- 点击「上传文件」按钮，选择要处理的 txt 文件
+- 文件名格式建议为 `作者 - 标题.txt`，系统自动解析作者和标题
+- 支持的分隔符：`-`、`—`、`·`、`_`、`~`
 
-### 2. 查看处理状态
+### 配置与处理
 
-- 上传后会显示处理进度和状态
-- 处理完成后会自动跳转到审核页面
+- 上传后可配置该文件的处理规则
+- 点击「保存并开始处理」执行五步流水线
+- 处理过程中可查看进度和当前步骤
+- 可随时下载当前版本的中间文件
 
-### 3. 审核修改建议
+### 审核
 
-- 查看系统生成的修改建议
-- 对每个建议点击「通过」或「拒绝」
-- 可以点击「全部通过」或「全部拒绝」进行批量操作
-- 点击「保存进度」保存当前审核进度
+- 到达人工审核步骤时，逐条审核修改建议
+- 支持通过/拒绝/编辑/批量操作
+- 可随时中断审核，关闭浏览器后可继续
 
-### 4. 版本管理
+### 完成
 
-- 在版本管理页面查看所有版本
-- 点击「恢复」按钮恢复到特定版本
-- 点击「删除」按钮删除不需要的版本
-
-### 5. 自定义规则
-
-- 在自定义规则页面添加新的正则表达式规则
-- 输入规则名称、正则表达式和替换内容
-- 点击「添加规则」保存规则
-
-### 6. 外部API配置
-
-- 在外部API配置页面输入API URL和API Key
-- 点击「保存配置」应用配置
-
-## 配置说明
-
-### 环境变量
-
-可以通过 `.env` 文件或环境变量配置以下参数：
-
-- `PORT`：服务端口，默认8080
-- `DATA_DIR`：数据目录，默认./data
-- `MODELS_DIR`：模型目录，默认./models
-- `MAX_FILE_SIZE`：最大文件大小，默认104857600（100MB）
-- `BACKUP_KEEP_DAYS`：备份保留天数，默认7
-- `EXTERNAL_API_URL`：外部API URL
-- `EXTERNAL_API_KEY`：外部API Key
-
-### 配置文件
-
-也可以通过 `configs/config.yaml` 文件进行配置：
-
-```yaml
-port: 8080
-data_dir: ./data
-models_dir: ./models
-max_file_size: 104857600
-backup_keep_days: 7
-external_api_url: ""
-external_api_key: ""
-```
-
-## 项目结构
-
-```
-txt-cleaning/
-├── cmd/                  # 命令行工具
-│   └── txtclean/         # 主入口
-├── internal/             # 内部包
-│   ├── config/           # 配置管理
-│   ├── processor/        # 文本处理器
-│   │   ├── preprocess/   # 预处理
-│   │   ├── model/        # NLP模型
-│   │   ├── postprocess/  # 后处理
-│   │   └── rules/        # 规则管理
-│   ├── file/             # 文件操作
-│   ├── review/           # 审核管理
-│   ├── external/         # 外部API调用
-│   └── utils/            # 工具函数
-├── pkg/                  # 公共包
-│   ├── nlp/              # NLP工具
-│   ├── detector/         # 检测工具
-│   └── corrector/        # 纠正工具
-├── web/                  # Web界面
-│   ├── frontend/         # 前端代码
-│   └── backend/          # 后端API
-├── configs/              # 配置文件
-├── data/                 # 数据目录
-├── models/               # 模型目录
-├── scripts/              # 脚本
-├── tests/                # 测试代码
-├── Dockerfile            # Dockerfile
-├── docker-compose.yml    # Docker Compose配置
-├── go.mod                # Go模块文件
-└── README.md             # 项目说明
-```
+- 所有审核项处理完毕后，点击「生成最终文件」
+- 下载清洗后的最终文件
+- 可查看处理报告
 
 ## 常见问题
 
 ### 1. 文件上传失败
 
-- 检查文件大小是否超过限制（默认100MB）
-- 检查文件类型是否为txt文件
+- 检查文件大小是否超过限制（默认 100MB）
+- 检查文件类型是否为 txt 文件
+- 检查网络连接是否正常
 
 ### 2. 处理速度慢
 
-- 大文件处理可能需要较长时间，请耐心等待
-- 可以在处理过程中关闭浏览器，稍后再访问查看结果
+- LLM 修复阶段耗时较长，请耐心等待
+- 可关闭浏览器，处理会在后台继续
+- 可设置 `ENABLE_MODEL_REPAIR=false` 跳过 LLM 修复
 
-### 3. 外部API调用失败
+### 3. 外部 API 调用失败
 
-- 检查API URL和API Key是否正确
+- 检查 API URL 和 API Key 是否正确
 - 检查网络连接是否正常
-- 外部API调用失败不会影响本地处理功能
+- 模型修复阶段会自动降级为本地字典修复
 
-### 4. 版本恢复失败
+## 项目文档
 
-- 检查版本是否存在
-- 检查文件权限是否正确
+更多技术细节请参阅 [doc/00-目录.md](doc/00-目录.md)
 
 ## 许可证
 
 MIT License
-
-## 贡献
-
-欢迎提交Issue和Pull Request！
 
 ## 联系方式
 
 - 作者：handy
 - 邮箱：mikelon@aliyun.com
 - 项目地址：https://github.com/handy-h/txtCleaning.git
-

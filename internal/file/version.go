@@ -2,6 +2,7 @@ package file
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -41,7 +42,7 @@ func (vm *VersionManager) CreateVersion(fileID, content, note string) (Version, 
 	}
 
 	// 生成新版本号
-	version := string(len(currentVersions) + 1)
+	version := fmt.Sprintf("%d", len(currentVersions)+1)
 
 	// 创建版本
 	newVersion := Version{
@@ -113,7 +114,7 @@ func (vm *VersionManager) RestoreVersion(fileID, version string) (string, error)
 	}
 
 	// 保存恢复操作
-	_, err = vm.CreateVersion(fileID, targetVersion.Content, "恢复到版本 " + version)
+	_, err = vm.CreateVersion(fileID, targetVersion.Content, "恢复到版本 "+version)
 	if err != nil {
 		return "", err
 	}
@@ -136,7 +137,7 @@ func (vm *VersionManager) DeleteVersion(fileID, version string) error {
 			newVersions = append(newVersions, v)
 		} else {
 			// 删除版本文件
-			versionPath := filepath.Join(config.AppConfig.DataDir, "backups", v.ID+'.json')
+			versionPath := filepath.Join(config.AppConfigInstance.DataDir, "backups", v.ID+".json")
 			os.Remove(versionPath)
 		}
 	}
@@ -165,7 +166,7 @@ func (vm *VersionManager) CleanupOldVersions(fileID string, keepDays int) error 
 			newVersions = append(newVersions, v)
 		} else {
 			// 删除版本文件
-			versionPath := filepath.Join(config.AppConfig.DataDir, "backups", v.ID+'.json')
+			versionPath := filepath.Join(config.AppConfigInstance.DataDir, "backups", v.ID+".json")
 			os.Remove(versionPath)
 		}
 	}
@@ -178,7 +179,7 @@ func (vm *VersionManager) CleanupOldVersions(fileID string, keepDays int) error 
 
 // saveVersion 保存版本到磁盘
 func (vm *VersionManager) saveVersion(version Version) error {
-	versionPath := filepath.Join(config.AppConfig.DataDir, "backups", version.ID+'.json')
+	versionPath := filepath.Join(config.AppConfigInstance.DataDir, "backups", version.ID+".json")
 
 	// 确保目录存在
 	if err := os.MkdirAll(filepath.Dir(versionPath), 0755); err != nil {
@@ -197,7 +198,7 @@ func (vm *VersionManager) saveVersion(version Version) error {
 
 // loadVersions 从磁盘加载版本列表
 func (vm *VersionManager) loadVersions(fileID string) ([]Version, error) {
-	backupsDir := filepath.Join(config.AppConfig.DataDir, "backups")
+	backupsDir := filepath.Join(config.AppConfigInstance.DataDir, "backups")
 
 	// 确保目录存在
 	if err := os.MkdirAll(backupsDir, 0755); err != nil {

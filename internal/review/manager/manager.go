@@ -2,6 +2,7 @@ package manager
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -14,30 +15,30 @@ import (
 type ReviewStatus string
 
 const (
-	StatusPending   ReviewStatus = "pending"
-	StatusApproved  ReviewStatus = "approved"
-	StatusRejected  ReviewStatus = "rejected"
-	StatusSkipped   ReviewStatus = "skipped"
+	StatusPending  ReviewStatus = "pending"
+	StatusApproved ReviewStatus = "approved"
+	StatusRejected ReviewStatus = "rejected"
+	StatusSkipped  ReviewStatus = "skipped"
 )
 
 // ReviewItem 审核项
 type ReviewItem struct {
-	ID           string         `json:"id"`
+	ID           string            `json:"id"`
 	Suggestion   preprocess.Change `json:"suggestion"`
-	Status       ReviewStatus   `json:"status"`
-	ReviewedAt   *time.Time     `json:"reviewedAt"`
-	ReviewerNote string         `json:"reviewerNote"`
+	Status       ReviewStatus      `json:"status"`
+	ReviewedAt   *time.Time        `json:"reviewedAt"`
+	ReviewerNote string            `json:"reviewerNote"`
 }
 
 // ReviewSession 审核会话
 type ReviewSession struct {
-	ID           string        `json:"id"`
-	FileID       string        `json:"fileId"`
-	ProcessID    string        `json:"processId"`
-	Items        []ReviewItem  `json:"items"`
-	CreatedAt    time.Time     `json:"createdAt"`
-	LastModified time.Time     `json:"lastModified"`
-	Completed    bool          `json:"completed"`
+	ID           string       `json:"id"`
+	FileID       string       `json:"fileId"`
+	ProcessID    string       `json:"processId"`
+	Items        []ReviewItem `json:"items"`
+	CreatedAt    time.Time    `json:"createdAt"`
+	LastModified time.Time    `json:"lastModified"`
+	Completed    bool         `json:"completed"`
 }
 
 // Manager 审核管理器
@@ -58,7 +59,7 @@ func (m *Manager) CreateSession(sessionID, fileID, processID string, suggestions
 	items := make([]ReviewItem, len(suggestions))
 	for i, suggestion := range suggestions {
 		items[i] = ReviewItem{
-			ID:         string(i + 1),
+			ID:         fmt.Sprintf("%d", i+1),
 			Suggestion: suggestion,
 			Status:     StatusPending,
 		}
@@ -195,7 +196,7 @@ func (m *Manager) GetApprovedSuggestions(sessionID string) ([]preprocess.Change,
 
 // saveSession 保存会话到磁盘
 func (m *Manager) saveSession(session *ReviewSession) error {
-	sessionPath := filepath.Join(config.AppConfig.DataDir, "reviews", session.ID+'.json')
+	sessionPath := filepath.Join(config.AppConfigInstance.DataDir, "reviews", session.ID+".json")
 
 	// 确保目录存在
 	if err := os.MkdirAll(filepath.Dir(sessionPath), 0755); err != nil {
@@ -214,7 +215,7 @@ func (m *Manager) saveSession(session *ReviewSession) error {
 
 // loadSession 从磁盘加载会话
 func (m *Manager) loadSession(sessionID string) (*ReviewSession, error) {
-	sessionPath := filepath.Join(config.AppConfig.DataDir, "reviews", sessionID+'.json')
+	sessionPath := filepath.Join(config.AppConfigInstance.DataDir, "reviews", sessionID+".json")
 
 	// 读取文件
 	data, err := os.ReadFile(sessionPath)

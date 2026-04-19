@@ -3,15 +3,13 @@ package postprocess
 import (
 	"regexp"
 	"strings"
-
-	"txt-cleaning/internal/processor/preprocess"
 )
 
 // PostprocessResult 后处理结果
 type PostprocessResult struct {
-	Content  string   `json:"content"`
-	Original string   `json:"original"`
-	Changes  []Change `json:"changes"`
+	Content  string         `json:"content"`
+	Original string         `json:"original"`
+	Changes  []Change       `json:"changes"`
 	Stats    map[string]int `json:"stats"`
 }
 
@@ -72,11 +70,10 @@ func organizeChapters(result PostprocessResult) PostprocessResult {
 		regex := regexp.MustCompile(pattern)
 		matches := regex.FindAllStringIndex(result.Content, -1)
 
-		for i, match := range matches {
-			// 在章节标题前添加空行
-			if i > 0 && match[0] > 0 && result.Content[match[0]-1] != '\n' {
+		for _, match := range matches {
+			result.Stats["chapters"]++
+			if match[0] > 0 && result.Content[match[0]-1] != '\n' {
 				result.Content = result.Content[:match[0]] + "\n\n" + result.Content[match[0]:]
-				result.Stats["chapters"]++
 			}
 		}
 	}
@@ -88,14 +85,14 @@ func organizeChapters(result PostprocessResult) PostprocessResult {
 func normalizePunctuation(result PostprocessResult) PostprocessResult {
 	// 中文标点符号规范化
 	punctuationMap := map[string]string{
-		",": "，",
-		".": "。",
-		":": "：",
-		";": "；",
-		"?": "？",
-		"!": "！",
-		"'": "'",
-		"\"": """,
+		",":  "，",
+		".":  "。",
+		":":  "：",
+		";":  "；",
+		"?":  "？",
+		"!":  "！",
+		"'":  "'",
+		"\"": "\"",
 	}
 
 	for en, zh := range punctuationMap {
@@ -103,8 +100,11 @@ func normalizePunctuation(result PostprocessResult) PostprocessResult {
 	}
 
 	// 移除重复的标点符号
-	regex := regexp.MustCompile(`([，。：；？！])\1+`)
-	result.Content = regex.ReplaceAllString(result.Content, "$1")
+	punctuationMarks := []string{"，", "。", "：", "；", "？", "！"}
+	for _, mark := range punctuationMarks {
+		pattern := regexp.MustCompile(regexp.QuoteMeta(mark) + "+")
+		result.Content = pattern.ReplaceAllString(result.Content, mark)
+	}
 
 	return result
 }
