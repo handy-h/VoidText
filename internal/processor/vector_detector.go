@@ -1,6 +1,7 @@
 package processor
 
 import (
+	"log"
 	"math"
 	"strings"
 	"txt-cleaning/internal/config"
@@ -202,7 +203,8 @@ func (vd *VectorDetector) generateEmbeddings(texts []string) ([][]float64, error
 		api := external.NewAPI()
 		resp, err := api.GenerateEmbedding(texts)
 		if err != nil {
-			return nil, err
+			log.Printf("[向量检测] API调用失败，降级为本地向量: 错误=%v", err)
+			return vd.generateVectors(texts), nil
 		}
 
 		if resp != nil && len(resp.Data) > 0 {
@@ -212,6 +214,8 @@ func (vd *VectorDetector) generateEmbeddings(texts []string) ([][]float64, error
 			}
 			return embeddings, nil
 		}
+
+		log.Printf("[向量检测] API返回空数据，降级为本地向量")
 	}
 
 	// 如果API调用失败或使用本地模型，返回简化向量

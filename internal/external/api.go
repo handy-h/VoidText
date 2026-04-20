@@ -448,6 +448,7 @@ func (api *API) GenerateEmbedding(texts []string) (*EmbeddingResponse, error) {
 	}
 
 	url := api.baseURL + "/embeddings"
+	startTime := time.Now()
 
 	req := EmbeddingRequest{
 		Input: texts,
@@ -589,6 +590,7 @@ func (api *API) GenerateChatCompletion(systemPrompt, userPrompt string, maxToken
 	}
 
 	url := api.baseURL + "/chat/completions"
+	startTime := time.Now()
 
 	messages := []ChatMessage{}
 	if systemPrompt != "" {
