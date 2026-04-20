@@ -54,6 +54,14 @@ logs/
 # Temporary files
 tmp/
 
+# Python cache files
+*.pyc
+__pycache__/
+
+# Runtime data and binaries
+memory/
+txtclean
+
 # Backup files
 *.bak
 *.backup

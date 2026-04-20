@@ -15,6 +15,7 @@ import (
 type AppConfig struct {
 	Port           int
 	DataDir        string
+	BaseDir        string
 	MaxFileSize    int64
 	BackupKeepDays int
 
@@ -30,6 +31,7 @@ type AppConfig struct {
 	VectorModelApiKey         string
 
 	EnableModelRepair     bool
+	EnableEvolver         bool
 	RepairModelName       string
 	RepairModelType       string
 	LLMApiURL             string
@@ -69,6 +71,7 @@ func Load() error {
 	cfg := AppConfig{
 		Port:                      getEnvInt("PORT", 8080),
 		DataDir:                   getEnvStr("DATA_DIR", "./data"),
+		BaseDir:                   getEnvStr("BASE_DIR", "."),
 		MaxFileSize:               getEnvInt64("MAX_FILE_SIZE", 100*1024*1024),
 		BackupKeepDays:            getEnvInt("BACKUP_KEEP_DAYS", 7),
 		EnableBasicCleaning:       getEnvBool("ENABLE_BASIC_CLEANING", true),
@@ -81,6 +84,7 @@ func Load() error {
 		VectorModelURL:            getEnvStr("VECTOR_MODEL_URL", ""),
 		VectorModelApiKey:         getEnvStr("VECTOR_MODEL_API_KEY", ""),
 		EnableModelRepair:         getEnvBool("ENABLE_MODEL_REPAIR", true),
+		EnableEvolver:             getEnvBool("ENABLE_EVOLVER", false),
 		RepairModelName:           getEnvStr("REPAIR_MODEL_NAME", "gpt-3.5-turbo-instruct"),
 		RepairModelType:           getEnvStr("REPAIR_MODEL_TYPE", "api"),
 		LLMApiURL:                 getEnvStr("LLM_API_URL", ""),
