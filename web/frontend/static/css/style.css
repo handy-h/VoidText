@@ -579,6 +579,78 @@ section h2 {
   gap: 8px;
 }
 
+.processing-logs {
+  margin-bottom: 16px;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.logs-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background-color: #f5f5f5;
+  font-size: 13px;
+  font-weight: 600;
+  color: #555;
+  cursor: pointer;
+  user-select: none;
+}
+
+.logs-header:hover {
+  background-color: #eee;
+}
+
+.logs-content {
+  display: block;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.logs-list {
+  padding: 8px 12px;
+}
+
+.log-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.log-item:last-child {
+  border-bottom: none;
+}
+
+.log-time {
+  color: #999;
+  white-space: nowrap;
+  font-family: monospace;
+}
+
+.log-step {
+  color: #666;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.log-detail {
+  color: #333;
+  word-break: break-all;
+}
+
+.log-running .log-detail {
+  color: #2196f3;
+}
+
+.log-success .log-detail {
+  color: #4caf50;
+}
+
 .review-progress-info {
   display: flex;
   align-items: center;

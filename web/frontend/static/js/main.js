@@ -508,6 +508,40 @@ function updateProcessingUI(data) {
 
   const actionEl = document.getElementById("current-action");
   if (actionEl) actionEl.textContent = data.currentAction || "";
+
+  updateProcessingLogs(data.logs);
+}
+
+function updateProcessingLogs(logs) {
+  const listEl = document.getElementById("logs-list");
+  if (!listEl || !logs || logs.length === 0) return;
+
+  const stepLabels = {
+    cleaning: "基础清洗",
+    indexing: "向量检测",
+    llm_fix: "LLM修复",
+    review: "人工审核",
+    finalizing: "生成文件",
+  };
+
+  const html = logs.map((log) => {
+    const time = log.timestamp ? new Date(log.timestamp).toLocaleTimeString("zh-CN") : "";
+    const step = stepLabels[log.step] || log.step || "";
+    const detail = log.details || "";
+    const statusClass = log.status === "running" ? "log-running" : log.status === "success" ? "log-success" : "log-default";
+    return `<div class="log-item ${statusClass}"><span class="log-time">${time}</span><span class="log-step">[${step}]</span><span class="log-detail">${detail}</span></div>`;
+  }).join("");
+
+  listEl.innerHTML = html;
+}
+
+function toggleLogs() {
+  const content = document.getElementById("logs-content");
+  const icon = document.getElementById("logs-toggle-icon");
+  if (!content || !icon) return;
+  const isHidden = content.style.display === "none";
+  content.style.display = isHidden ? "block" : "none";
+  icon.textContent = isHidden ? "▲" : "▼";
 }
 
 function downloadCurrentVersion() {

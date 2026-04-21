@@ -117,6 +117,9 @@ func GetFileStatus(c *gin.Context) {
 		response["reviewResolved"] = resolved
 	}
 
+	recentLogs, _ := database.GetRecentProcessingLogs(fileMd5, 20)
+	response["logs"] = recentLogs
+
 	c.JSON(http.StatusOK, response)
 }
 

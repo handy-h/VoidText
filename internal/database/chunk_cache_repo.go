@@ -354,12 +354,15 @@ func (r *ChunkCacheRepo) UpdatePromptUsage(promptName, promptVersion string, suc
 
 	// 先获取当前统计
 	var totalUses, successfulUses int
-	row := tx.QueryRow(`SELECT total_uses, successful_uses FROM prompt_versions 
+	var promptContent, source string
+	row := tx.QueryRow(`SELECT total_uses, successful_uses, prompt_content, source FROM prompt_versions 
 		WHERE prompt_name = ? AND prompt_version = ?`, promptName, promptVersion)
-	if err := row.Scan(&totalUses, &successfulUses); err != nil {
+	if err := row.Scan(&totalUses, &successfulUses, &promptContent, &source); err != nil {
 		// 如果记录不存在，创建新记录
 		totalUses = 0
 		successfulUses = 0
+		promptContent = ""
+		source = "file"
 	}
 
 	// 更新统计
@@ -373,9 +376,9 @@ func (r *ChunkCacheRepo) UpdatePromptUsage(promptName, promptVersion string, suc
 	}
 
 	stmt := `INSERT OR REPLACE INTO prompt_versions 
-		(prompt_name, prompt_version, total_uses, successful_uses, success_rate, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)`
-	_, err = tx.Exec(stmt, promptName, promptVersion, totalUses, successfulUses, successRate, time.Now())
+		(prompt_name, prompt_version, prompt_content, source, total_uses, successful_uses, success_rate, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+	_, err = tx.Exec(stmt, promptName, promptVersion, promptContent, source, totalUses, successfulUses, successRate, time.Now())
 	if err != nil {
 		return fmt.Errorf("更新提示词使用统计失败: %w", err)
 	}

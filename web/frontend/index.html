@@ -151,6 +151,15 @@
             </div>
             <div id="processing-message"></div>
             <div id="current-action" class="current-action"></div>
+            <div class="processing-logs">
+              <div class="logs-header" onclick="toggleLogs()">
+                <span>处理日志</span>
+                <span id="logs-toggle-icon">▼</span>
+              </div>
+              <div id="logs-content" class="logs-content">
+                <div id="logs-list" class="logs-list"></div>
+              </div>
+            </div>
             <div class="processing-actions">
               <button class="btn-secondary" onclick="downloadCurrentVersion()">
                 下载当前版本
