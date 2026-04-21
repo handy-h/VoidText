@@ -24,6 +24,7 @@ go.work
 *.swp
 *.swo
 *~
+.qoder/
 
 # OS generated files
 .DS_Store
