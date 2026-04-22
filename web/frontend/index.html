@@ -151,6 +151,20 @@
             </div>
             <div id="processing-message"></div>
             <div id="current-action" class="current-action"></div>
+            <div id="chunk-progress-container" class="chunk-progress" style="display: none;">
+              <div class="chunk-progress-header">
+                <span>LLM修复进度</span>
+                <span id="chunk-eta" class="chunk-eta"></span>
+              </div>
+              <div class="chunk-progress-bar-container">
+                <div class="chunk-progress-bar" id="chunk-progress-bar"></div>
+              </div>
+              <div class="chunk-stats">
+                <span id="chunk-count">已处理: 0/0 块</span>
+                <span id="chunk-api-stats">API调用: 0次 | 缓存命中: 0次</span>
+                <span id="chunk-avg-time">平均耗时: 0ms/块</span>
+              </div>
+            </div>
             <div class="processing-logs">
               <div class="logs-header" onclick="toggleLogs()">
                 <span>处理日志</span>

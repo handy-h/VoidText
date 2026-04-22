@@ -120,6 +120,13 @@ func GetFileStatus(c *gin.Context) {
 	recentLogs, _ := database.GetRecentProcessingLogs(fileMd5, 20)
 	response["logs"] = recentLogs
 
+	// 添加LLM修复进度信息
+	if record.CurrentStep == "llm_fix" && record.Status == "processing" {
+		if progressInfo, exists := processor.GlobalProgressTracker.GetProgress(fileMd5); exists {
+			response["chunkProgress"] = progressInfo
+		}
+	}
+
 	c.JSON(http.StatusOK, response)
 }
 

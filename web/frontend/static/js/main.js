@@ -509,7 +509,67 @@ function updateProcessingUI(data) {
   const actionEl = document.getElementById("current-action");
   if (actionEl) actionEl.textContent = data.currentAction || "";
 
+  updateChunkProgress(data.chunkProgress);
+
   updateProcessingLogs(data.logs);
+}
+
+function updateChunkProgress(chunkProgress) {
+  const container = document.getElementById("chunk-progress-container");
+  if (!container) return;
+
+  if (!chunkProgress || chunkProgress.totalChunks === 0) {
+    container.style.display = "none";
+    return;
+  }
+
+  container.style.display = "block";
+
+  const progressBar = document.getElementById("chunk-progress-bar");
+  const etaEl = document.getElementById("chunk-eta");
+  const countEl = document.getElementById("chunk-count");
+  const apiStatsEl = document.getElementById("chunk-api-stats");
+  const avgTimeEl = document.getElementById("chunk-avg-time");
+
+  const progress = chunkProgress.progress || 0;
+  if (progressBar) progressBar.style.width = progress + "%";
+
+  if (countEl) {
+    countEl.textContent = `已处理: ${chunkProgress.processedChunks}/${chunkProgress.totalChunks} 块`;
+  }
+
+  if (apiStatsEl) {
+    apiStatsEl.textContent = `API调用: ${chunkProgress.apiCalls}次 | 缓存命中: ${chunkProgress.cacheHits}次`;
+  }
+
+  if (avgTimeEl) {
+    avgTimeEl.textContent = `平均耗时: ${chunkProgress.avgChunkTimeMs}ms/块`;
+  }
+
+  if (etaEl) {
+    const remainingSecs = chunkProgress.estimatedRemainingSecs || 0;
+    if (remainingSecs > 0) {
+      etaEl.textContent = `预计剩余: ${formatEta(remainingSecs)}`;
+    } else if (progress < 100) {
+      etaEl.textContent = "计算中...";
+    } else {
+      etaEl.textContent = "处理完成";
+    }
+  }
+}
+
+function formatEta(seconds) {
+  if (seconds < 60) {
+    return `${seconds}秒`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const remainingSecs = seconds % 60;
+  if (minutes < 60) {
+    return remainingSecs > 0 ? `${minutes}分${remainingSecs}秒` : `${minutes}分钟`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const remainingMins = minutes % 60;
+  return `${hours}小时${remainingMins}分钟`;
 }
 
 function updateProcessingLogs(logs) {

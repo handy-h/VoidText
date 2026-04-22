@@ -16,15 +16,21 @@ import (
 	"txt-cleaning/internal/processor/preprocess"
 )
 
+// 默认分块大小常量
+const (
+	DefaultMinChunkSize = 1200
+	DefaultMaxChunkSize = 1500
+)
+
 // ModelRepairer 模型修复器（重构版）
 // 集成智能分块、缓存幂等性和动态提示词管理
 type ModelRepairer struct {
 	RepairModelType string
 	RepairModelName string
-	promptManager   *PromptManager      // 动态提示词管理器
+	promptManager   *PromptManager           // 动态提示词管理器
 	cacheRepo       *database.ChunkCacheRepo // 块缓存仓库
-	workerPool      *WorkerPool         // 工作池（用于并发处理）
-	monitor         *EvolverMonitor     // 自进化监控器（可选）
+	workerPool      *WorkerPool              // 工作池（用于并发处理）
+	monitor         *EvolverMonitor          // 自进化监控器（可选）
 }
 
 // ModelRepairResult 模型修复结果
@@ -93,8 +99,8 @@ func (mr *ModelRepairer) RepairTextWithFileMd5(fileMd5, content string) ModelRep
 		return result
 	}
 
-	// 智能分块：将零散段落合并为1500-2000字符的Chunk
-	chunks := mr.SplitIntoChunks(content, 1500, 2000)
+	// 智能分块：将零散段落合并为800-1000字符的Chunk
+	chunks := mr.SplitIntoChunks(content, DefaultMinChunkSize, DefaultMaxChunkSize)
 	if len(chunks) == 0 {
 		return result
 	}
@@ -121,11 +127,11 @@ func (mr *ModelRepairer) RepairTextWithFileMd5(fileMd5, content string) ModelRep
 	return result
 }
 
-// SplitIntoChunks 智能分块：将文本分割为1500-2000字符的Chunk
+// SplitIntoChunks 智能分块：将文本分割为minChars-maxChars字符的Chunk
 // 算法：
 // 1. 按换行符分割为原始段落
-// 2. 合并小段落直到达到minChars（1500）
-// 3. 当合并后超过maxChars（2000）时，将最后一个段落放入下一个Chunk
+// 2. 合并小段落直到达到minChars
+// 3. 当合并后超过maxChars时，将最后一个段落放入下一个Chunk
 // 4. 保持段落完整性，不拆分单个段落
 func (mr *ModelRepairer) SplitIntoChunks(content string, minChars, maxChars int) []ChunkInfo {
 	// 按换行符分割原始段落
@@ -202,9 +208,9 @@ func (mr *ModelRepairer) SplitIntoChunks(content string, minChars, maxChars int)
 	// 记录分块统计
 	logging.Info("chunking_completed", map[string]interface{}{
 		"total_paragraphs": len(paragraphs),
-		"total_chunks":    len(chunks),
-		"min_chars":       minChars,
-		"max_chars":       maxChars,
+		"total_chunks":     len(chunks),
+		"min_chars":        minChars,
+		"max_chars":        maxChars,
 	})
 
 	return chunks
@@ -256,20 +262,26 @@ func (mr *ModelRepairer) repairWithAPI(paragraph, chunkHash string) (string, []p
 
 	api := external.NewAPI()
 
-	// 构建用户提示词
-	userPrompt := "输入：她高兴及了，跑过去抱住他。\n输出：她高兴极了，跑过去抱住他。\n\n当前任务：\n输入：" + paragraph + "\n输出："
+	// 构建用户提示词（优化格式，避免特殊字符）
+	cleanedParagraph := mr.cleanTextForAPI(paragraph)
+	userPrompt := "输入：她高兴及了，跑过去抱住他。\n输出：她高兴极了，跑过去抱住他。\n\n当前任务：\n输入：" + cleanedParagraph + "\n输出："
 
 	startTime := time.Now()
 	resp, err := api.GenerateChatCompletion(prompt, userPrompt, 0, -1)
 	duration := time.Since(startTime).Milliseconds()
 
 	if err != nil || resp == nil || len(resp.Choices) == 0 {
+		// 检查是否是400错误，如果是，尝试简化请求
+		if strings.Contains(err.Error(), "400") {
+			return mr.retryWithSimplifiedRequest(paragraph, chunkHash, prompt, version)
+		}
+
 		logging.Error("api_repair_failed", map[string]interface{}{
-			"chunk_hash":      chunkHash,
-			"paragraph_len":   len(paragraph),
-			"duration_ms":     duration,
-			"error":           err.Error(),
-			"prompt_version":  version,
+			"chunk_hash":     chunkHash,
+			"paragraph_len":  len(paragraph),
+			"duration_ms":    duration,
+			"error":          err.Error(),
+			"prompt_version": version,
 		})
 
 		// 记录失败，添加到重试队列
@@ -290,7 +302,11 @@ func (mr *ModelRepairer) repairWithAPI(paragraph, chunkHash string) (string, []p
 		return mr.repairLocally(paragraph, chunkHash)
 	}
 
-	repairedText := strings.TrimSpace(resp.Choices[0].Message.Content)
+	// 提取修复后的文本
+	repairedText := resp.Choices[0].Message.Content
+
+	// 清理修复后的文本
+	repairedText = mr.cleanRepairedText(repairedText)
 
 	if repairedText == "" || repairedText == paragraph {
 		// 没有变化，记录空结果
@@ -301,12 +317,12 @@ func (mr *ModelRepairer) repairWithAPI(paragraph, chunkHash string) (string, []p
 
 	// 记录成功
 	logging.Info("api_repair_success", map[string]interface{}{
-		"chunk_hash":      chunkHash,
-		"paragraph_len":   len(paragraph),
-		"repaired_len":    len(repairedText),
-		"changes_count":   len(changes),
-		"duration_ms":     duration,
-		"prompt_version":  version,
+		"chunk_hash":     chunkHash,
+		"paragraph_len":  len(paragraph),
+		"repaired_len":   len(repairedText),
+		"changes_count":  len(changes),
+		"duration_ms":    duration,
+		"prompt_version": version,
 	})
 
 	// 记录提示词使用情况（成功）
@@ -316,6 +332,108 @@ func (mr *ModelRepairer) repairWithAPI(paragraph, chunkHash string) (string, []p
 	// 注意：缓存保存由workerPool在获取到fileMd5后处理
 
 	return repairedText, changes
+}
+
+// cleanTextForAPI 清理文本，避免API请求格式问题
+func (mr *ModelRepairer) cleanTextForAPI(text string) string {
+	// 移除控制字符
+	cleaned := strings.Map(func(r rune) rune {
+		if r >= 32 && r != 127 || r == '\n' || r == '\t' {
+			return r
+		}
+		return -1
+	}, text)
+
+	// 限制最大长度（避免API限制）
+	maxLength := 1500
+	if len(cleaned) > maxLength {
+		cleaned = cleaned[:maxLength] + "..."
+	}
+
+	return cleaned
+}
+
+// cleanRepairedText 清理API返回的文本
+func (mr *ModelRepairer) cleanRepairedText(text string) string {
+	// 移除可能的JSON转义字符
+	text = strings.ReplaceAll(text, "\\n", "\n")
+	text = strings.ReplaceAll(text, "\\t", "\t")
+	text = strings.ReplaceAll(text, "\\\"", "\"")
+
+	// 移除首尾空白
+	text = strings.TrimSpace(text)
+
+	return text
+}
+
+// retryWithSimplifiedRequest 使用简化请求重试400错误
+func (mr *ModelRepairer) retryWithSimplifiedRequest(paragraph, chunkHash, prompt, version string) (string, []preprocess.Change) {
+	logging.Warn("api_400_error_retry", map[string]interface{}{
+		"chunk_hash":    chunkHash,
+		"paragraph_len": len(paragraph),
+		"action":        "尝试简化请求",
+	})
+
+	// 简化段落内容
+	simplifiedParagraph := mr.simplifyText(paragraph)
+	if simplifiedParagraph == "" {
+		simplifiedParagraph = paragraph[:min(len(paragraph), 500)] // 截断过长的文本
+	}
+
+	// 简化提示词
+	simplifiedPrompt := "请修正以下文本中的错别字：" + simplifiedParagraph
+
+	api := external.NewAPI()
+	startTime := time.Now()
+	resp, err := api.GenerateChatCompletion(simplifiedPrompt, "", 0, -1)
+	duration := time.Since(startTime).Milliseconds()
+
+	if err != nil || resp == nil || len(resp.Choices) == 0 {
+		logging.Error("api_simplified_retry_failed", map[string]interface{}{
+			"chunk_hash":  chunkHash,
+			"duration_ms": duration,
+			"error":       err.Error(),
+		})
+		return mr.repairLocally(paragraph, chunkHash)
+	}
+
+	repairedText := mr.cleanRepairedText(resp.Choices[0].Message.Content)
+
+	if repairedText == "" || repairedText == paragraph {
+		return paragraph, []preprocess.Change{}
+	}
+
+	changes := mr.compareTexts(paragraph, repairedText)
+
+	logging.Info("api_simplified_retry_success", map[string]interface{}{
+		"chunk_hash":    chunkHash,
+		"changes_count": len(changes),
+		"duration_ms":   duration,
+	})
+
+	return repairedText, changes
+}
+
+// simplifyText 简化文本内容
+func (mr *ModelRepairer) simplifyText(text string) string {
+	// 移除特殊字符和过多空白
+	text = strings.TrimSpace(text)
+	text = strings.ReplaceAll(text, "\n\n", "\n")
+
+	// 限制长度
+	if len(text) > 800 {
+		text = text[:800] + "..."
+	}
+
+	return text
+}
+
+// min 返回两个整数中的较小值
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // repairLocally 本地修复（带缓存支持）
@@ -517,40 +635,41 @@ type ChunkInfo struct {
 
 // ChunkResult 块处理结果
 type ChunkResult struct {
-	ChunkID   int                  `json:"chunk_id"`
+	ChunkID    int                 `json:"chunk_id"`
 	Paragraphs []string            `json:"paragraphs"` // 修复后的段落列表
-	Changes   []preprocess.Change `json:"changes"`
-	CacheHit  bool                `json:"cache_hit"`
+	Changes    []preprocess.Change `json:"changes"`
+	CacheHit   bool                `json:"cache_hit"`
 }
 
 // WorkerPool 工作池（用于并发处理Chunk）
 type WorkerPool struct {
-	workerCount int
-	taskQueue   chan ChunkTask
-	results     chan ChunkResult
-	cacheRepo   *database.ChunkCacheRepo
+	workerCount   int
+	taskQueue     chan ChunkTask
+	results       chan ChunkResult
+	cacheRepo     *database.ChunkCacheRepo
 	promptManager *PromptManager
-	wg          sync.WaitGroup
-	mu          sync.RWMutex
-	cacheHits   int
-	cacheMisses int
+	progress      *ProcessingProgress
+	wg            sync.WaitGroup
+	mu            sync.RWMutex
+	cacheHits     int
+	cacheMisses   int
 }
 
 // ChunkTask 块任务
 type ChunkTask struct {
-	ChunkID   int
-	Content   string
-	FileMd5   string
+	ChunkID       int
+	Content       string
+	FileMd5       string
 	PromptVersion string
 }
 
 // NewWorkerPool 创建工作池
 func NewWorkerPool(workerCount int, cacheRepo *database.ChunkCacheRepo, promptManager *PromptManager) *WorkerPool {
 	wp := &WorkerPool{
-		workerCount: workerCount,
-		taskQueue:   make(chan ChunkTask, workerCount*10),
-		results:     make(chan ChunkResult, workerCount*10),
-		cacheRepo:   cacheRepo,
+		workerCount:   workerCount,
+		taskQueue:     make(chan ChunkTask, workerCount*10),
+		results:       make(chan ChunkResult, workerCount*10),
+		cacheRepo:     cacheRepo,
 		promptManager: promptManager,
 	}
 
@@ -560,6 +679,11 @@ func NewWorkerPool(workerCount int, cacheRepo *database.ChunkCacheRepo, promptMa
 	}
 
 	return wp
+}
+
+// SetProgress 设置进度追踪器
+func (wp *WorkerPool) SetProgress(progress *ProcessingProgress) {
+	wp.progress = progress
 }
 
 // worker 工作线程
@@ -581,10 +705,10 @@ func (wp *WorkerPool) processChunk(task ChunkTask, workerID int) ChunkResult {
 	cacheRecord, err := wp.cacheRepo.GetChunkRepair(task.FileMd5, chunkHash)
 	if err != nil {
 		logging.Error("worker_cache_query_failed", map[string]interface{}{
-			"worker_id":   workerID,
-			"chunk_id":    task.ChunkID,
-			"chunk_hash":  chunkHash,
-			"error":       err.Error(),
+			"worker_id":  workerID,
+			"chunk_id":   task.ChunkID,
+			"chunk_hash": chunkHash,
+			"error":      err.Error(),
 		})
 	} else if cacheRecord != nil {
 		// 缓存命中
@@ -592,11 +716,23 @@ func (wp *WorkerPool) processChunk(task ChunkTask, workerID int) ChunkResult {
 		wp.cacheHits++
 		wp.mu.Unlock()
 		logging.CacheHit(task.FileMd5, task.ChunkID, chunkHash)
+
+		// 记录进度（添加空指针检查）
+		var processingMs int64
+		if cacheRecord != nil {
+			processingMs = int64(cacheRecord.ProcessingTimeMs)
+		} else {
+			processingMs = 0
+		}
+		if wp.progress != nil {
+			wp.progress.RecordChunkComplete(true, processingMs)
+		}
+
 		return ChunkResult{
-			ChunkID:   task.ChunkID,
+			ChunkID:    task.ChunkID,
 			Paragraphs: strings.Split(cacheRecord.RepairedText, "\n"),
-			Changes:   []preprocess.Change{},
-			CacheHit:  true,
+			Changes:    []preprocess.Change{},
+			CacheHit:   true,
 		}
 	}
 
@@ -622,12 +758,17 @@ func (wp *WorkerPool) processChunk(task ChunkTask, workerID int) ChunkResult {
 		}
 		wp.cacheRepo.AddToRetryQueue(retryRecord)
 
+		// 记录进度
+		if wp.progress != nil {
+			wp.progress.RecordChunkComplete(false, duration)
+		}
+
 		// 返回原始内容
 		return ChunkResult{
-			ChunkID:   task.ChunkID,
+			ChunkID:    task.ChunkID,
 			Paragraphs: strings.Split(task.Content, "\n"),
-			Changes:   []preprocess.Change{},
-			CacheHit:  false,
+			Changes:    []preprocess.Change{},
+			CacheHit:   false,
 		}
 	}
 
@@ -647,10 +788,10 @@ func (wp *WorkerPool) processChunk(task ChunkTask, workerID int) ChunkResult {
 	}
 	if err := wp.cacheRepo.SaveChunkRepair(cacheRecordNew); err != nil {
 		logging.Error("worker_cache_save_failed", map[string]interface{}{
-			"worker_id":   workerID,
-			"chunk_id":    task.ChunkID,
-			"chunk_hash":  chunkHash,
-			"error":       err.Error(),
+			"worker_id":  workerID,
+			"chunk_id":   task.ChunkID,
+			"chunk_hash": chunkHash,
+			"error":      err.Error(),
 		})
 	}
 
@@ -660,14 +801,19 @@ func (wp *WorkerPool) processChunk(task ChunkTask, workerID int) ChunkResult {
 	wp.mu.Unlock()
 	logging.CacheMiss(task.FileMd5, task.ChunkID, chunkHash)
 
+	// 记录进度
+	if wp.progress != nil {
+		wp.progress.RecordChunkComplete(false, duration)
+	}
+
 	// 记录提示词使用成功
 	wp.promptManager.RecordUsage(true)
 
 	return ChunkResult{
-		ChunkID:   task.ChunkID,
+		ChunkID:    task.ChunkID,
 		Paragraphs: strings.Split(repairedText, "\n"),
-		Changes:   []preprocess.Change{}, // 这里应该调用compareTexts，但简化处理
-		CacheHit:  false,
+		Changes:    []preprocess.Change{}, // 这里应该调用compareTexts，但简化处理
+		CacheHit:   false,
 	}
 }
 
@@ -676,12 +822,17 @@ func (wp *WorkerPool) ProcessChunks(fileMd5 string, chunks []ChunkInfo) []ChunkR
 	totalTasks := len(chunks)
 	wp.wg.Add(totalTasks)
 
+	// 初始化进度追踪器
+	if wp.progress == nil {
+		wp.progress = GlobalProgressTracker.StartTracking(fileMd5, totalTasks)
+	}
+
 	// 提交任务到队列
 	for i, chunk := range chunks {
 		task := ChunkTask{
-			ChunkID:   i,
-			Content:   chunk.Content,
-			FileMd5:   fileMd5,
+			ChunkID:       i,
+			Content:       chunk.Content,
+			FileMd5:       fileMd5,
 			PromptVersion: "", // 由worker获取
 		}
 		wp.taskQueue <- task
@@ -698,11 +849,11 @@ func (wp *WorkerPool) ProcessChunks(fileMd5 string, chunks []ChunkInfo) []ChunkR
 
 	// 记录工作池统计
 	logging.Info("worker_pool_completed", map[string]interface{}{
-		"file_md5":      fileMd5,
-		"total_chunks":  totalTasks,
-		"cache_hits":    wp.GetCacheHits(),
-		"cache_misses":  wp.GetCacheMisses(),
-		"worker_count":  wp.workerCount,
+		"file_md5":     fileMd5,
+		"total_chunks": totalTasks,
+		"cache_hits":   wp.GetCacheHits(),
+		"cache_misses": wp.GetCacheMisses(),
+		"worker_count": wp.workerCount,
 	})
 
 	return results

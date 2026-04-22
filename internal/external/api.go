@@ -24,6 +24,62 @@ var (
 	globalHTTPClientOnce sync.Once
 )
 
+// APIRateLimiter API限流器
+type APIRateLimiter struct {
+	mu          sync.Mutex
+	lastRequest time.Time
+	minInterval time.Duration
+	tokenBucket int
+	maxTokens   int
+	refillRate  time.Duration
+}
+
+// NewAPIRateLimiter 创建API限流器
+func NewAPIRateLimiter(minInterval time.Duration, maxTokens int, refillRate time.Duration) *APIRateLimiter {
+	return &APIRateLimiter{
+		minInterval: minInterval,
+		tokenBucket: maxTokens,
+		maxTokens:   maxTokens,
+		refillRate:  refillRate,
+		lastRequest: time.Now().Add(-minInterval), // 允许立即发送第一个请求
+	}
+}
+
+// Acquire 获取API调用许可
+func (rl *APIRateLimiter) Acquire() {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	// 检查是否需要补充令牌
+	now := time.Now()
+	elapsed := now.Sub(rl.lastRequest)
+	if elapsed >= rl.refillRate && rl.tokenBucket < rl.maxTokens {
+		rl.tokenBucket++
+		rl.lastRequest = now
+	}
+
+	// 等待直到有可用令牌
+	for rl.tokenBucket <= 0 {
+		rl.mu.Unlock()
+		time.Sleep(rl.minInterval)
+		rl.mu.Lock()
+
+		// 重新检查时间并补充令牌
+		now = time.Now()
+		elapsed = now.Sub(rl.lastRequest)
+		if elapsed >= rl.refillRate && rl.tokenBucket < rl.maxTokens {
+			rl.tokenBucket++
+			rl.lastRequest = now
+		}
+	}
+
+	// 使用令牌
+	rl.tokenBucket--
+}
+
+// 全局API限流器
+var globalRateLimiter = NewAPIRateLimiter(500*time.Millisecond, 5, 2*time.Second)
+
 // getGlobalHTTPClient 获取全局HTTP客户端单例
 // 配置MaxIdleConnsPerHost=100提高并发性能，支持大量API调用
 func getGlobalHTTPClient() *http.Client {
@@ -33,15 +89,15 @@ func getGlobalHTTPClient() *http.Client {
 			// 每个主机的最大空闲连接数，设置为100以支持高并发
 			MaxIdleConnsPerHost: 100,
 			// 总的最大空闲连接数
-			MaxIdleConns:        200,
+			MaxIdleConns: 200,
 			// 最大打开连接数
-			MaxConnsPerHost:     200,
+			MaxConnsPerHost: 200,
 			// 连接空闲超时时间
-			IdleConnTimeout:     90 * time.Second,
+			IdleConnTimeout: 90 * time.Second,
 			// TLS握手超时
 			TLSHandshakeTimeout: 10 * time.Second,
 			// 期望保持连接
-			DisableKeepAlives:   false,
+			DisableKeepAlives: false,
 		}
 
 		globalHTTPClient = &http.Client{
@@ -298,123 +354,131 @@ func (api *API) doRequestWithRetry(req *http.Request) (*http.Response, error) {
 
 	config := api.retryConfig
 	if config == nil {
-		config = DefaultRetryConfig()
+		config = &RetryConfig{
+			MaxRetries: 3,
+			BackoffStrategy: &ExponentialBackoff{
+				BaseDelay: 1 * time.Second,
+				MaxDelay:  30 * time.Second,
+				Jitter:    true,
+			},
+		}
 	}
+
+	// 应用API限流控制
+	globalRateLimiter.Acquire()
 
 	for retry := 0; retry <= config.MaxRetries; retry++ {
-		// 记录请求开始时间
-		startTime := time.Now()
-
-		// 执行请求
-		resp, lastErr = api.client.Do(req)
-		duration := time.Since(startTime)
-
-		if lastErr == nil && resp != nil {
-			// 检查HTTP状态码
-			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-				// 成功响应
-				logging.Info("api_request_success", map[string]interface{}{
-					"url":      req.URL.String(),
-					"method":   req.Method,
-					"status":   resp.StatusCode,
-					"duration": duration.Milliseconds(),
-					"retry":    retry,
-				})
-				return resp, nil
-			}
-
-			// 检查是否可重试的状态码
-			isRetryable := false
-			for _, status := range config.RetryableStatus {
-				if resp.StatusCode == status {
-					isRetryable = true
-					break
-				}
-			}
-
-			// 读取错误响应（但不消耗响应体）
-			var errorMsg string
-			if resp.Body != nil {
-				bodyBytes, _ := io.ReadAll(resp.Body)
-				resp.Body.Close()
-				// 重新创建响应体，以便后续读取
-				resp.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-				
-				// 尝试解析错误信息
-				var apiErrResp APIErrorResponse
-				if json.Unmarshal(bodyBytes, &apiErrResp) == nil && apiErrResp.Error.Message != "" {
-					errorMsg = apiErrResp.Error.Message
-				} else {
-					errorMsg = string(bodyBytes)
-				}
-			}
-
-			// 记录错误
-			logging.Error("api_request_failed", map[string]interface{}{
-				"url":      req.URL.String(),
-				"method":   req.Method,
-				"status":   resp.StatusCode,
-				"duration": duration.Milliseconds(),
+		if retry > 0 {
+			// 计算退避延迟
+			delay := config.BackoffStrategy.Next(retry - 1)
+			logging.Info("api_retry_delay", map[string]interface{}{
 				"retry":    retry,
-				"error":    errorMsg,
+				"delay_ms": delay.Milliseconds(),
+				"url":      req.URL.String(),
 			})
-
-			if isRetryable && retry < config.MaxRetries {
-				// 计算退避时间
-				backoff := config.BackoffStrategy.Next(retry)
-				logging.Warn("api_retry_scheduled", map[string]interface{}{
-					"url":     req.URL.String(),
-					"retry":   retry + 1,
-					"max":     config.MaxRetries,
-					"backoff": backoff.Seconds(),
-					"status":  resp.StatusCode,
-				})
-
-				// 等待退避时间
-				time.Sleep(backoff)
-
-				// 关闭当前响应体
-				resp.Body.Close()
-				continue
-			}
-
-			// 不可重试或达到最大重试次数
-			lastErr = &APIError{
-				StatusCode: resp.StatusCode,
-				Message:    errorMsg,
-			}
-			return resp, lastErr
+			time.Sleep(delay)
 		}
 
-		// 网络错误或客户端错误
+		// 克隆请求以避免重试时修改原始请求
+		clonedReq := req.Clone(req.Context())
+
+		// 添加智能请求头优化
+		clonedReq.Header.Set("User-Agent", "TxtCleaning/1.0")
+		clonedReq.Header.Set("Content-Type", "application/json; charset=utf-8")
+		clonedReq.Header.Set("Accept", "application/json")
+
+		startTime := time.Now()
+		resp, lastErr = getGlobalHTTPClient().Do(clonedReq)
+		duration := time.Since(startTime).Milliseconds()
+
 		if lastErr != nil {
 			logging.Error("api_request_error", map[string]interface{}{
-				"url":      req.URL.String(),
-				"method":   req.Method,
-				"duration": duration.Milliseconds(),
 				"retry":    retry,
+				"duration": duration,
 				"error":    lastErr.Error(),
+				"url":      req.URL.String(),
 			})
+			continue
+		}
 
-			if IsRetryableError(lastErr) && retry < config.MaxRetries {
-				backoff := config.BackoffStrategy.Next(retry)
-				logging.Warn("api_retry_scheduled", map[string]interface{}{
-					"url":     req.URL.String(),
-					"retry":   retry + 1,
-					"max":     config.MaxRetries,
-					"backoff": backoff.Seconds(),
-					"error":   lastErr.Error(),
-				})
+		// 检查响应状态码
+		statusCode := resp.StatusCode
 
-				time.Sleep(backoff)
-				continue
-			}
+		// 记录请求详情
+		logging.Info("api_request_completed", map[string]interface{}{
+			"retry":    retry,
+			"duration": duration,
+			"status":   statusCode,
+			"url":      req.URL.String(),
+		})
 
+		// 成功响应
+		if statusCode >= 200 && statusCode < 300 {
+			return resp, nil
+		}
+
+		// 读取错误响应体
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		errorBody := string(bodyBytes)
+		if len(errorBody) > 500 {
+			errorBody = errorBody[:500] + "..."
+		}
+
+		// 根据状态码决定是否重试
+		shouldRetry := false
+
+		switch {
+		case statusCode == 429: // 限流
+			shouldRetry = true
+			logging.Warn("api_rate_limited", map[string]interface{}{
+				"retry":     retry,
+				"status":    statusCode,
+				"error":     errorBody,
+				"url":       req.URL.String(),
+			})
+			
+		case statusCode >= 500: // 服务器错误
+			shouldRetry = true
+			logging.Error("api_server_error", map[string]interface{}{
+				"retry":     retry,
+				"status":    statusCode,
+				"error":     errorBody,
+				"url":       req.URL.String(),
+			})
+			
+		case statusCode == 400: // 客户端错误（通常不重试）
+			logging.Error("api_client_error", map[string]interface{}{
+				"retry":     retry,
+				"status":    statusCode,
+				"error":     errorBody,
+				"url":       req.URL.String(),
+			})
+			lastErr = fmt.Errorf("API错误 (状态码: %d): %s", statusCode, errorBody)
+			
+		default: // 其他错误
+			logging.Error("api_other_error", map[string]interface{}{
+				"retry":     retry,
+				"status":    statusCode,
+				"error":     errorBody,
+				"url":       req.URL.String(),
+			})
+			lastErr = fmt.Errorf("API错误 (状态码: %d): %s", statusCode, errorBody)
+		}
+
+		// 如果不应该重试，立即返回错误
+		if !shouldRetry {
 			return nil, lastErr
+		}
+
+		// 如果是最后一次重试，返回错误
+		if retry == config.MaxRetries {
+			return nil, fmt.Errorf("API请求失败，重试%d次后仍然失败: %v", config.MaxRetries, lastErr)
 		}
 	}
 
-	return nil, fmt.Errorf("达到最大重试次数 (%d): %w", config.MaxRetries, lastErr)
+	return nil, lastErr
 }
 
 // doJSONRequestWithRetry 执行JSON请求并自动重试（高级封装）
@@ -476,11 +540,11 @@ func (api *API) GenerateEmbedding(texts []string) (*EmbeddingResponse, error) {
 			Message:    apiErrResp.Error.Message,
 		}
 		logging.Error("embedding_api_error", map[string]interface{}{
-			"url":        url,
-			"model":      api.embeddingModelName,
-			"status":     resp.StatusCode,
-			"duration":   time.Since(startTime).Milliseconds(),
-			"error":      apiErrResp.Error.Message,
+			"url":      url,
+			"model":    api.embeddingModelName,
+			"status":   resp.StatusCode,
+			"duration": time.Since(startTime).Milliseconds(),
+			"error":    apiErrResp.Error.Message,
 		})
 		return nil, err
 	}
@@ -568,9 +632,9 @@ func (api *API) GenerateCompletion(prompt string, maxTokens int, temperature flo
 	}
 
 	logging.Info("completion_api_success", map[string]interface{}{
-		"url":     url,
-		"model":   api.completionModelName,
-		"tokens":  completionResp.Usage.TotalTokens,
+		"url":    url,
+		"model":  api.completionModelName,
+		"tokens": completionResp.Usage.TotalTokens,
 	})
 
 	return &completionResp, nil
@@ -626,18 +690,18 @@ func (api *API) GenerateChatCompletion(systemPrompt, userPrompt string, maxToken
 			StatusCode: resp.StatusCode,
 			Message:    apiErrResp.Error.Message,
 		}
-		
+
 		// 记录API拒绝错误（用于Evolver分析）
 		if resp.StatusCode == 400 || resp.StatusCode == 429 {
 			logging.APIRefusal(0, "v1", userPrompt[:min(100, len(userPrompt))], apiErrResp.Error.Message)
 		}
-		
+
 		logging.Error("chat_completion_api_error", map[string]interface{}{
-			"url":       url,
-			"model":     api.completionModelName,
-			"status":    resp.StatusCode,
-			"duration":  time.Since(startTime).Milliseconds(),
-			"error":     apiErrResp.Error.Message,
+			"url":        url,
+			"model":      api.completionModelName,
+			"status":     resp.StatusCode,
+			"duration":   time.Since(startTime).Milliseconds(),
+			"error":      apiErrResp.Error.Message,
 			"error_type": "api_error",
 		})
 		return nil, err
@@ -655,12 +719,12 @@ func (api *API) GenerateChatCompletion(systemPrompt, userPrompt string, maxToken
 	}
 
 	logging.Info("chat_completion_api_success", map[string]interface{}{
-		"url":         url,
-		"model":       api.completionModelName,
-		"input_len":   len(userPrompt),
-		"output_len":  len(chatResp.Choices[0].Message.Content),
-		"tokens":      chatResp.Usage.TotalTokens,
-		"duration":    time.Since(startTime).Milliseconds(),
+		"url":        url,
+		"model":      api.completionModelName,
+		"input_len":  len(userPrompt),
+		"output_len": len(chatResp.Choices[0].Message.Content),
+		"tokens":     chatResp.Usage.TotalTokens,
+		"duration":   time.Since(startTime).Milliseconds(),
 	})
 
 	return &chatResp, nil

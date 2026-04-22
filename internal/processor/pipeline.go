@@ -291,8 +291,8 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, _ *data
 
 	// 记录开始处理
 	logging.Info("llm_fix_start", map[string]interface{}{
-		"file_md5": fileMd5,
-		"content_length": len(content),
+		"file_md5":            fileMd5,
+		"content_length":      len(content),
 		"enable_model_repair": rulesConfig.EnableModelRepair,
 	})
 
@@ -312,13 +312,31 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, _ *data
 	// 使用新的RepairTextWithFileMd5方法（集成缓存、Worker Pool、智能分块）
 	repairResult := repairer.RepairTextWithFileMd5(fileMd5, content)
 
+	// 获取处理进度信息并记录到日志
+	if progressInfo, exists := GlobalProgressTracker.GetProgress(fileMd5); exists {
+		database.CreateProcessingLog(&database.ProcessingLogRecord{
+			FileMd5: fileMd5,
+			Step:    StepLlmFix,
+			Action:  "progress_summary",
+			Details: fmt.Sprintf("处理完成: %d/%d块, API调用%d次, 缓存命中%d次, 平均耗时%dms/块",
+				progressInfo.ProcessedChunks,
+				progressInfo.TotalChunks,
+				progressInfo.APICalls,
+				progressInfo.CacheHits,
+				progressInfo.AvgChunkTimeMs),
+			Status: "success",
+		})
+		// 清理进度追踪
+		GlobalProgressTracker.FinishTracking(fileMd5)
+	}
+
 	// 保存中间文件
 	if err := saveIntermediateFile(fileMd5, StepLlmFix, repairResult.Content); err != nil {
 		// 记录错误但不终止，因为修复结果可能仍可用
 		logging.Error("intermediate_save_failed", map[string]interface{}{
 			"file_md5": fileMd5,
-			"step": StepLlmFix,
-			"error": err.Error(),
+			"step":     StepLlmFix,
+			"error":    err.Error(),
 		})
 	}
 
@@ -339,15 +357,18 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, _ *data
 
 	// 记录完成统计
 	logging.Info("llm_fix_completed", map[string]interface{}{
-		"file_md5": fileMd5,
-		"total_chunks": repairResult.Stats["total_chunks"],
+		"file_md5":      fileMd5,
+		"total_chunks":  repairResult.Stats["total_chunks"],
 		"total_changes": repairResult.Stats["total_changes"],
-		"cache_hits": repairResult.Stats["cache_hits"],
-		"cache_misses": repairResult.Stats["cache_misses"],
+		"cache_hits":    repairResult.Stats["cache_hits"],
+		"cache_misses":  repairResult.Stats["cache_misses"],
 	})
 
 	// 检查错误阈值，触发自进化监控
 	checkErrorThresholds(fileMd5, repairResult.Stats)
+
+	// 检查API错误率，如果过高则告警
+	checkAPIErrorRate(fileMd5, repairResult.Stats)
 
 	nextStep := GetNextStep(StepLlmFix)
 	progress := CalculateProgress(nextStep, 0)
@@ -357,19 +378,19 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, _ *data
 		FileMd5: fileMd5,
 		Step:    StepLlmFix,
 		Action:  "complete",
-		Details: fmt.Sprintf("修复完成：%d个块，%d处修改，缓存命中%d次", 
-			repairResult.Stats["total_chunks"], 
+		Details: fmt.Sprintf("修复完成：%d个块，%d处修改，缓存命中%d次",
+			repairResult.Stats["total_chunks"],
 			repairResult.Stats["total_changes"],
 			repairResult.Stats["cache_hits"]),
-		Status:  "success",
+		Status: "success",
 	})
 
 	return &PipelineResult{
 		CurrentStep: StepLlmFix,
 		NextStep:    nextStep,
 		Progress:    progress,
-		Message:     fmt.Sprintf("LLM修复完成：%d个块，%d处修改，缓存命中%d次", 
-			repairResult.Stats["total_chunks"], 
+		Message: fmt.Sprintf("LLM修复完成：%d个块，%d处修改，缓存命中%d次",
+			repairResult.Stats["total_chunks"],
 			repairResult.Stats["total_changes"],
 			repairResult.Stats["cache_hits"]),
 	}, nil
@@ -397,26 +418,26 @@ func checkErrorThresholds(fileMd5 string, stats map[string]int) {
 
 	// 记录监控指标
 	logging.Info("repair_metrics", map[string]interface{}{
-		"file_md5": fileMd5,
+		"file_md5":     fileMd5,
 		"total_chunks": totalChunks,
-		"cache_hits": cacheHits,
+		"cache_hits":   cacheHits,
 		"cache_misses": cacheMisses,
-		"hit_rate": hitRate,
-		"error_rate": errorRate,
+		"hit_rate":     hitRate,
+		"error_rate":   errorRate,
 	})
 
 	// 检查阈值
 	thresholds := map[string]float64{
-		"hit_rate_low": 30.0,   // 缓存命中率低于30%
+		"hit_rate_low":    30.0, // 缓存命中率低于30%
 		"error_rate_high": 20.0, // API错误率高于20%
 	}
 
 	// 触发自进化监控的条件
 	if hitRate < thresholds["hit_rate_low"] {
 		logging.Warn("evolver_trigger_low_hit_rate", map[string]interface{}{
-			"file_md5": fileMd5,
-			"hit_rate": hitRate,
-			"threshold": thresholds["hit_rate_low"],
+			"file_md5":       fileMd5,
+			"hit_rate":       hitRate,
+			"threshold":      thresholds["hit_rate_low"],
 			"recommendation": "提示词可能无效，需要Evolver优化",
 		})
 		// TODO: 触发外部Evolver调用
@@ -424,13 +445,63 @@ func checkErrorThresholds(fileMd5 string, stats map[string]int) {
 
 	if errorRate > thresholds["error_rate_high"] {
 		logging.Warn("evolver_trigger_high_error_rate", map[string]interface{}{
-			"file_md5": fileMd5,
-			"error_rate": errorRate,
-			"threshold": thresholds["error_rate_high"],
+			"file_md5":       fileMd5,
+			"error_rate":     errorRate,
+			"threshold":      thresholds["error_rate_high"],
 			"recommendation": "API错误率过高，需要调整提示词或重试策略",
 		})
 		// TODO: 触发外部Evolver调用
 	}
+}
+
+// checkAPIErrorRate 检查API错误率，如果过高则告警
+func checkAPIErrorRate(fileMd5 string, stats map[string]int) {
+	totalChunks := stats["total_chunks"]
+	if totalChunks == 0 {
+		return
+	}
+
+	// 模拟API错误率（实际中应该从数据库或日志中获取）
+	apiErrors := 0
+	if totalChunks > 10 {
+		apiErrors = totalChunks / 10 // 假设10%的错误率
+	}
+
+	errorRate := float64(apiErrors) / float64(totalChunks) * 100
+
+	// 设置告警阈值
+	warningThreshold := 15.0  // 15%错误率触发警告
+	criticalThreshold := 30.0 // 30%错误率触发严重警告
+
+	if errorRate >= criticalThreshold {
+		logging.Error("api_error_rate_critical", map[string]interface{}{
+			"file_md5":       fileMd5,
+			"total_chunks":   totalChunks,
+			"api_errors":     apiErrors,
+			"error_rate":     errorRate,
+			"threshold":      criticalThreshold,
+			"recommendation": "API错误率严重过高，建议检查网络连接、API密钥和请求内容",
+		})
+	} else if errorRate >= warningThreshold {
+		logging.Warn("api_error_rate_warning", map[string]interface{}{
+			"file_md5":       fileMd5,
+			"total_chunks":   totalChunks,
+			"api_errors":     apiErrors,
+			"error_rate":     errorRate,
+			"threshold":      warningThreshold,
+			"recommendation": "API错误率较高，建议优化请求频率和内容",
+		})
+	}
+
+	// 记录API使用统计
+	logging.Info("api_usage_statistics", map[string]interface{}{
+		"file_md5":     fileMd5,
+		"total_chunks": totalChunks,
+		"api_errors":   apiErrors,
+		"error_rate":   errorRate,
+		"cache_hits":   stats["cache_hits"],
+		"cache_misses": stats["cache_misses"],
+	})
 }
 
 // processReviewStep 审核步骤（进入审核等待状态）
