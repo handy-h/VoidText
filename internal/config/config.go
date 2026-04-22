@@ -40,6 +40,14 @@ type AppConfig struct {
 	CompletionTemperature float64
 	CompletionMaxTokens   int
 
+	// 本地模型配置（混合架构新增）
+	EnableLocalModel         bool
+	LocalModelURL            string
+	LocalModelName           string
+	LocalModelTimeout        int
+	LocalConfidenceThreshold float64
+	LocalFallbackEnabled     bool
+
 	NameSeparators string
 }
 
@@ -92,6 +100,15 @@ func Load() error {
 		CompletionModelName:       getEnvStr("COMPLETION_MODEL_NAME", "gpt-3.5-turbo-instruct"),
 		CompletionTemperature:     getEnvFloat("COMPLETION_TEMPERATURE", 0.3),
 		CompletionMaxTokens:       getEnvInt("COMPLETION_MAX_TOKENS", 2048),
+		
+		// 本地模型配置（混合架构新增）
+		EnableLocalModel:         getEnvBool("ENABLE_LOCAL_MODEL", false),
+		LocalModelURL:            getEnvStr("LOCAL_MODEL_URL", "http://localhost:11434"),
+		LocalModelName:           getEnvStr("LOCAL_MODEL_NAME", "qwen2.5:7b-instruct-q4_K_M"),
+		LocalModelTimeout:        getEnvInt("LOCAL_MODEL_TIMEOUT", 60),
+		LocalConfidenceThreshold: getEnvFloat("LOCAL_CONFIDENCE_THRESHOLD", 0.7),
+		LocalFallbackEnabled:     getEnvBool("LOCAL_FALLBACK_ENABLED", true),
+		
 		NameSeparators:            getEnvStr("NAME_SEPARATORS", "-|—|·|·|_| "),
 	}
 

@@ -36,17 +36,24 @@ func NewProcessingProgress(fileMd5 string, totalChunks int) *ProcessingProgress 
 	}
 }
 
-// RecordChunkComplete 记录一个chunk处理完成
-func (pp *ProcessingProgress) RecordChunkComplete(cacheHit bool, processingMs int64) {
+// RecordChunkComplete 记录一个chunk处理完成（混合架构版）
+func (pp *ProcessingProgress) RecordChunkComplete(success bool, processingMs int64, source string) {
 	pp.progressMu.Lock()
 	defer pp.progressMu.Unlock()
 
 	pp.ProcessedChunks++
-	if cacheHit {
+	
+	// 根据处理来源更新统计
+	switch source {
+	case "cache":
 		pp.CacheHits++
-	} else {
+	case "local":
+		// 本地模型处理，不计入API调用
+		// 可以添加本地模型统计字段
+	case "remote":
 		pp.APICalls++
 	}
+	
 	pp.TotalProcessingMs += processingMs
 	pp.ChunkTimes = append(pp.ChunkTimes, processingMs)
 	pp.LastChunkTime = time.Now()

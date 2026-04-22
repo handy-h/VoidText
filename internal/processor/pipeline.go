@@ -310,7 +310,20 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, _ *data
 		"LLM修复：智能分块与并发处理")
 
 	// 使用新的RepairTextWithFileMd5方法（集成缓存、Worker Pool、智能分块）
-	repairResult := repairer.RepairTextWithFileMd5(fileMd5, content)
+	// 检查是否需要恢复处理
+	resume := false
+	stateManager := GetStateManager()
+	if state, exists := stateManager.GetProcessingState(fileMd5); exists && state.Status == "processing" {
+		resume = true
+		logging.Info("llm_fix_resume_detected", map[string]interface{}{
+			"file_md5":       fileMd5,
+			"processed":      state.ProcessedChunks,
+			"total":          state.TotalChunks,
+			"progress":       state.Progress,
+		})
+	}
+	
+	repairResult := repairer.RepairTextWithFileMd5(fileMd5, content, resume)
 
 	// 获取处理进度信息并记录到日志
 	if progressInfo, exists := GlobalProgressTracker.GetProgress(fileMd5); exists {

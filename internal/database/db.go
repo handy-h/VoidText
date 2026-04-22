@@ -10,6 +10,11 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// Table names (exported for use in migrations and tests)
+const (
+	TableChunkRepairCache = "chunk_repair_cache"
+)
+
 var db *sql.DB
 
 // Init 初始化数据库连接和表结构
@@ -138,7 +143,7 @@ func createTables() error {
 			status TEXT,
 			timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
-		// 新增：块级修复缓存表，支持断点续传和幂等性
+		// 新增：块级修复缓存表，支持断点续传和幂等性（混合架构版）
 		`CREATE TABLE IF NOT EXISTS chunk_repair_cache (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			file_md5 TEXT NOT NULL,
@@ -150,6 +155,8 @@ func createTables() error {
 			api_model TEXT,
 			token_usage INTEGER,
 			processing_time_ms INTEGER,
+			confidence REAL DEFAULT 1.0, -- 处理结果置信度
+			source TEXT DEFAULT 'remote', -- 处理来源：local/remote/cache
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			UNIQUE(file_md5, chunk_hash)
 		)`,
@@ -194,8 +201,8 @@ func createTables() error {
 		`CREATE INDEX IF NOT EXISTS idx_review_items_status ON review_items(file_md5, status)`,
 		`CREATE INDEX IF NOT EXISTS idx_processing_logs_file_md5 ON processing_logs(file_md5)`,
 		// 新增索引
-		`CREATE INDEX IF NOT EXISTS idx_chunk_repair_cache_file_md5 ON chunk_repair_cache(file_md5)`,
-		`CREATE INDEX IF NOT EXISTS idx_chunk_repair_cache_chunk_hash ON chunk_repair_cache(chunk_hash)`,
+		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_chunk_repair_cache_file_md5 ON %s(file_md5)`, TableChunkRepairCache),
+		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_chunk_repair_cache_chunk_hash ON %s(chunk_hash)`, TableChunkRepairCache),
 		`CREATE INDEX IF NOT EXISTS idx_retry_queue_status ON retry_queue(status)`,
 		`CREATE INDEX IF NOT EXISTS idx_retry_queue_next_retry ON retry_queue(next_retry_at) WHERE status = 'pending'`,
 		`CREATE INDEX IF NOT EXISTS idx_prompt_versions_name_version ON prompt_versions(prompt_name, prompt_version)`,

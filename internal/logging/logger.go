@@ -19,7 +19,7 @@ const (
 	LevelError LogLevel = "error"
 )
 
-// LogEvent 结构化日志事件
+// LogEvent 结构化日志事件（混合架构增强版）
 type LogEvent struct {
 	Time          string                 `json:"time"`
 	Level         LogLevel               `json:"level"`
@@ -32,6 +32,8 @@ type LogEvent struct {
 	ErrorType     string                 `json:"error_type,omitempty"`
 	Context       string                 `json:"context,omitempty"`
 	DurationMs    int64                  `json:"duration_ms,omitempty"`
+	Source        string                 `json:"source,omitempty"` // 处理来源：local/remote/cache
+	Confidence    float64                `json:"confidence,omitempty"` // 置信度
 	Extra         map[string]interface{} `json:"extra,omitempty"`
 	Caller        string                 `json:"caller,omitempty"`
 }
@@ -247,4 +249,97 @@ func RetryProcessed(fileMd5 string, chunkID int, success bool) {
 		"chunk_id": chunkID,
 		"success":  success,
 	})
+}
+
+// ProcessingSource 记录处理来源（混合架构新增）
+func ProcessingSource(fileMd5 string, chunkID int, source string, confidence float64, durationMs int64, cacheHit bool) {
+	extra := map[string]interface{}{
+		"file_md5":   fileMd5,
+		"chunk_id":   chunkID,
+		"source":     source,
+		"confidence": confidence,
+		"duration":   durationMs,
+		"cache_hit":  cacheHit,
+	}
+	
+	Log(LevelInfo, "processing_source", extra)
+}
+
+// LocalModelProcessed 记录本地模型处理结果
+func LocalModelProcessed(fileMd5 string, chunkID int, success bool, confidence float64, durationMs int64, errorMsg string) {
+	level := LevelInfo
+	if !success {
+		level = LevelError
+	}
+	
+	extra := map[string]interface{}{
+		"file_md5":   fileMd5,
+		"chunk_id":   chunkID,
+		"success":    success,
+		"confidence": confidence,
+		"duration":   durationMs,
+		"source":     "local",
+	}
+	
+	if errorMsg != "" {
+		extra["error"] = errorMsg
+	}
+	
+	Log(level, "local_model_processed", extra)
+}
+
+// RemoteAPIFallback 记录远程API降级处理
+func RemoteAPIFallback(fileMd5 string, chunkID int, success bool, durationMs int64, errorMsg string) {
+	level := LevelInfo
+	if !success {
+		level = LevelError
+	}
+	
+	extra := map[string]interface{}{
+		"file_md5": fileMd5,
+		"chunk_id": chunkID,
+		"success":  success,
+		"duration": durationMs,
+		"source":   "remote",
+	}
+	
+	if errorMsg != "" {
+		extra["error"] = errorMsg
+	}
+	
+	Log(level, "remote_api_fallback", extra)
+}
+
+// HealthCheckResult 记录健康检查结果
+func HealthCheckResult(service string, healthy bool, durationMs int64, errorMsg string) {
+	level := LevelInfo
+	if !healthy {
+		level = LevelWarn
+	}
+	
+	extra := map[string]interface{}{
+		"service":  service,
+		"healthy":  healthy,
+		"duration": durationMs,
+	}
+	
+	if errorMsg != "" {
+		extra["error"] = errorMsg
+	}
+	
+	Log(level, "health_check", extra)
+}
+
+// StateCheckpoint 记录状态检查点
+func StateCheckpoint(fileMd5 string, checkpointType string, data map[string]interface{}) {
+	extra := map[string]interface{}{
+		"file_md5":        fileMd5,
+		"checkpoint_type": checkpointType,
+	}
+	
+	for k, v := range data {
+		extra[k] = v
+	}
+	
+	Log(LevelInfo, "state_checkpoint", extra)
 }

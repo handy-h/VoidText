@@ -77,8 +77,62 @@ func (rl *APIRateLimiter) Acquire() {
 	rl.tokenBucket--
 }
 
-// 全局API限流器
-var globalRateLimiter = NewAPIRateLimiter(500*time.Millisecond, 5, 2*time.Second)
+// 全局API限流器 - 分离策略（线程安全初始化）
+var (
+	remoteRateLimiter     *APIRateLimiter
+	localRateLimiter      *APIRateLimiter
+	rateLimiterInitOnce   sync.Once
+)
+
+// RateLimiterConfig 限流器配置
+type RateLimiterConfig struct {
+	RemoteInterval time.Duration
+	RemoteBurst    int
+	RemoteTimeout  time.Duration
+	LocalInterval  time.Duration
+	LocalBurst     int
+	LocalTimeout   time.Duration
+}
+
+// DefaultRateLimiterConfig 默认限流器配置
+var DefaultRateLimiterConfig = RateLimiterConfig{
+	RemoteInterval: 200 * time.Millisecond, // 远程API间隔：200ms
+	RemoteBurst:    10,                     // 远程API突发：10个请求
+	RemoteTimeout:  3 * time.Second,        // 远程API超时：3秒
+	LocalInterval:  10 * time.Millisecond,  // 本地模型间隔：10ms
+	LocalBurst:     50,                     // 本地模型突发：50个请求
+	LocalTimeout:   1 * time.Second,        // 本地模型超时：1秒
+}
+
+// initRateLimiters 初始化限流器（线程安全）
+func initRateLimiters() {
+	rateLimiterInitOnce.Do(func() {
+		// 远程API限流器（严格限流，针对Coding Plan）
+		remoteRateLimiter = NewAPIRateLimiter(
+			DefaultRateLimiterConfig.RemoteInterval,
+			DefaultRateLimiterConfig.RemoteBurst,
+			DefaultRateLimiterConfig.RemoteTimeout,
+		)
+		// 本地模型限流器（宽松限流）
+		localRateLimiter = NewAPIRateLimiter(
+			DefaultRateLimiterConfig.LocalInterval,
+			DefaultRateLimiterConfig.LocalBurst,
+			DefaultRateLimiterConfig.LocalTimeout,
+		)
+	})
+}
+
+// getRemoteRateLimiter 获取远程API限流器
+func getRemoteRateLimiter() *APIRateLimiter {
+	initRateLimiters()
+	return remoteRateLimiter
+}
+
+// getLocalRateLimiter 获取本地模型限流器
+func getLocalRateLimiter() *APIRateLimiter {
+	initRateLimiters()
+	return localRateLimiter
+}
 
 // getGlobalHTTPClient 获取全局HTTP客户端单例
 // 配置MaxIdleConnsPerHost=100提高并发性能，支持大量API调用
@@ -239,6 +293,28 @@ type API struct {
 	completionMaxTokens   int
 	retryConfig           *RetryConfig
 	mu                    sync.RWMutex // 保护配置更新
+	isLocalModel          bool         // 是否为本地模型
+}
+
+// IsLocalModel 检查是否为本地模型
+func (api *API) IsLocalModel() bool {
+	api.mu.RLock()
+	defer api.mu.RUnlock()
+	return api.isLocalModel
+}
+
+// GetBaseURL 获取基础URL
+func (api *API) GetBaseURL() string {
+	api.mu.RLock()
+	defer api.mu.RUnlock()
+	return api.baseURL
+}
+
+// GetCompletionModelName 获取完成模型名称
+func (api *API) GetCompletionModelName() string {
+	api.mu.RLock()
+	defer api.mu.RUnlock()
+	return api.completionModelName
 }
 
 // NewAPI 创建新的API客户端
@@ -252,6 +328,22 @@ func NewAPI() *API {
 		completionTemperature: config.AppConfigInstance.CompletionTemperature,
 		completionMaxTokens:   config.AppConfigInstance.CompletionMaxTokens,
 		retryConfig:           DefaultRetryConfig(),
+		isLocalModel:          false, // 默认为远程API
+	}
+}
+
+// NewLocalAPI 创建本地模型API客户端
+func NewLocalAPI(baseURL string) *API {
+	return &API{
+		client:                getGlobalHTTPClient(),
+		baseURL:               baseURL,
+		apiKey:                "", // 本地模型不需要API Key
+		embeddingModelName:    "",
+		completionModelName:   "qwen2.5:7b-instruct-q4_K_M",
+		completionTemperature: 0.3,
+		completionMaxTokens:   2048,
+		retryConfig:           DefaultRetryConfig(),
+		isLocalModel:          true,
 	}
 }
 
@@ -364,8 +456,12 @@ func (api *API) doRequestWithRetry(req *http.Request) (*http.Response, error) {
 		}
 	}
 
-	// 应用API限流控制
-	globalRateLimiter.Acquire()
+	// 应用API限流控制（根据API类型选择限流器）
+	if api.isLocalModel {
+		getLocalRateLimiter().Acquire()
+	} else {
+		getRemoteRateLimiter().Acquire()
+	}
 
 	for retry := 0; retry <= config.MaxRetries; retry++ {
 		if retry > 0 {

@@ -6,7 +6,22 @@ import (
 	"time"
 )
 
-// ChunkRepairCacheRecord 块修复缓存记录
+// Table names
+const (
+	ChunkRepairCacheTable = "chunk_repair_cache"
+)
+
+// Time windows for statistics
+const (
+	StatsTimeWindow = "24 hours" // 24小时统计窗口
+)
+
+// Default retention days
+const (
+	DefaultCacheRetentionDays = 30 // 默认缓存保留30天
+)
+
+// ChunkRepairCacheRecord 块修复缓存记录（混合架构版）
 type ChunkRepairCacheRecord struct {
 	ID               int64     `json:"id"`
 	FileMd5          string    `json:"file_md5"`
@@ -18,6 +33,8 @@ type ChunkRepairCacheRecord struct {
 	APIModel         string    `json:"api_model"`
 	TokenUsage       int       `json:"token_usage"`
 	ProcessingTimeMs int       `json:"processing_time_ms"`
+	Confidence       float64   `json:"confidence"` // 处理结果置信度
+	Source           string    `json:"source"`     // 处理来源：local/remote/cache
 	CreatedAt        time.Time `json:"created_at"`
 }
 
@@ -73,9 +90,9 @@ func (r *ChunkCacheRepo) SaveChunkRepair(record *ChunkRepairCacheRecord) error {
 	}
 	defer tx.Rollback()
 
-	stmt := `INSERT OR REPLACE INTO chunk_repair_cache 
-		(file_md5, chunk_id, chunk_hash, original_text, repaired_text, prompt_version, api_model, token_usage, processing_time_ms)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	stmt := fmt.Sprintf(`INSERT OR REPLACE INTO %s 
+		(file_md5, chunk_id, chunk_hash, original_text, repaired_text, prompt_version, api_model, token_usage, processing_time_ms, confidence, source)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, ChunkRepairCacheTable)
 
 	_, err = tx.Exec(stmt,
 		record.FileMd5,
@@ -87,6 +104,8 @@ func (r *ChunkCacheRepo) SaveChunkRepair(record *ChunkRepairCacheRecord) error {
 		record.APIModel,
 		record.TokenUsage,
 		record.ProcessingTimeMs,
+		record.Confidence,
+		record.Source,
 	)
 	if err != nil {
 		return fmt.Errorf("插入块修复缓存失败: %w", err)
@@ -105,9 +124,9 @@ func (r *ChunkCacheRepo) SaveChunkRepair(record *ChunkRepairCacheRecord) error {
 // GetChunkRepair 根据块哈希获取缓存修复结果
 // 使用查询缓存提高性能，减少重复API调用
 func (r *ChunkCacheRepo) GetChunkRepair(fileMd5, chunkHash string) (*ChunkRepairCacheRecord, error) {
-	stmt := `SELECT id, file_md5, chunk_id, chunk_hash, original_text, repaired_text, 
-		prompt_version, api_model, token_usage, processing_time_ms, created_at
-		FROM chunk_repair_cache WHERE file_md5 = ? AND chunk_hash = ?`
+	stmt := fmt.Sprintf(`SELECT id, file_md5, chunk_id, chunk_hash, original_text, repaired_text, 
+		prompt_version, api_model, token_usage, processing_time_ms, confidence, source, created_at
+		FROM %s WHERE file_md5 = ? AND chunk_hash = ?`, ChunkRepairCacheTable)
 
 	row := r.db.QueryRow(stmt, fileMd5, chunkHash)
 
@@ -123,6 +142,8 @@ func (r *ChunkCacheRepo) GetChunkRepair(fileMd5, chunkHash string) (*ChunkRepair
 		&record.APIModel,
 		&record.TokenUsage,
 		&record.ProcessingTimeMs,
+		&record.Confidence,
+		&record.Source,
 		&record.CreatedAt,
 	)
 
@@ -139,7 +160,7 @@ func (r *ChunkCacheRepo) GetChunkRepair(fileMd5, chunkHash string) (*ChunkRepair
 // GetUnfinishedChunks 获取未完成的块（用于断点续传）
 // 通过比较已缓存块和总块数，识别需要继续处理的块
 func (r *ChunkCacheRepo) GetUnfinishedChunks(fileMd5 string, totalChunks int) ([]int, error) {
-	stmt := `SELECT chunk_id FROM chunk_repair_cache WHERE file_md5 = ? ORDER BY chunk_id`
+	stmt := fmt.Sprintf(`SELECT chunk_id FROM %s WHERE file_md5 = ? ORDER BY chunk_id`, ChunkRepairCacheTable)
 	rows, err := r.db.Query(stmt, fileMd5)
 	if err != nil {
 		return nil, fmt.Errorf("查询已缓存块失败: %w", err)
@@ -404,7 +425,7 @@ func (r *ChunkCacheRepo) DeleteOldCache(daysToKeep int) error {
 	defer tx.Rollback()
 
 	// 删除旧的块修复缓存
-	_, err = tx.Exec(`DELETE FROM chunk_repair_cache WHERE created_at < ?`, cutoffTime)
+	_, err = tx.Exec(fmt.Sprintf(`DELETE FROM %s WHERE created_at < ?`, ChunkRepairCacheTable), cutoffTime)
 	if err != nil {
 		return fmt.Errorf("删除旧块修复缓存失败: %w", err)
 	}
@@ -428,8 +449,8 @@ func (r *ChunkCacheRepo) DeleteOldCache(daysToKeep int) error {
 func (r *ChunkCacheRepo) GetCacheHitRate() (float64, error) {
 	// 查询最近24小时内的缓存命中次数
 	var hitCount int
-	row := r.db.QueryRow(`SELECT COUNT(*) FROM chunk_repair_cache 
-		WHERE created_at >= datetime('now', '-24 hours')`)
+	row := r.db.QueryRow(fmt.Sprintf(`SELECT COUNT(*) FROM %s 
+		WHERE created_at >= datetime('now', '-%s')`, ChunkRepairCacheTable, StatsTimeWindow))
 	if err := row.Scan(&hitCount); err != nil {
 		return 0.0, fmt.Errorf("查询缓存命中次数失败: %w", err)
 	}
@@ -437,8 +458,8 @@ func (r *ChunkCacheRepo) GetCacheHitRate() (float64, error) {
 	// 查询最近24小时内的总查询次数（估算）
 	// 这里我们使用缓存记录数 + 重试记录数作为总查询次数的近似值
 	var retryCount int
-	row = r.db.QueryRow(`SELECT COUNT(*) FROM retry_queue 
-		WHERE created_at >= datetime('now', '-24 hours')`)
+	row = r.db.QueryRow(fmt.Sprintf(`SELECT COUNT(*) FROM retry_queue 
+		WHERE created_at >= datetime('now', '-%s')`, StatsTimeWindow))
 	if err := row.Scan(&retryCount); err != nil {
 		return 0.0, fmt.Errorf("查询重试次数失败: %w", err)
 	}
@@ -457,8 +478,8 @@ func (r *ChunkCacheRepo) GetCacheHitRate() (float64, error) {
 func (r *ChunkCacheRepo) GetErrorRate() (float64, error) {
 	// 查询最近24小时内的错误次数（重试队列中的记录）
 	var errorCount int
-	row := r.db.QueryRow(`SELECT COUNT(*) FROM retry_queue 
-		WHERE created_at >= datetime('now', '-24 hours')`)
+	row := r.db.QueryRow(fmt.Sprintf(`SELECT COUNT(*) FROM retry_queue 
+		WHERE created_at >= datetime('now', '-%s')`, StatsTimeWindow))
 	if err := row.Scan(&errorCount); err != nil {
 		return 0.0, fmt.Errorf("查询错误次数失败: %w", err)
 	}
