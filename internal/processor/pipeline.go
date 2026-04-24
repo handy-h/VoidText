@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"txt-cleaning/internal/config"
-	"txt-cleaning/internal/database"
-	"txt-cleaning/internal/file"
-	"txt-cleaning/internal/logging"
-	"txt-cleaning/internal/processor/preprocess"
-	"txt-cleaning/internal/processor/rules"
+	"voidtext/internal/config"
+	"voidtext/internal/database"
+	"voidtext/internal/file"
+	"voidtext/internal/logging"
+	"voidtext/internal/processor/preprocess"
+	"voidtext/internal/processor/rules"
 )
 
 const (
@@ -111,10 +111,24 @@ func ProcessStep(fileMd5 string, step string) (*PipelineResult, error) {
 		return nil, fmt.Errorf("文件不存在: %s", fileMd5)
 	}
 
-	content, err := os.ReadFile(record.FilePath)
+	contentBytes, err := os.ReadFile(record.FilePath)
 	if err != nil {
 		return nil, fmt.Errorf("读取文件内容失败: %w", err)
 	}
+
+	// 预处理字节数组，自动检测编码并转换为UTF-8
+	preprocessResult, err := preprocess.PreprocessBytes(contentBytes)
+	if err != nil {
+		return nil, fmt.Errorf("预处理文件内容失败: %w", err)
+	}
+	
+	content := preprocessResult.Content
+	logging.Info("file_content_preprocessed", map[string]interface{}{
+		"file_md5":       fileMd5,
+		"original_bytes": len(contentBytes),
+		"processed_chars": len(content),
+		"encoding_changes": len(preprocessResult.Changes),
+	})
 
 	rulesConfig := ParseRulesConfig(record.RulesConfig)
 
@@ -664,8 +678,6 @@ func saveIntermediateFile(fileMd5, step, content string) error {
 
 // removeAdContent 根据正则模式移除广告内容
 func removeAdContent(content, _ string) string {
-	cleaner := NewBasicCleaner(false)
-	_ = cleaner
 	return content
 }
 

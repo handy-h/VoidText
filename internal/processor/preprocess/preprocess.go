@@ -1,11 +1,14 @@
 package preprocess
 
 import (
+	"bytes"
+	"fmt"
 	"io"
 	"regexp"
 	"strings"
 	"unicode/utf8"
 
+	"golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/simplifiedchinese"
 	"golang.org/x/text/transform"
 )
@@ -37,27 +40,132 @@ func Preprocess(content string) PreprocessResult {
 	// 1. 编码规范化
 	result = normalizeEncoding(result)
 
-	// 2. 广告内容识别与移除
-	result = removeAdvertisements(result)
+	// 2. 乱码清理（兜底处理）- 在特殊字符清理之前执行
+	result = cleanupGarbledText(result)
 
 	// 3. 特殊字符处理
 	result = cleanSpecialCharacters(result)
 
-	// 4. 空白字符规范化
+	// 4. 广告内容识别与移除
+	result = removeAdvertisements(result)
+
+	// 5. 空白字符规范化
 	result = normalizeWhitespace(result)
 
 	return result
 }
 
+// PreprocessBytes 预处理字节数组，自动检测编码
+func PreprocessBytes(data []byte) (PreprocessResult, error) {
+	// 检测编码并转换为UTF-8
+	content, err := detectAndConvertToUTF8(data)
+	if err != nil {
+		return PreprocessResult{}, err
+	}
+
+	// 使用现有的预处理逻辑
+	return Preprocess(content), nil
+}
+
+// detectAndConvertToUTF8 检测字节数组的编码并转换为UTF-8
+func detectAndConvertToUTF8(data []byte) (string, error) {
+	// 检查是否包含UTF-8替换字符序列
+	containsReplacement := bytes.Contains(data, []byte{0xEF, 0xBF, 0xBD})
+	
+	// 如果包含替换字符，可能文件原本是其他编码但被错误地保存为UTF-8
+	// 我们需要尝试从原始字节中恢复
+	if containsReplacement {
+		// 尝试常见的编码
+		encodings := []struct {
+			name string
+			enc  encoding.Encoding
+		}{
+			{"gbk", simplifiedchinese.GBK},
+			{"gb18030", simplifiedchinese.GB18030},
+		}
+
+		for _, enc := range encodings {
+			decoder := enc.enc.NewDecoder()
+			reader := transform.NewReader(bytes.NewReader(data), decoder)
+			decoded, err := io.ReadAll(reader)
+			if err == nil && utf8.Valid(decoded) {
+				str := string(decoded)
+				// 检查解码后是否还有替换字符
+				if !strings.Contains(str, "�") {
+					return str, nil
+				}
+			}
+		}
+		
+		// 如果解码后仍然包含替换字符，尝试修复混合编码
+		str := string(data)
+		return fixMixedEncoding(str), nil
+	}
+	
+	// 不包含替换字符，检查是否是有效的UTF-8
+	if utf8.Valid(data) {
+		return string(data), nil
+	}
+	
+	// 不是有效的UTF-8，尝试解码
+	encodings := []struct {
+		name string
+		enc  encoding.Encoding
+	}{
+		{"gbk", simplifiedchinese.GBK},
+		{"gb18030", simplifiedchinese.GB18030},
+	}
+
+	for _, enc := range encodings {
+		decoder := enc.enc.NewDecoder()
+		reader := transform.NewReader(bytes.NewReader(data), decoder)
+		decoded, err := io.ReadAll(reader)
+		if err == nil && utf8.Valid(decoded) {
+			str := string(decoded)
+			if !strings.Contains(str, "�") {
+				return str, nil
+			}
+		}
+	}
+
+	// 如果所有解码都失败，返回原始字符串
+	return string(data), nil
+}
+
 // normalizeEncoding 规范化编码
 func normalizeEncoding(result PreprocessResult) PreprocessResult {
+	// 检查是否包含替换字符
+	if strings.Contains(result.Content, "�") {
+		// 尝试修复包含替换字符的文本
+		fixed := fixMixedEncoding(result.Content)
+		if fixed != result.Content {
+			result.Changes = append(result.Changes, Change{
+				Type:        "encoding_fix",
+				Original:    result.Content,
+				Replacement: fixed,
+				Position:    0,
+			})
+			result.Content = fixed
+		}
+		return result
+	}
+
 	// 检查是否已经是有效的UTF-8
 	if utf8.ValidString(result.Content) {
 		return result
 	}
 
 	// 处理混合编码：逐行检测并转换
-	result.Content = fixMixedEncoding(result.Content)
+	fixed := fixMixedEncoding(result.Content)
+	if fixed != result.Content {
+		result.Changes = append(result.Changes, Change{
+			Type:        "encoding_fix",
+			Original:    result.Content,
+			Replacement: fixed,
+			Position:    0,
+		})
+		result.Content = fixed
+	}
 
 	return result
 }
@@ -246,4 +354,127 @@ func normalizeWhitespace(result PreprocessResult) PreprocessResult {
 	result.Content = strings.TrimSpace(result.Content)
 
 	return result
+}
+
+// cleanupGarbledText 清理无法修复的乱码（兜底处理）
+func cleanupGarbledText(result PreprocessResult) PreprocessResult {
+	// 定义乱码模式
+	// 1. 连续的替换字符（U+FFFD） - 包括单个和多个
+	replacementPattern := regexp.MustCompile(`�+`)
+	
+	// 2. 常见的乱码模式（如"锟斤拷"等）
+	commonGarbledPatterns := []string{
+		`(锟斤拷)+`,
+		`(烫烫烫)+`,
+		`(屯屯屯)+`,
+		`(����������������)+`,
+	}
+	
+	originalContent := result.Content
+	changes := result.Changes
+	
+	// 处理连续的替换字符（至少2个连续的替换字符才认为是乱码）
+	matches := replacementPattern.FindAllStringIndex(originalContent, -1)
+	for i := len(matches) - 1; i >= 0; i-- {
+		match := matches[i]
+		start, end := match[0], match[1]
+		garbledText := originalContent[start:end]
+		
+		// 只处理至少2个连续的替换字符
+		if utf8.RuneCountInString(garbledText) >= 2 {
+			// 计算乱码字符数
+			charCount := utf8.RuneCountInString(garbledText)
+			
+			// 创建替换文本
+			replacement := fmt.Sprintf("[因无法修复的乱码删除了%d个字符]", charCount)
+			
+			// 添加变更记录
+			changes = append(changes, Change{
+				Type:        "garbled_text_removal",
+				Original:    garbledText,
+				Replacement: replacement,
+				Position:    start,
+				Confidence:  1.0,
+			})
+			
+			// 替换乱码
+			originalContent = originalContent[:start] + replacement + originalContent[end:]
+		}
+	}
+	
+
+	
+	// 处理常见的乱码模式
+	for _, pattern := range commonGarbledPatterns {
+		regex := regexp.MustCompile(pattern)
+		matches := regex.FindAllStringIndex(originalContent, -1)
+		
+		for i := len(matches) - 1; i >= 0; i-- {
+			match := matches[i]
+			start, end := match[0], match[1]
+			garbledText := originalContent[start:end]
+			
+			charCount := utf8.RuneCountInString(garbledText)
+			replacement := fmt.Sprintf("[因无法修复的乱码删除了%d个字符]", charCount)
+			
+			changes = append(changes, Change{
+				Type:        "garbled_text_removal",
+				Original:    garbledText,
+				Replacement: replacement,
+				Position:    start,
+				Confidence:  1.0,
+			})
+			
+			originalContent = originalContent[:start] + replacement + originalContent[end:]
+		}
+	}
+	
+	result.Content = originalContent
+	result.Changes = changes
+	return result
+}
+
+// isLikelyGarbled 判断文本是否可能是乱码
+func isLikelyGarbled(text string) bool {
+	// 如果文本很短，可能不是乱码
+	if utf8.RuneCountInString(text) < 3 {
+		return false
+	}
+	
+	// 检查是否包含常见的乱码模式
+	commonGarbledPatterns := []string{
+		"锟斤拷", "烫烫烫", "屯屯屯", "����������������",
+	}
+	
+	for _, pattern := range commonGarbledPatterns {
+		if strings.Contains(text, pattern) {
+			return true
+		}
+	}
+	
+	// 检查是否包含大量替换字符
+	replacementCount := strings.Count(text, "�")
+	if replacementCount >= utf8.RuneCountInString(text)/2 {
+		// 如果超过一半的字符是替换字符，认为是乱码
+		return true
+	}
+	
+	// 检查是否包含大量不可打印字符
+	unprintableCount := 0
+	totalRunes := 0
+	for _, r := range text {
+		totalRunes++
+		if r < 32 && r != '\n' && r != '\r' && r != '\t' {
+			unprintableCount++
+		}
+	}
+	
+	if totalRunes == 0 {
+		return false
+	}
+	
+	unprintableRatio := float64(unprintableCount) / float64(totalRunes)
+	
+	// 如果不可打印字符比例高于50%，认为是乱码
+	return unprintableRatio > 0.5
 }
