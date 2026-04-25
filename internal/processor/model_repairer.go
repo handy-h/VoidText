@@ -9,11 +9,11 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"txt-cleaning/internal/config"
-	"txt-cleaning/internal/database"
-	"txt-cleaning/internal/external"
-	"txt-cleaning/internal/logging"
-	"txt-cleaning/internal/processor/preprocess"
+	"voidtext/internal/config"
+	"voidtext/internal/database"
+	"voidtext/internal/external"
+	"voidtext/internal/logging"
+	"voidtext/internal/processor/preprocess"
 )
 
 // 默认分块大小常量
@@ -24,14 +24,14 @@ const (
 
 // ModelRepairerConfig 模型修复器配置
 type ModelRepairerConfig struct {
-	RepairModelType       string
-	RepairModelName       string
-	EnableLocalModel      bool
+	RepairModelType          string
+	RepairModelName          string
+	EnableLocalModel         bool
 	LocalConfidenceThreshold float64
-	LocalModelURL         string
-	LocalModelName        string
-	LocalModelTimeout     int
-	LocalFallbackEnabled  bool
+	LocalModelURL            string
+	LocalModelName           string
+	LocalModelTimeout        int
+	LocalFallbackEnabled     bool
 }
 
 // ModelRepairer 模型修复器（混合架构版）
@@ -56,14 +56,14 @@ type ModelRepairResult struct {
 // NewModelRepairer 创建模型修复器（混合架构版）
 func NewModelRepairer(modelType, modelName string) *ModelRepairer {
 	cfg := ModelRepairerConfig{
-		RepairModelType:        modelType,
-		RepairModelName:        modelName,
-		EnableLocalModel:       config.AppConfigInstance.EnableLocalModel,
+		RepairModelType:          modelType,
+		RepairModelName:          modelName,
+		EnableLocalModel:         config.AppConfigInstance.EnableLocalModel,
 		LocalConfidenceThreshold: config.AppConfigInstance.LocalConfidenceThreshold,
-		LocalModelURL:          config.AppConfigInstance.LocalModelURL,
-		LocalModelName:         config.AppConfigInstance.LocalModelName,
-		LocalModelTimeout:      config.AppConfigInstance.LocalModelTimeout,
-		LocalFallbackEnabled:   config.AppConfigInstance.LocalFallbackEnabled,
+		LocalModelURL:            config.AppConfigInstance.LocalModelURL,
+		LocalModelName:           config.AppConfigInstance.LocalModelName,
+		LocalModelTimeout:        config.AppConfigInstance.LocalModelTimeout,
+		LocalFallbackEnabled:     config.AppConfigInstance.LocalFallbackEnabled,
 	}
 
 	// 初始化提示词管理器
@@ -81,7 +81,7 @@ func NewModelRepairer(modelType, modelName string) *ModelRepairer {
 	repo := database.NewChunkCacheRepo()
 
 	// 初始化工作池（默认10个worker）
-	workerPool := NewWorkerPool(10, repo, pm)
+	workerPool := NewWorkerPool(1, repo, pm)
 
 	// 创建自进化监控器（可选，可根据配置启用）
 	monitor := NewEvolverMonitor(pm)
@@ -101,9 +101,12 @@ func NewModelRepairer(modelType, modelName string) *ModelRepairer {
 			cfg.LocalModelName,
 			time.Duration(cfg.LocalModelTimeout)*time.Second,
 		)
-		log.Printf("[ModelRepairer] Ollama client initialized (URL: %s, Model: %s)", 
+		log.Printf("[ModelRepairer] 本地模型已启用 (URL: %s, Model: %s, Timeout: %ds)",
 			cfg.LocalModelURL,
-			cfg.LocalModelName)
+			cfg.LocalModelName,
+			cfg.LocalModelTimeout)
+	} else {
+		log.Printf("[ModelRepairer] 本地模型未启用，将使用远程API")
 	}
 
 	return &ModelRepairer{
@@ -155,10 +158,10 @@ func (mr *ModelRepairer) RepairTextWithFileMd5(fileMd5, content string, resume b
 
 	// 重新组合文本（保持原有换行结构）
 	result.Content = mr.reconstructText(content, repairedParagraphs)
-	
+
 	// 获取详细统计
 	localSuccess, localFailure, remoteFallback := mr.workerPool.GetLocalStats()
-	
+
 	result.Stats["total_chunks"] = len(chunks)
 	result.Stats["total_changes"] = len(result.Changes)
 	result.Stats["cache_hits"] = mr.workerPool.GetCacheHits()
@@ -205,6 +208,40 @@ func (mr *ModelRepairer) SplitIntoChunks(content string, minChars, maxChars int)
 			paragraphIndices = append(paragraphIndices, i)
 		}
 	}
+
+	// 如果没有段落（所有行都为空），返回空
+	if len(paragraphs) == 0 {
+		return []ChunkInfo{}
+	}
+
+	// 处理超长段落：如果段落长度超过maxChars，按字符数分割
+	processedParagraphs := []string{}
+	processedIndices := []int{}
+	for i, paragraph := range paragraphs {
+		paragraphLen := utf8.RuneCountInString(paragraph)
+		
+		if paragraphLen <= maxChars {
+			// 正常段落，直接添加
+			processedParagraphs = append(processedParagraphs, paragraph)
+			processedIndices = append(processedIndices, paragraphIndices[i])
+		} else {
+			// 超长段落，按maxChars分割
+			runes := []rune(paragraph)
+			for start := 0; start < len(runes); start += maxChars {
+				end := start + maxChars
+				if end > len(runes) {
+					end = len(runes)
+				}
+				chunkText := string(runes[start:end])
+				processedParagraphs = append(processedParagraphs, chunkText)
+				processedIndices = append(processedIndices, paragraphIndices[i])
+			}
+		}
+	}
+
+	// 使用处理后的段落进行分块
+	paragraphs = processedParagraphs
+	paragraphIndices = processedIndices
 
 	chunks := []ChunkInfo{}
 	currentChunk := strings.Builder{}
@@ -496,21 +533,9 @@ func min(a, b int) int {
 func (mr *ModelRepairer) repairLocally(paragraph, chunkHash string) (string, []preprocess.Change) {
 	changes := []preprocess.Change{}
 
-	// 常见错别字映射表
-	typoMap := map[string]string{
-		"图书管": "图书馆",
-		"及了":  "极了",
-		"在次":  "再次",
-		"哪么":  "那么",
-		"因该":  "应该",
-		"以经":  "已经",
-		"好象":  "好像",
-		"做车":  "坐车",
-	}
-
 	// 应用错别字修正
 	repaired := paragraph
-	for typo, correct := range typoMap {
+	for typo, correct := range CommonTypos {
 		if strings.Contains(repaired, typo) && typo != correct {
 			// 记录变更
 			position := strings.Index(repaired, typo)
@@ -699,25 +724,25 @@ type ChunkResult struct {
 
 // WorkerPool 工作池（混合架构版）
 type WorkerPool struct {
-	workerCount      int
-	taskQueue        chan ChunkTask
-	results          chan ChunkResult
-	cacheRepo        *database.ChunkCacheRepo
-	promptManager    *PromptManager
-	progress         *ProcessingProgress
-	stateManager     *StateManager
-	healthManager    *HealthCheckManager
-	ollamaClient     *external.OllamaClient
-	enableLocal      bool
-	localConfidence  float64
-	fallbackEnabled  bool
-	wg               sync.WaitGroup
-	mu               sync.RWMutex
-	cacheHits        int
-	cacheMisses      int
-	localSuccess     int
-	localFailure     int
-	remoteFallback   int
+	workerCount     int
+	taskQueue       chan ChunkTask
+	results         chan ChunkResult
+	cacheRepo       *database.ChunkCacheRepo
+	promptManager   *PromptManager
+	progress        *ProcessingProgress
+	stateManager    *StateManager
+	healthManager   *HealthCheckManager
+	ollamaClient    *external.OllamaClient
+	enableLocal     bool
+	localConfidence float64
+	fallbackEnabled bool
+	wg              sync.WaitGroup
+	mu              sync.RWMutex
+	cacheHits       int
+	cacheMisses     int
+	localSuccess    int
+	localFailure    int
+	remoteFallback  int
 }
 
 // ChunkTask 块任务
@@ -731,16 +756,16 @@ type ChunkTask struct {
 // NewWorkerPool 创建工作池（混合架构版）
 func NewWorkerPool(workerCount int, cacheRepo *database.ChunkCacheRepo, promptManager *PromptManager) *WorkerPool {
 	wp := &WorkerPool{
-		workerCount:      workerCount,
-		taskQueue:        make(chan ChunkTask, workerCount*10),
-		results:          make(chan ChunkResult, workerCount*10),
-		cacheRepo:        cacheRepo,
-		promptManager:    promptManager,
-		enableLocal:      config.AppConfigInstance.EnableLocalModel,
-		localConfidence:  config.AppConfigInstance.LocalConfidenceThreshold,
-		fallbackEnabled:  config.AppConfigInstance.LocalFallbackEnabled,
-		stateManager:     GetStateManager(),
-		healthManager:    GetHealthManager(),
+		workerCount:     workerCount,
+		taskQueue:       make(chan ChunkTask, workerCount*10),
+		results:         make(chan ChunkResult, workerCount*10),
+		cacheRepo:       cacheRepo,
+		promptManager:   promptManager,
+		enableLocal:     config.AppConfigInstance.EnableLocalModel,
+		localConfidence: config.AppConfigInstance.LocalConfidenceThreshold,
+		fallbackEnabled: config.AppConfigInstance.LocalFallbackEnabled,
+		stateManager:    GetStateManager(),
+		healthManager:   GetHealthManager(),
 	}
 
 	// 初始化Ollama客户端
@@ -750,7 +775,7 @@ func NewWorkerPool(workerCount int, cacheRepo *database.ChunkCacheRepo, promptMa
 			config.AppConfigInstance.LocalModelName,
 			time.Duration(config.AppConfigInstance.LocalModelTimeout)*time.Second,
 		)
-		
+
 		// 启动健康检查
 		if wp.healthManager != nil {
 			if err := wp.healthManager.Start(); err != nil {
@@ -785,7 +810,7 @@ func (wp *WorkerPool) worker() {
 func (wp *WorkerPool) processTask(task ChunkTask) {
 	// 调用processChunk处理
 	result := wp.processChunk(task)
-	
+
 	// 发送结果
 	wp.results <- result
 }
@@ -855,11 +880,18 @@ func (wp *WorkerPool) processChunk(task ChunkTask) ChunkResult {
 	if useLocal && wp.healthManager != nil {
 		useLocal = wp.healthManager.ShouldUseLocalModel()
 	}
-	
+
+	logging.Info("chunk_processing_strategy", map[string]interface{}{
+		"chunk_id":    task.ChunkID,
+		"enableLocal": wp.enableLocal,
+		"hasClient":   wp.ollamaClient != nil,
+		"useLocal":    useLocal,
+	})
+
 	if useLocal {
 		repairedText, confidence, errMsg = wp.processWithLocalModel(task.Content)
 		source = "local"
-		
+
 		if errMsg == "" && confidence >= wp.localConfidence {
 			// 本地模型成功且置信度达标
 			wp.mu.Lock()
@@ -871,7 +903,7 @@ func (wp *WorkerPool) processChunk(task ChunkTask) ChunkResult {
 			if wp.healthManager != nil {
 				shouldFallback = shouldFallback && wp.healthManager.ShouldFallbackToRemote()
 			}
-			
+
 			if shouldFallback {
 				repairedText, source, errMsg = wp.processWithRemoteAPI(task)
 				if errMsg == "" {
@@ -970,23 +1002,77 @@ func (wp *WorkerPool) processChunk(task ChunkTask) ChunkResult {
 	// 记录提示词使用成功
 	wp.promptManager.RecordUsage(true)
 
-		// 记录处理来源
+	// 记录处理来源
 	logging.ProcessingSource(task.FileMd5, task.ChunkID, source, confidence, duration, false)
+
+	// 比较原文和修复后的文本，生成变更列表
+	changes := wp.detectChanges(task.Content, repairedText)
 
 	return ChunkResult{
 		ChunkID:    task.ChunkID,
 		Paragraphs: strings.Split(repairedText, "\n"),
-		Changes:    []preprocess.Change{},
+		Changes:    changes,
 		CacheHit:   false,
 	}
+}
+
+// detectChanges 比较原文和修复后的文本，生成变更列表
+func (wp *WorkerPool) detectChanges(original, repaired string) []preprocess.Change {
+	if original == repaired {
+		return []preprocess.Change{}
+	}
+
+	changes := []preprocess.Change{}
+
+	// 按行分割
+	origLines := strings.Split(original, "\n")
+	repairLines := strings.Split(repaired, "\n")
+
+	// 逐行比较
+	maxLines := len(origLines)
+	if len(repairLines) > maxLines {
+		maxLines = len(repairLines)
+	}
+
+	position := 0
+	for i := 0; i < maxLines; i++ {
+		origLine := ""
+		if i < len(origLines) {
+			origLine = origLines[i]
+		}
+
+		repairLine := ""
+		if i < len(repairLines) {
+			repairLine = repairLines[i]
+		}
+
+		if origLine != repairLine {
+			// 检测到变更
+			change := preprocess.Change{
+				Type:        "llm_fix",
+				Original:    origLine,
+				Replacement: repairLine,
+				Position:    position,
+				Confidence:  0.8,
+			}
+			changes = append(changes, change)
+		}
+
+		// 更新位置（包含换行符）
+		if i < len(origLines) {
+			position += len(origLines[i]) + 1 // +1 for \n
+		}
+	}
+
+	return changes
 }
 
 // ProcessChunks 处理所有Chunk并返回结果（支持状态恢复）
 func (wp *WorkerPool) ProcessChunks(fileMd5 string, chunks []ChunkInfo, resume bool) []ChunkResult {
 	totalTasks := len(chunks)
-	
-	// 初始化状态管理器
-	if wp.stateManager != nil && !resume {
+
+	// 初始化状态管理器（恢复时也重新初始化，因为chunk数量可能变化）
+	if wp.stateManager != nil {
 		wp.stateManager.StartProcessing(fileMd5, totalTasks, "llm_fix")
 	}
 
@@ -1052,16 +1138,16 @@ func (wp *WorkerPool) ProcessChunks(fileMd5 string, chunks []ChunkInfo, resume b
 	// 记录工作池统计
 	localSuccess, localFailure, remoteFallback := wp.GetLocalStats()
 	logging.Info("worker_pool_completed", map[string]interface{}{
-		"file_md5":        fileMd5,
-		"total_chunks":    totalTasks,
+		"file_md5":         fileMd5,
+		"total_chunks":     totalTasks,
 		"processed_chunks": len(chunksToProcess),
-		"cache_hits":      wp.GetCacheHits(),
-		"cache_misses":    wp.GetCacheMisses(),
-		"local_success":   localSuccess,
-		"local_failure":   localFailure,
-		"remote_fallback": remoteFallback,
-		"worker_count":    wp.workerCount,
-		"resume_mode":     resume,
+		"cache_hits":       wp.GetCacheHits(),
+		"cache_misses":     wp.GetCacheMisses(),
+		"local_success":    localSuccess,
+		"local_failure":    localFailure,
+		"remote_fallback":  remoteFallback,
+		"worker_count":     wp.workerCount,
+		"resume_mode":      resume,
 	})
 
 	return results
@@ -1080,16 +1166,34 @@ func (wp *WorkerPool) processWithLocalModel(content string) (string, float64, st
 		return "", 0.0, "local model client not initialized"
 	}
 
+	logging.Info("local_model_processing_start", map[string]interface{}{
+		"content_len": len(content),
+		"model":       wp.ollamaClient.GetModelName(),
+	})
+
 	startTime := time.Now()
 	repairedText, err := wp.ollamaClient.CorrectText(content)
-	_ = time.Since(startTime).Milliseconds() // duration not used in this version
+	duration := time.Since(startTime).Milliseconds()
 
 	if err != nil {
+		logging.Error("local_model_processing_failed", map[string]interface{}{
+			"duration_ms": duration,
+			"error":       err.Error(),
+			"model":       wp.ollamaClient.GetModelName(),
+		})
 		return "", 0.0, err.Error()
 	}
 
 	// 计算置信度
 	confidence := wp.calculateConfidence(content, repairedText)
+
+	logging.Info("local_model_processing_success", map[string]interface{}{
+		"duration_ms":  duration,
+		"confidence":   confidence,
+		"model":        wp.ollamaClient.GetModelName(),
+		"content_len":  len(content),
+		"repaired_len": len(repairedText),
+	})
 
 	return repairedText, confidence, ""
 }
@@ -1100,100 +1204,114 @@ func (wp *WorkerPool) processWithRemoteAPI(task ChunkTask) (string, string, stri
 	prompt, _ := wp.promptManager.GetCurrentPrompt()
 	api := external.NewAPI()
 	resp, err := api.GenerateChatCompletion(prompt, task.Content, 0, -1)
-	_ = time.Since(startTime).Milliseconds() // duration not used in this version
+	_ = time.Since(startTime)
 
 	if err != nil || resp == nil || len(resp.Choices) == 0 {
 		return "", "remote", err.Error()
 	}
 
 	repairedText := strings.TrimSpace(resp.Choices[0].Message.Content)
-	
+
 	return repairedText, "remote", ""
 }
 
 // ConfidenceConfig 置信度计算配置
 type ConfidenceConfig struct {
-	SimilarityWeight    float64
+	SimilarityWeight     float64
 	ReasonablenessWeight float64
-	MinConfidence       float64
-	MaxConfidence       float64
+	MinConfidence        float64
+	MaxConfidence        float64
 }
 
 // DefaultConfidenceConfig 默认置信度配置
 var DefaultConfidenceConfig = ConfidenceConfig{
-	SimilarityWeight:    0.6,
-	ReasonablenessWeight: 0.4,
-	MinConfidence:       0.0,
-	MaxConfidence:       1.0,
+	SimilarityWeight:     0.7,
+	ReasonablenessWeight: 0.3,
+	MinConfidence:        0.0,
+	MaxConfidence:        1.0,
 }
 
 // calculateConfidence 计算本地模型处理结果的置信度
 func (wp *WorkerPool) calculateConfidence(original, repaired string) float64 {
 	if original == repaired {
-		return DefaultConfidenceConfig.MaxConfidence // 文本未修改，置信度最高
+		return DefaultConfidenceConfig.MaxConfidence
 	}
 
-	// 计算文本相似度（基于编辑距离）
-	similarity := wp.calculateSimilarity(original, repaired)
-	
-	// 检查修改是否合理
+	if len(original) == 0 || len(repaired) == 0 {
+		return 0.0
+	}
+
+	similarity := wp.calculateEditDistanceSimilarity(original, repaired)
 	reasonableness := wp.checkReasonableness(original, repaired)
-	
-	// 综合置信度
-	confidence := similarity*DefaultConfidenceConfig.SimilarityWeight + 
+
+	confidence := similarity*DefaultConfidenceConfig.SimilarityWeight +
 		reasonableness*DefaultConfidenceConfig.ReasonablenessWeight
-	
-	// 确保置信度在合理范围内
+
 	if confidence < DefaultConfidenceConfig.MinConfidence {
 		return DefaultConfidenceConfig.MinConfidence
 	}
 	if confidence > DefaultConfidenceConfig.MaxConfidence {
 		return DefaultConfidenceConfig.MaxConfidence
 	}
-	
+
 	return confidence
 }
 
-// calculateSimilarity 计算文本相似度
-func (wp *WorkerPool) calculateSimilarity(str1, str2 string) float64 {
-	// 简化实现：基于共同字符比例
+// calculateEditDistanceSimilarity 基于编辑距离计算相似度
+func (wp *WorkerPool) calculateEditDistanceSimilarity(str1, str2 string) float64 {
 	runes1 := []rune(str1)
 	runes2 := []rune(str2)
-	
-	if len(runes1) == 0 && len(runes2) == 0 {
+	maxLen := max(len(runes1), len(runes2))
+
+	if maxLen == 0 {
 		return 1.0
 	}
-	
-	// 计算最长公共子序列长度
-	lcsLen := wp.lcsLength(runes1, runes2)
-	maxLen := max(len(runes1), len(runes2))
-	
-	// 防止除零
-	if maxLen == 0 {
+
+	editDist := wp.levenshteinDistance(runes1, runes2)
+	similarity := 1.0 - float64(editDist)/float64(maxLen)
+
+	if similarity < 0.0 {
 		return 0.0
 	}
-	
-	return float64(lcsLen) / float64(maxLen)
+	return similarity
 }
 
-// lcsLength 计算最长公共子序列长度
-func (wp *WorkerPool) lcsLength(a, b []rune) int {
+// levenshteinDistance 计算 Levenshtein 编辑距离
+func (wp *WorkerPool) levenshteinDistance(a, b []rune) int {
 	m, n := len(a), len(b)
+
+	if m == 0 {
+		return n
+	}
+	if n == 0 {
+		return m
+	}
+
 	dp := make([][]int, m+1)
 	for i := range dp {
 		dp[i] = make([]int, n+1)
 	}
-	
+
+	for i := 0; i <= m; i++ {
+		dp[i][0] = i
+	}
+	for j := 0; j <= n; j++ {
+		dp[0][j] = j
+	}
+
 	for i := 1; i <= m; i++ {
 		for j := 1; j <= n; j++ {
+			cost := 1
 			if a[i-1] == b[j-1] {
-				dp[i][j] = dp[i-1][j-1] + 1
-			} else {
-				dp[i][j] = max(dp[i-1][j], dp[i][j-1])
+				cost = 0
 			}
+			dp[i][j] = min(
+				dp[i-1][j]+1,
+				min(dp[i][j-1]+1, dp[i-1][j-1]+cost),
+			)
 		}
 	}
-	
+
 	return dp[m][n]
 }
 
@@ -1211,52 +1329,39 @@ var CommonTypos = map[string]string{
 
 // checkReasonableness 检查修改的合理性
 func (wp *WorkerPool) checkReasonableness(original, repaired string) float64 {
-	// 简化实现：检查修改是否涉及常见错别字修正
-	commonTypos := CommonTypos
-	
-	score := 0.0
-	totalChecks := 0.0
-	
-	// 检查是否修正了常见错别字
-	for typo, correct := range commonTypos {
-		if strings.Contains(original, typo) && strings.Contains(repaired, correct) {
-			score += 1.0
-		}
-		totalChecks += 1.0
-	}
-	
-	// 检查文本长度变化是否合理
 	origLen := len([]rune(original))
 	repLen := len([]rune(repaired))
-	
-	// 防止除零
+
 	if origLen == 0 && repLen == 0 {
-		score += 1.0 // 两者都为空，认为是合理的
-	} else if origLen > 0 || repLen > 0 {
+		return 1.0
+	}
+
+	lengthRatio := 1.0
+	if origLen > 0 && repLen > 0 {
 		maxLen := max(origLen, repLen)
-		if maxLen > 0 {
-			minLen := min(origLen, repLen)
-			lengthRatio := float64(minLen) / float64(maxLen)
-			score += lengthRatio
+		minLen := min(origLen, repLen)
+		lengthRatio = float64(minLen) / float64(maxLen)
+	}
+
+	changeRatio := 0.0
+	if origLen > 0 {
+		editDist := wp.levenshteinDistance([]rune(original), []rune(repaired))
+		changeRatio = 1.0 - float64(editDist)/float64(origLen)
+		if changeRatio < 0.0 {
+			changeRatio = 0.0
 		}
 	}
-	totalChecks += 1.0
-	
-	if totalChecks == 0 {
-		return 0.5 // 默认值
+
+	reasonableness := (lengthRatio + changeRatio) / 2.0
+
+	if reasonableness < 0.0 {
+		return 0.0
 	}
-	
-	result := score / totalChecks
-	
-	// 确保结果在合理范围内
-	if result < 0 {
-		return 0
+	if reasonableness > 1.0 {
+		return 1.0
 	}
-	if result > 1 {
-		return 1
-	}
-	
-	return result
+
+	return reasonableness
 }
 
 // GetCacheMisses 获取缓存未命中数
@@ -1288,16 +1393,16 @@ func (wp *WorkerPool) GetHealthStatus() map[string]interface{} {
 			"error": "health manager not initialized",
 		}
 	}
-	
+
 	statuses := wp.healthManager.GetAllStatuses()
 	result := make(map[string]interface{})
-	
+
 	for service, status := range statuses {
 		lastCheck := ""
 		if !status.LastCheck.IsZero() {
 			lastCheck = status.LastCheck.Format(time.RFC3339)
 		}
-		
+
 		result[service] = map[string]interface{}{
 			"healthy":         status.Healthy,
 			"enabled":         status.Enabled,
@@ -1308,12 +1413,12 @@ func (wp *WorkerPool) GetHealthStatus() map[string]interface{} {
 			"avg_response_ms": status.AvgResponseMs,
 		}
 	}
-	
+
 	// 添加降级建议
 	if wp.healthManager != nil {
 		result["fallback_recommendation"] = wp.healthManager.GetFallbackRecommendation()
 	}
-	
+
 	return result
 }
 

@@ -5,9 +5,9 @@ import (
 	"sync"
 	"time"
 
-	"txt-cleaning/internal/config"
-	"txt-cleaning/internal/external"
-	"txt-cleaning/internal/logging"
+	"voidtext/internal/config"
+	"voidtext/internal/external"
+	"voidtext/internal/logging"
 )
 
 // HealthStatus 健康状态
@@ -109,6 +109,9 @@ func (hcm *HealthCheckManager) Stop() {
 
 // runHealthChecks 运行健康检查循环
 func (hcm *HealthCheckManager) runHealthChecks() {
+	// 立即执行一次健康检查，避免初始状态为不健康
+	hcm.performHealthChecks()
+	
 	ticker := time.NewTicker(hcm.checkInterval)
 	defer ticker.Stop()
 	
