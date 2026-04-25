@@ -4,9 +4,9 @@ import (
 	"log"
 	"math"
 	"strings"
-	"txt-cleaning/internal/config"
-	"txt-cleaning/internal/external"
-	"txt-cleaning/internal/processor/preprocess"
+	"voidtext/internal/config"
+	"voidtext/internal/external"
+	"voidtext/internal/processor/preprocess"
 )
 
 // VectorDetector 向量检测器

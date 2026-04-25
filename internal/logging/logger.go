@@ -51,7 +51,7 @@ var (
 
 func init() {
 	defaultLogger = &Logger{
-		serviceName: "txt-cleaning",
+		serviceName: "voidtext",
 		promptFile:  "config/prompt.txt",
 		enableJSON:  true,
 	}

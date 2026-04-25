@@ -4,7 +4,7 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 
-	"txt-cleaning/web/backend/handlers"
+	"voidtext/web/backend/handlers"
 )
 
 // NewServer 创建新的Web服务器

@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"txt-cleaning/internal/config"
-	"txt-cleaning/internal/database"
-	"txt-cleaning/internal/logging"
+	"voidtext/internal/config"
+	"voidtext/internal/database"
+	"voidtext/internal/logging"
 )
 
 // ProcessingStats 处理统计

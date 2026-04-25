@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"txt-cleaning/internal/config"
-	"txt-cleaning/internal/processor/preprocess"
+	"voidtext/internal/config"
+	"voidtext/internal/processor/preprocess"
 )
 
 // ReviewStatus 审核状态

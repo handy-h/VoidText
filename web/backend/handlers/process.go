@@ -8,8 +8,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"txt-cleaning/internal/database"
-	"txt-cleaning/internal/processor"
+	"voidtext/internal/database"
+	"voidtext/internal/processor"
 )
 
 // RunAllSteps 异步执行所有步骤直到审核或完成

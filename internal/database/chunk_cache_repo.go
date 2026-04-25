@@ -118,9 +118,6 @@ func (r *ChunkCacheRepo) SaveChunkRepair(record *ChunkRepairCacheRecord) error {
 	return nil
 }
 
-// GetCacheHitRate 获取缓存命中率（百分比）
-
-
 // GetChunkRepair 根据块哈希获取缓存修复结果
 // 使用查询缓存提高性能，减少重复API调用
 func (r *ChunkCacheRepo) GetChunkRepair(fileMd5, chunkHash string) (*ChunkRepairCacheRecord, error) {
@@ -222,9 +219,6 @@ func (r *ChunkCacheRepo) AddToRetryQueue(record *RetryQueueRecord) error {
 	return nil
 }
 
-// GetCacheHitRate 获取缓存命中率（百分比）
-
-
 // GetPendingRetries 获取待处理的重试任务
 // 只获取已到重试时间的任务，避免过早重试
 func (r *ChunkCacheRepo) GetPendingRetries(limit int) ([]RetryQueueRecord, error) {
@@ -292,9 +286,6 @@ func (r *ChunkCacheRepo) UpdateRetryStatus(id int64, status string, retryCount i
 	return nil
 }
 
-// GetCacheHitRate 获取缓存命中率（百分比）
-
-
 // SavePromptVersion 保存提示词版本
 // 用于Evolver自进化，记录不同版本的提示词效果
 func (r *ChunkCacheRepo) SavePromptVersion(record *PromptVersionRecord) error {
@@ -320,9 +311,6 @@ func (r *ChunkCacheRepo) SavePromptVersion(record *PromptVersionRecord) error {
 
 	return nil
 }
-
-// GetCacheHitRate 获取缓存命中率（百分比）
-
 
 // GetLatestPromptVersion 获取最新的提示词版本
 // 优先返回成功率高、使用次数多的版本

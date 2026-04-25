@@ -3,8 +3,8 @@ package processor
 import (
 	"testing"
 
-	"txt-cleaning/internal/config"
-	"txt-cleaning/internal/processor/preprocess"
+	"voidtext/internal/config"
+	"voidtext/internal/processor/preprocess"
 )
 
 func initPipelineTestConfig() {
@@ -18,7 +18,7 @@ func initPipelineTestConfig() {
 		VectorModelName:           "test-model",
 		RepairModelType:           "local",
 		RepairModelName:           "test-model",
-		DataDir:                   "/tmp/txtcleaning_test",
+		DataDir:                   "/tmp/voidtext_test",
 	}
 }
 

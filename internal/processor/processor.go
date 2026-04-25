@@ -4,10 +4,10 @@ import (
 	"sort"
 	"strings"
 
-	"txt-cleaning/internal/config"
-	"txt-cleaning/internal/processor/preprocess"
-	"txt-cleaning/internal/processor/rules"
-	"txt-cleaning/internal/review/manager"
+	"voidtext/internal/config"
+	"voidtext/internal/processor/preprocess"
+	"voidtext/internal/processor/rules"
+	"voidtext/internal/review/manager"
 )
 
 // ProcessResult 处理结果

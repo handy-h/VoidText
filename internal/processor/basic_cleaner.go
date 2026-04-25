@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode"
 
-	"txt-cleaning/internal/processor/preprocess"
+	"voidtext/internal/processor/preprocess"
 )
 
 // BasicCleanResult 基础清洗结果
@@ -129,11 +129,10 @@ func (bc *BasicCleaner) isInChineseContext(content string, position int) bool {
 	runes := []rune(content)
 	runePos := 0
 
-	for i, r := range runes {
+	for _, r := range runes {
 		if runePos >= position {
 			break
 		}
-		_ = i
 		runePos += len(string(r))
 	}
 

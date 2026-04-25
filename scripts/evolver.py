@@ -50,7 +50,7 @@ def write_error_to_memory(context_json, base_dir="."):
     gep_event = {
         "type": "error",
         "timestamp": datetime.now().isoformat(),
-        "source": "txt-cleaning",
+        "source": "voidtext",
         "data": {
             "prompt_version": context.get("prompt_version", "unknown"),
             "prompt_length": context.get("prompt_length", 0),

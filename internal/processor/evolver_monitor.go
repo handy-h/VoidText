@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"txt-cleaning/internal/config"
-	"txt-cleaning/internal/database"
-	"txt-cleaning/internal/logging"
+	"voidtext/internal/config"
+	"voidtext/internal/database"
+	"voidtext/internal/logging"
 )
 
 // EvolverMonitor 自进化监控器
@@ -91,11 +91,6 @@ func (em *EvolverMonitor) monitorLoop() {
 
 // checkAndTrigger 检查阈值并触发Evolver调用
 func (em *EvolverMonitor) checkAndTrigger() {
-	// 从数据库或日志中获取最近的错误统计（简化实现）
-	// 实际项目中应从数据库查询错误率、缓存命中率等指标
-	// 这里使用一个简单的启发式规则：如果最近有错误日志，则触发
-
-	// 检查是否达到最小调用间隔
 	em.mu.RLock()
 	lastCall := em.lastCallTime
 	em.mu.RUnlock()
@@ -212,7 +207,7 @@ func (em *EvolverMonitor) triggerEvolver() {
 	"hit_rate_error": "%v",
 	"error_rate_error": "%v",
 	"recommendation": "根据性能指标优化提示词",
-	"system": "txt-cleaning",
+	"system": "voidtext",
 	"environment": "production",
 	"component": "model_repairer"
 }`, version, len(prompt), time.Now().Format(time.RFC3339),

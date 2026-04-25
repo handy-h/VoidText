@@ -4,8 +4,8 @@ import (
 	"os"
 	"testing"
 
-	"txt-cleaning/internal/config"
-	"txt-cleaning/internal/processor/preprocess"
+	"voidtext/internal/config"
+	"voidtext/internal/processor/preprocess"
 )
 
 func initTestConfig(t *testing.T) {

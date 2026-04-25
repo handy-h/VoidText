@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# 树莓派启动脚本 - 后台运行 txtCleaning 服务
+# 树莓派启动脚本 - 后台运行 VoidText 服务
 # Usage: ./raspberrypi-start.sh [--log-dir <dir>] [--stop] [--status]
 
 # 默认配置
-APP_NAME="txtCleaning"
-APP_BINARY="./txtclean"
-LOG_DIR="/mnt/ssd/txtCleaning/log"
+APP_NAME="voidtext"
+APP_BINARY="./voidtext"
+LOG_DIR="/mnt/ssd/voidtext/log"
 PID_FILE="./pid.txt"
 
 # 解析参数
@@ -91,7 +91,7 @@ else
   # 检查二进制文件
   if [ ! -f "$APP_BINARY" ]; then
     echo "错误: 未找到二进制文件 '$APP_BINARY'"
-    echo "请先编译: go build -o txtclean ./cmd/txtclean/"
+    echo "请先编译: go build -o voidtext ./cmd/voidtext/"
     exit 1
   fi
 

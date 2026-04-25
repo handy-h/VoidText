@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	"txt-cleaning/internal/config"
-	"txt-cleaning/internal/database"
-	"txt-cleaning/web/backend"
+	"voidtext/internal/config"
+	"voidtext/internal/database"
+	"voidtext/web/backend"
 )
 
 func main() {

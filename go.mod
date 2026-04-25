@@ -1,4 +1,4 @@
-module txt-cleaning
+module voidtext
 
 go 1.25.0
 

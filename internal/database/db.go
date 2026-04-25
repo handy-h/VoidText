@@ -70,6 +70,10 @@ func Init(dataDir string) error {
 		return fmt.Errorf("创建表结构失败: %w", err)
 	}
 
+	if err := migrateTables(); err != nil {
+		return fmt.Errorf("迁移表结构失败: %w", err)
+	}
+
 	return nil
 }
 
@@ -226,4 +230,43 @@ func createTables() error {
 	}
 
 	return nil
+}
+
+// migrateTables 迁移表结构，为旧数据库添加缺失的列
+func migrateTables() error {
+	migrations := []string{
+		`ALTER TABLE chunk_repair_cache ADD COLUMN confidence REAL DEFAULT 1.0`,
+		`ALTER TABLE chunk_repair_cache ADD COLUMN source TEXT DEFAULT 'remote'`,
+	}
+
+	for _, stmt := range migrations {
+		if _, err := db.Exec(stmt); err != nil {
+			if !isColumnExistsError(err) {
+				return fmt.Errorf("执行迁移失败 [%s]: %w", stmt[:60], err)
+			}
+		}
+	}
+
+	return nil
+}
+
+// isColumnExistsError 判断是否是列已存在的错误
+func isColumnExistsError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return contains(errStr, "duplicate column") ||
+		contains(errStr, "column already exists") ||
+		contains(errStr, "SQL logic error")
+}
+
+// contains 检查字符串是否包含子串
+func contains(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }

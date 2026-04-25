@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"txt-cleaning/internal/database"
-	"txt-cleaning/internal/logging"
+	"voidtext/internal/database"
+	"voidtext/internal/logging"
 )
 
 // PromptManager 提示词管理器

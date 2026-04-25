@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"txt-cleaning/internal/logging"
+	"voidtext/internal/logging"
 )
 
 // OllamaClient Ollama客户端

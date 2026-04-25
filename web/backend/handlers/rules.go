@@ -5,8 +5,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"txt-cleaning/internal/processor"
-	"txt-cleaning/internal/processor/rules"
+	"voidtext/internal/processor"
+	"voidtext/internal/processor/rules"
 )
 
 // ListRules 列出所有自定义规则

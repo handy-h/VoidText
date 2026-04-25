@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"txt-cleaning/internal/config"
-	"txt-cleaning/internal/logging"
+	"voidtext/internal/config"
+	"voidtext/internal/logging"
 )
 
 // 全局HTTP客户端单例，配置连接池和超时设置

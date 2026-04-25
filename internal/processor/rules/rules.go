@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 
-	"txt-cleaning/internal/config"
+	"voidtext/internal/config"
 )
 
 // Rule 自定义规则

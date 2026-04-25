@@ -3,7 +3,7 @@ package processor
 import (
 	"testing"
 
-	"txt-cleaning/internal/config"
+	"voidtext/internal/config"
 )
 
 func initRepairerTestConfig() {

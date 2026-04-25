@@ -10,9 +10,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"txt-cleaning/internal/config"
-	"txt-cleaning/internal/database"
-	"txt-cleaning/internal/file"
+	"voidtext/internal/config"
+	"voidtext/internal/database"
+	"voidtext/internal/file"
 )
 
 // UploadFile 上传文件（支持MD5识别和智能行为）

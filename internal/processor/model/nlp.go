@@ -7,8 +7,8 @@ import (
 	"github.com/agnivade/levenshtein"
 	"github.com/jdkato/prose/v2"
 
-	"txt-cleaning/internal/external"
-	"txt-cleaning/internal/processor/preprocess"
+	"voidtext/internal/external"
+	"voidtext/internal/processor/preprocess"
 )
 
 // NLPResult NLP处理结果

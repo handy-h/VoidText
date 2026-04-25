@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"txt-cleaning/internal/config"
+	"voidtext/internal/config"
 )
 
 // Version 版本信息

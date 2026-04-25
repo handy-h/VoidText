@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"txt-cleaning/internal/config"
+	"voidtext/internal/config"
 )
 
 // ParsedFileName 解析后的文件名信息

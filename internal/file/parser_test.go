@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"txt-cleaning/internal/config"
+	"voidtext/internal/config"
 )
 
 func initTestConfig() {

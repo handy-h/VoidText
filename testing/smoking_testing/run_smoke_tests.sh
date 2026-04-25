@@ -61,7 +61,7 @@ check_service() {
     return 0
   else
     echo -e "${RED}错误: 服务不可用 ($SERVER_URL)${NC}"
-    echo "请确保服务已启动: go run ./cmd/txtclean/"
+    echo "请确保服务已启动: go run ./cmd/voidtext/"
     exit 1
   fi
 }
