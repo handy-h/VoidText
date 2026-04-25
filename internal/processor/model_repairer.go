@@ -808,6 +808,8 @@ func (wp *WorkerPool) worker() {
 
 // processTask 处理单个任务
 func (wp *WorkerPool) processTask(task ChunkTask) {
+	defer wp.wg.Done()
+
 	// 调用processChunk处理
 	result := wp.processChunk(task)
 

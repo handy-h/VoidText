@@ -83,15 +83,21 @@ func (hcm *HealthCheckManager) Start() error {
 	if hcm.running {
 		return fmt.Errorf("健康检查已在运行")
 	}
-	
+
 	hcm.running = true
-	go hcm.runHealthChecks()
-	
+
+	// 同步执行第一次健康检查，确保初始状态正确
+	// 避免goroutine调度延迟导致processChunk在健康检查完成前运行
+	hcm.performHealthChecks()
+
+	// 启动后台定期检查
+	go hcm.runHealthChecksLoop()
+
 	logging.Info("health_check_started", map[string]interface{}{
 		"interval_seconds": hcm.checkInterval.Seconds(),
 		"services":         len(hcm.statuses),
 	})
-	
+
 	return nil
 }
 
@@ -107,14 +113,19 @@ func (hcm *HealthCheckManager) Stop() {
 	logging.Info("health_check_stopped", nil)
 }
 
-// runHealthChecks 运行健康检查循环
+// runHealthChecks 运行健康检查循环（仅包含定期检查，初始检查由Start同步完成）
 func (hcm *HealthCheckManager) runHealthChecks() {
 	// 立即执行一次健康检查，避免初始状态为不健康
 	hcm.performHealthChecks()
-	
+
+	hcm.runHealthChecksLoop()
+}
+
+// runHealthChecksLoop 定期执行健康检查的循环
+func (hcm *HealthCheckManager) runHealthChecksLoop() {
 	ticker := time.NewTicker(hcm.checkInterval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ticker.C:

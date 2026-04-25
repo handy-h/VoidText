@@ -625,7 +625,8 @@ func CheckReviewComplete(fileMd5 string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return total > 0 && total == resolved, nil
+	// 没有审核项时视为审核完成，有审核项时需全部解决
+	return total == 0 || total == resolved, nil
 }
 
 // AdvanceFromReview 审核完成后推进到下一步

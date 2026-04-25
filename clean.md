@@ -5,7 +5,7 @@
 - 识别未被任何地方引用的资源文件（图片、字体、JSON、配置文件等）。
 - 识别未被引用的源代码文件（组件、工具类、路由页面、样式文件等）。
 - 识别临时文件、备份文件、自动生成但未纳入版本控制的文件（如 .DS_Store、.bak、*.log、dist 下的中间文件等）。
-- 注意：不要删除构建必需文件（如 package.json、webpack.config.js、.gitignore 等）。
+- 注意：不要删除构建必需文件（如 package.json、webpack.config.js、.gitignore 等）。不要删除说明文档（如md文件）。不要删除配置文件（如 .env）等。
 
 ## 检测冗余代码逻辑
 
@@ -29,10 +29,5 @@
 
 ---
 
-项目语言/框架：（请填写，如 TypeScript + React / Java Spring / Python FastAPI 等）
-
-项目根目录：（请填写路径）
-
-额外要求/排除规则：______（例如：不要删除 /legacy 目录，忽略 *.test.js 文件等）
 
 请现在开始分析。
