@@ -7,23 +7,50 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"voidtext/internal/config"
 	"voidtext/internal/database"
+	"voidtext/internal/logging"
+	"voidtext/internal/processor"
 	"voidtext/web/backend"
 )
 
 func main() {
+	// 初始化配置
 	if err := config.Load(); err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
+	// 初始化日志系统
+	logConfig := logging.Config{
+		Level:              logging.INFO,
+		EnableFileLog:      true,
+		LogFilePath:        filepath.Join(config.AppConfigInstance.DataDir, "logs", "voidtext.log"),
+		EnableStructuredLog: true,
+		MaxFileSize:        10 * 1024 * 1024, // 10MB
+		MaxBackupFiles:     5,
+	}
+	
+	if err := logging.Init(logConfig); err != nil {
+		log.Fatalf("Failed to init logging: %v", err)
+	}
+	defer logging.Close()
+	
+	logging.Info("应用程序启动", map[string]interface{}{
+		"version": "1.0.0",
+		"data_dir": config.AppConfigInstance.DataDir,
+	})
+
+	// 初始化数据库
 	if err := database.Init(config.AppConfigInstance.DataDir); err != nil {
-		log.Fatalf("Failed to init database: %v", err)
+		logging.Fatal("初始化数据库失败", err, nil)
 	}
 	defer database.Close()
+	
+	logging.Info("数据库初始化完成", nil)
 
 	// 初始化Web服务
 	server := backend.NewServer()
@@ -56,6 +83,11 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Fatalf("Server forced to shutdown: %v", err)
 	}
+
+	// 关闭工作池
+	log.Println("正在关闭工作池...")
+	pool := processor.GetWorkerPool()
+	pool.Shutdown()
 
 	log.Println("Server exited")
 }

@@ -157,14 +157,7 @@ func ProcessStep(fileMd5 string, step string) (*PipelineResult, error) {
 	}
 
 	if err != nil {
-		database.UpdateFileStatus(fileMd5, "failed", step, 0, err.Error())
-		database.CreateProcessingLog(&database.ProcessingLogRecord{
-			FileMd5: fileMd5,
-			Step:    step,
-			Action:  "error",
-			Details: err.Error(),
-			Status:  "failed",
-		})
+		FailProcessingStep(fileMd5, step, err)
 		return nil, err
 	}
 
@@ -174,8 +167,8 @@ func ProcessStep(fileMd5 string, step string) (*PipelineResult, error) {
 // processCleaningStep 基础清洗步骤
 func processCleaningStep(fileMd5, content string, rulesConfig RulesConfig, _ *database.FileRecord) (*PipelineResult, error) {
 	if !rulesConfig.EnableBasicCleaning {
+		SkipProcessingStep(fileMd5, StepCleaning, "基础清洗已禁用")
 		nextStep := GetNextStep(StepCleaning)
-		database.UpdateFileStatus(fileMd5, "processing", nextStep, CalculateProgress(nextStep, 0), "")
 		return &PipelineResult{
 			CurrentStep: StepCleaning,
 			NextStep:    nextStep,
@@ -208,14 +201,10 @@ func processCleaningStep(fileMd5, content string, rulesConfig RulesConfig, _ *da
 
 	nextStep := GetNextStep(StepCleaning)
 	progress := CalculateProgress(nextStep, 0)
-	database.UpdateFileStatus(fileMd5, "processing", nextStep, progress, "")
-
-	database.CreateProcessingLog(&database.ProcessingLogRecord{
-		FileMd5: fileMd5,
-		Step:    StepCleaning,
-		Action:  "complete",
-		Details: fmt.Sprintf("修改数: %d", len(cleanResult.Changes)),
-		Status:  "success",
+	
+	// 使用事务更新状态和记录日志
+	CompleteProcessingStep(fileMd5, StepCleaning, map[string]interface{}{
+		"changes_count": len(cleanResult.Changes),
 	})
 
 	return &PipelineResult{
@@ -229,8 +218,8 @@ func processCleaningStep(fileMd5, content string, rulesConfig RulesConfig, _ *da
 // processIndexingStep 向量索引与检测步骤
 func processIndexingStep(fileMd5, content string, rulesConfig RulesConfig, _ *database.FileRecord) (*PipelineResult, error) {
 	if !rulesConfig.EnableVectorDetection {
+		SkipProcessingStep(fileMd5, StepIndexing, "向量检测已禁用")
 		nextStep := GetNextStep(StepIndexing)
-		database.UpdateFileStatus(fileMd5, "processing", nextStep, CalculateProgress(nextStep, 0), "")
 		return &PipelineResult{
 			CurrentStep: StepIndexing,
 			NextStep:    nextStep,
@@ -266,14 +255,10 @@ func processIndexingStep(fileMd5, content string, rulesConfig RulesConfig, _ *da
 
 	nextStep := GetNextStep(StepIndexing)
 	progress := CalculateProgress(nextStep, 0)
-	database.UpdateFileStatus(fileMd5, "processing", nextStep, progress, "")
-
-	database.CreateProcessingLog(&database.ProcessingLogRecord{
-		FileMd5: fileMd5,
-		Step:    StepIndexing,
-		Action:  "complete",
-		Details: fmt.Sprintf("检测到重复: %d", len(detectResult.Changes)),
-		Status:  "success",
+	
+	// 使用事务更新状态和记录日志
+	CompleteProcessingStep(fileMd5, StepIndexing, map[string]interface{}{
+		"duplicates_detected": len(detectResult.Changes),
 	})
 
 	return &PipelineResult{
@@ -288,8 +273,8 @@ func processIndexingStep(fileMd5, content string, rulesConfig RulesConfig, _ *da
 // 集成智能分块、Worker Pool并发、缓存幂等性和断点续传
 func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, _ *database.FileRecord) (*PipelineResult, error) {
 	if !rulesConfig.EnableModelRepair {
+		SkipProcessingStep(fileMd5, StepLlmFix, "LLM修复已禁用")
 		nextStep := GetNextStep(StepLlmFix)
-		database.UpdateFileStatus(fileMd5, "processing", nextStep, CalculateProgress(nextStep, 0), "")
 		return &PipelineResult{
 			CurrentStep: StepLlmFix,
 			NextStep:    nextStep,
@@ -319,9 +304,7 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, _ *data
 	})
 
 	// 更新状态为处理中
-	database.UpdateFileStatus(fileMd5, "processing", StepLlmFix,
-		CalculateProgress(StepLlmFix, 0),
-		"LLM修复：智能分块与并发处理")
+	StartProcessingStep(fileMd5, StepLlmFix)
 
 	// 使用新的RepairTextWithFileMd5方法（集成缓存、Worker Pool、智能分块）
 	// 检查是否需要恢复处理
@@ -399,17 +382,12 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, _ *data
 
 	nextStep := GetNextStep(StepLlmFix)
 	progress := CalculateProgress(nextStep, 0)
-	database.UpdateFileStatus(fileMd5, "processing", nextStep, progress, "")
-
-	database.CreateProcessingLog(&database.ProcessingLogRecord{
-		FileMd5: fileMd5,
-		Step:    StepLlmFix,
-		Action:  "complete",
-		Details: fmt.Sprintf("修复完成：%d个块，%d处修改，缓存命中%d次",
-			repairResult.Stats["total_chunks"],
-			repairResult.Stats["total_changes"],
-			repairResult.Stats["cache_hits"]),
-		Status: "success",
+	
+	// 使用事务更新状态和记录日志
+	CompleteProcessingStep(fileMd5, StepLlmFix, map[string]interface{}{
+		"total_chunks":  repairResult.Stats["total_chunks"],
+		"total_changes": repairResult.Stats["total_changes"],
+		"cache_hits":    repairResult.Stats["cache_hits"],
 	})
 
 	return &PipelineResult{
@@ -540,7 +518,7 @@ func processReviewStep(fileMd5, _ string, _ *database.FileRecord) (*PipelineResu
 
 	if total == 0 {
 		nextStep := GetNextStep(StepReview)
-		database.UpdateFileStatus(fileMd5, "processing", nextStep, CalculateProgress(nextStep, 0), "")
+		SkipProcessingStep(fileMd5, StepReview, "无需审核")
 		return &PipelineResult{
 			CurrentStep: StepReview,
 			NextStep:    nextStep,
@@ -555,7 +533,7 @@ func processReviewStep(fileMd5, _ string, _ *database.FileRecord) (*PipelineResu
 	}
 
 	progress := CalculateProgress(StepReview, stepProgress)
-	database.UpdateFileStatus(fileMd5, "reviewing", StepReview, progress, "")
+	UpdateFileStatusWithStepProgress(fileMd5, "reviewing", StepReview, progress)
 
 	return &PipelineResult{
 		CurrentStep: StepReview,
@@ -601,14 +579,9 @@ func processFinalizingStep(fileMd5, content string, record *database.FileRecord)
 		Step:        StepFinalizing,
 	})
 
-	database.UpdateFileStatus(fileMd5, "completed", StepFinalizing, 100, "")
-
-	database.CreateProcessingLog(&database.ProcessingLogRecord{
-		FileMd5: fileMd5,
-		Step:    StepFinalizing,
-		Action:  "complete",
-		Details: fmt.Sprintf("最终文件: %s", finalFileName),
-		Status:  "success",
+	// 使用事务更新状态和记录日志
+	CompleteProcessingStep(fileMd5, StepFinalizing, map[string]interface{}{
+		"final_file": finalFileName,
 	})
 
 	return &PipelineResult{

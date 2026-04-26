@@ -47,28 +47,31 @@ func RunAllSteps(c *gin.Context) {
 		}
 	}
 
-	database.UpdateFileStatus(fileMd5, "processing", startStep, processor.CalculateProgress(startStep, 0), "")
+	// 使用事务更新状态
+	if err := processor.UpdateFileStatusWithStepProgress(fileMd5, "processing", startStep, processor.CalculateProgress(startStep, 0)); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "更新文件状态失败: " + err.Error(),
+		})
+		return
+	}
 
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				database.UpdateFileStatus(fileMd5, "failed", "", 0, fmt.Sprintf("处理异常: %v", r))
-			}
-		}()
-
-		for _, step := range stepsToRun {
-			_, err := processor.ProcessStep(fileMd5, step)
-			if err != nil {
-				database.UpdateFileStatus(fileMd5, "failed", step, 0, err.Error())
-				return
-			}
+	// 使用工作池提交处理任务
+	err = processor.SubmitFileProcessing(fileMd5, stepsToRun, func(processingErr error) {
+		if processingErr != nil {
+			processor.FailProcessingStep(fileMd5, startStep, processingErr)
 		}
+		// 注意：这里不更新状态为完成，因为ProcessStep内部会更新状态
+	})
 
-		_, err := processor.ProcessStep(fileMd5, processor.StepReview)
-		if err != nil {
-			database.UpdateFileStatus(fileMd5, "failed", processor.StepReview, 0, err.Error())
-		}
-	}()
+	if err != nil {
+		processor.FailProcessingStep(fileMd5, startStep, fmt.Errorf("提交处理任务失败: %v", err))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "提交处理任务失败: " + err.Error(),
+		})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -392,7 +395,7 @@ func updateReviewProgress(fileMd5 string) {
 	if total > 0 {
 		stepProgress := resolved * 100 / total
 		progress := processor.CalculateProgress(processor.StepReview, stepProgress)
-		database.UpdateFileStatus(fileMd5, "reviewing", processor.StepReview, progress, "")
+		processor.UpdateFileStatusWithStepProgress(fileMd5, "reviewing", processor.StepReview, progress)
 	}
 }
 

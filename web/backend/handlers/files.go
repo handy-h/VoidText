@@ -12,46 +12,92 @@ import (
 
 	"voidtext/internal/config"
 	"voidtext/internal/database"
+	"voidtext/internal/errors"
 	"voidtext/internal/file"
+	"voidtext/internal/logging"
 )
 
 // UploadFile 上传文件（支持MD5识别和智能行为）
 func UploadFile(c *gin.Context) {
 	f, err := c.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "获取文件失败: " + err.Error()})
+		logging.APIError("获取上传文件失败", err, map[string]interface{}{
+			"client_ip": c.ClientIP(),
+		})
+		c.JSON(http.StatusBadRequest, errors.NewErrorResponse(
+			errors.New(errors.ErrBadRequest, "获取文件失败"),
+		))
 		return
 	}
 
+	// 记录上传文件信息
+	logging.APIInfo("收到文件上传请求", map[string]interface{}{
+		"filename": f.Filename,
+		"size":     f.Size,
+		"client_ip": c.ClientIP(),
+	})
+
 	if f.Size > config.AppConfigInstance.MaxFileSize {
 		maxSizeStr := formatFileSize(config.AppConfigInstance.MaxFileSize)
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": fmt.Sprintf("文件大小超过限制 (最大 %s)", maxSizeStr)})
+		logging.APIWarn("文件大小超过限制", map[string]interface{}{
+			"filename": f.Filename,
+			"size":     f.Size,
+			"max_size": config.AppConfigInstance.MaxFileSize,
+		})
+		c.JSON(http.StatusBadRequest, errors.NewErrorResponse(
+			errors.NewWithDetails(errors.ErrBadRequest, "文件大小超过限制", 
+				fmt.Sprintf("文件大小: %d, 最大限制: %d", f.Size, config.AppConfigInstance.MaxFileSize)),
+		))
 		return
 	}
 
 	if strings.ToLower(filepath.Ext(f.Filename)) != ".txt" {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "只支持 .txt 文件，当前文件: " + f.Filename})
+		logging.APIWarn("不支持的文件类型", map[string]interface{}{
+			"filename": f.Filename,
+			"extension": filepath.Ext(f.Filename),
+		})
+		c.JSON(http.StatusBadRequest, errors.NewErrorResponse(
+			errors.NewWithDetails(errors.ErrBadRequest, "不支持的文件类型", 
+				fmt.Sprintf("只支持 .txt 文件，当前文件: %s", f.Filename)),
+		))
 		return
 	}
 
 	tempPath := filepath.Join(config.AppConfigInstance.DataDir, "temp", fmt.Sprintf("%d_%s", time.Now().UnixNano(), f.Filename))
 	err = c.SaveUploadedFile(f, tempPath)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "保存文件失败: " + err.Error()})
+		logging.APIError("保存上传文件失败", err, map[string]interface{}{
+			"filename": f.Filename,
+			"temp_path": tempPath,
+		})
+		c.JSON(http.StatusInternalServerError, errors.NewErrorResponse(
+			errors.Wrap(err, errors.ErrFileUploadFailed, "保存文件失败"),
+		))
 		return
 	}
 
 	fileMd5, err := file.ComputeFileMd5(tempPath)
 	if err != nil {
 		os.Remove(tempPath)
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "计算文件MD5失败: " + err.Error()})
+		logging.APIError("计算文件MD5失败", err, map[string]interface{}{
+			"filename": f.Filename,
+			"temp_path": tempPath,
+		})
+		c.JSON(http.StatusInternalServerError, errors.NewErrorResponse(
+			errors.Wrap(err, errors.ErrFileUploadFailed, "计算文件MD5失败"),
+		))
 		return
 	}
 
 	existingFile, err := database.GetFileByMd5(fileMd5)
 	if err != nil {
 		os.Remove(tempPath)
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "查询文件记录失败: " + err.Error()})
+		logging.DatabaseError("查询文件记录失败", err, map[string]interface{}{
+			"file_md5": fileMd5,
+		})
+		c.JSON(http.StatusInternalServerError, errors.NewErrorResponse(
+			errors.Wrap(err, errors.ErrDatabase, "查询文件记录失败"),
+		))
 		return
 	}
 
@@ -159,7 +205,13 @@ func createNewFileRecord(c *gin.Context, tempPath, fileMd5, fileName string, fil
 	finalPath := filepath.Join(config.AppConfigInstance.DataDir, "uploads", fileMd5+"_"+fileName)
 	if err := os.Rename(tempPath, finalPath); err != nil {
 		os.Remove(tempPath)
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "保存文件失败"})
+		logging.FileError("移动文件失败", err, map[string]interface{}{
+			"temp_path": tempPath,
+			"final_path": finalPath,
+		})
+		c.JSON(http.StatusInternalServerError, errors.NewErrorResponse(
+			errors.Wrap(err, errors.ErrFileUploadFailed, "保存文件失败"),
+		))
 		return
 	}
 
@@ -175,11 +227,6 @@ func createNewFileRecord(c *gin.Context, tempPath, fileMd5, fileName string, fil
 		Status:   "pending",
 	}
 
-	if err := database.CreateFile(record); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "创建文件记录失败"})
-		return
-	}
-
 	versionRecord := &database.VersionRecord{
 		OriginalMd5: fileMd5,
 		VersionMd5:  fileMd5,
@@ -187,7 +234,28 @@ func createNewFileRecord(c *gin.Context, tempPath, fileMd5, fileName string, fil
 		FilePath:    finalPath,
 		Step:        "upload",
 	}
-	database.CreateVersion(versionRecord)
+
+	// 使用事务创建文件记录和版本记录
+	if err := database.CreateFileWithVersion(record, versionRecord); err != nil {
+		// 如果数据库操作失败，删除已移动的文件
+		os.Remove(finalPath)
+		logging.DatabaseError("创建文件记录失败", err, map[string]interface{}{
+			"file_md5": fileMd5,
+			"filename": fileName,
+		})
+		c.JSON(http.StatusInternalServerError, errors.NewErrorResponse(
+			errors.Wrap(err, errors.ErrDatabase, "创建文件记录失败"),
+		))
+		return
+	}
+
+	logging.FileInfo("文件上传成功", map[string]interface{}{
+		"file_md5": fileMd5,
+		"filename": fileName,
+		"file_size": fileSize,
+		"author": parsed.Author,
+		"title": parsed.Title,
+	})
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -213,27 +281,57 @@ func ResumeFile(c *gin.Context) {
 
 	switch record.Status {
 	case "completed":
-		if err := database.UpdateFileStatus(md5, "pending", "", 0, ""); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "重置文件状态失败"})
+		// 使用事务重置文件状态并删除审核项
+		err = database.WithTransactionSimple(func(tx database.Transaction) error {
+			// 重置文件状态
+			_, err := tx.Exec("UPDATE files SET status = ?, current_step = ?, progress = ?, error_msg = ?, updated_at = ? WHERE md5 = ?",
+				"pending", "", 0, "", time.Now().Format(time.RFC3339), md5)
+			if err != nil {
+				return fmt.Errorf("重置文件状态失败: %w", err)
+			}
+			
+			// 删除审核项
+			_, err = tx.Exec("DELETE FROM review_items WHERE file_md5 = ?", md5)
+			if err != nil {
+				return fmt.Errorf("清除审核记录失败: %w", err)
+			}
+			
+			return nil
+		})
+		
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": err.Error()})
 			return
 		}
-		if err := database.DeleteReviewItemsByFileMd5(md5); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "清除审核记录失败"})
-			return
-		}
+		
 		record.Status = "pending"
 		record.CurrentStep = ""
 		record.Progress = 0
 	case "failed":
-		if err := database.UpdateFileStatus(md5, "pending", record.CurrentStep, record.Progress, ""); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "重置文件状态失败"})
+		// 使用事务重置文件状态
+		err = database.WithTransactionSimple(func(tx database.Transaction) error {
+			_, err := tx.Exec("UPDATE files SET status = ?, error_msg = ?, updated_at = ? WHERE md5 = ?",
+				"pending", "", time.Now().Format(time.RFC3339), md5)
+			return err
+		})
+		
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "重置文件状态失败: " + err.Error()})
 			return
 		}
+		
 		record.Status = "pending"
 		record.ErrorMsg = ""
 	case "processing":
-		if err := database.UpdateFileStatus(md5, "pending", record.CurrentStep, record.Progress, ""); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "重置文件状态失败"})
+		// 使用事务重置文件状态
+		err = database.WithTransactionSimple(func(tx database.Transaction) error {
+			_, err := tx.Exec("UPDATE files SET status = ?, updated_at = ? WHERE md5 = ?",
+				"pending", time.Now().Format(time.RFC3339), md5)
+			return err
+		})
+		
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "重置文件状态失败: " + err.Error()})
 			return
 		}
 		record.Status = "pending"
@@ -340,12 +438,11 @@ func DeleteFile(c *gin.Context) {
 
 	keepFile := c.Query("keepFile") == "true"
 
-	if err := database.DeleteFile(md5); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "删除记录失败"})
+	// 使用事务删除所有相关数据
+	if err := database.DeleteFileWithRelatedData(md5); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "删除记录失败: " + err.Error()})
 		return
 	}
-
-	database.DeleteReviewItemsByFileMd5(md5)
 
 	if !keepFile {
 		os.Remove(record.FilePath)

@@ -68,6 +68,9 @@ txtclean
 # Backup files
 *.bak
 *.backup
+*-backup.js
+*-new.js
+*-modular.js
 
 # Configuration files (local)
 configs/local.yaml

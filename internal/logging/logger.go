@@ -1,345 +1,387 @@
 package logging
 
 import (
-	"encoding/json"
-	"fmt"
-	"os"
-	"runtime"
-	"strings"
-	"time"
+  "fmt"
+  "log"
+  "os"
+  "path/filepath"
+  "runtime"
+  "strings"
+  "time"
 )
 
 // LogLevel 日志级别
-type LogLevel string
+type LogLevel int
 
 const (
-	LevelDebug LogLevel = "debug"
-	LevelInfo  LogLevel = "info"
-	LevelWarn  LogLevel = "warn"
-	LevelError LogLevel = "error"
+  DEBUG LogLevel = iota
+  INFO
+  WARN
+  ERROR
+  FATAL
 )
-
-// LogEvent 结构化日志事件（混合架构增强版）
-type LogEvent struct {
-	Time          string                 `json:"time"`
-	Level         LogLevel               `json:"level"`
-	Event         string                 `json:"event"`
-	FileMd5       string                 `json:"file_md5,omitempty"`
-	ChunkID       int                    `json:"chunk_id,omitempty"`
-	PromptVersion string                 `json:"prompt_version,omitempty"`
-	InputPreview  string                 `json:"input_preview,omitempty"`
-	RawError      string                 `json:"raw_error,omitempty"`
-	ErrorType     string                 `json:"error_type,omitempty"`
-	Context       string                 `json:"context,omitempty"`
-	DurationMs    int64                  `json:"duration_ms,omitempty"`
-	Source        string                 `json:"source,omitempty"` // 处理来源：local/remote/cache
-	Confidence    float64                `json:"confidence,omitempty"` // 置信度
-	Extra         map[string]interface{} `json:"extra,omitempty"`
-	Caller        string                 `json:"caller,omitempty"`
-}
-
-// Logger 结构化日志记录器
-type Logger struct {
-	serviceName string
-	promptFile  string
-	enableJSON  bool
-}
 
 var (
-	defaultLogger *Logger
+  // 默认日志级别
+  currentLevel = INFO
+  
+  // 日志文件
+  logFile *os.File
+  
+  // 是否启用文件日志
+  enableFileLog = false
+  
+  // 是否启用结构化日志
+  enableStructuredLog = false
 )
 
-func init() {
-	defaultLogger = &Logger{
-		serviceName: "voidtext",
-		promptFile:  "config/prompt.txt",
-		enableJSON:  true,
-	}
+// Config 日志配置
+type Config struct {
+  Level            LogLevel
+  EnableFileLog   bool
+  LogFilePath     string
+  EnableStructuredLog bool
+  MaxFileSize     int64 // 最大文件大小（字节）
+  MaxBackupFiles  int   // 最大备份文件数
 }
 
-// SetPromptFile 设置提示词文件路径
-func SetPromptFile(path string) {
-	defaultLogger.promptFile = path
+// Init 初始化日志系统
+func Init(config Config) error {
+  currentLevel = config.Level
+  enableStructuredLog = config.EnableStructuredLog
+  
+  if config.EnableFileLog && config.LogFilePath != "" {
+    // 创建日志目录
+    logDir := filepath.Dir(config.LogFilePath)
+    if err := os.MkdirAll(logDir, 0755); err != nil {
+      return fmt.Errorf("创建日志目录失败: %w", err)
+    }
+    
+    // 打开日志文件
+    file, err := os.OpenFile(config.LogFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+    if err != nil {
+      return fmt.Errorf("打开日志文件失败: %w", err)
+    }
+    
+    logFile = file
+    enableFileLog = true
+    
+    // 设置日志输出到文件和控制台
+    log.SetOutput(file)
+    log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
+  }
+  
+  return nil
 }
 
-// SetEnableJSON 设置是否启用JSON格式
-func SetEnableJSON(enable bool) {
-	defaultLogger.enableJSON = enable
+// Close 关闭日志系统
+func Close() error {
+  if logFile != nil {
+    return logFile.Close()
+  }
+  return nil
 }
 
-// Log 记录结构化日志
-func Log(level LogLevel, event string, fields ...map[string]interface{}) {
-	defaultLogger.Log(level, event, fields...)
+// SetLevel 设置日志级别
+func SetLevel(level LogLevel) {
+  currentLevel = level
 }
 
-// Log 实例方法记录日志
-func (l *Logger) Log(level LogLevel, event string, fields ...map[string]interface{}) {
-	eventObj := LogEvent{
-		Time:  time.Now().UTC().Format(time.RFC3339Nano),
-		Level: level,
-		Event: event,
-	}
-
-	// 合并额外字段
-	if len(fields) > 0 {
-		eventObj.Extra = fields[0]
-	}
-
-	// 获取调用者信息（跳过logging包自身的调用栈）
-	if _, file, line, ok := runtime.Caller(2); ok {
-		// 简化文件路径
-		parts := strings.Split(file, "/")
-		if len(parts) > 2 {
-			file = strings.Join(parts[len(parts)-2:], "/")
-		}
-		eventObj.Caller = fmt.Sprintf("%s:%d", file, line)
-	}
-
-	// 输出JSON格式日志
-	if l.enableJSON {
-		jsonBytes, err := json.Marshal(eventObj)
-		if err != nil {
-			// 回退到简单格式
-			fmt.Fprintf(os.Stderr, `{"time":"%s","level":"error","event":"log_marshal_failed","raw_error":"%s"}`+"\n",
-				time.Now().UTC().Format(time.RFC3339Nano), err.Error())
-			return
-		}
-		fmt.Fprintln(os.Stderr, string(jsonBytes))
-	} else {
-		// 简单文本格式（兼容旧日志）
-		fmt.Fprintf(os.Stderr, "[%s] %s %s", strings.ToUpper(string(level)), eventObj.Time, event)
-		if eventObj.Caller != "" {
-			fmt.Fprintf(os.Stderr, " (%s)", eventObj.Caller)
-		}
-		if eventObj.Extra != nil && len(eventObj.Extra) > 0 {
-			for k, v := range eventObj.Extra {
-				fmt.Fprintf(os.Stderr, " %s=%v", k, v)
-			}
-		}
-		fmt.Fprintln(os.Stderr)
-	}
+// shouldLog 检查是否应该记录日志
+func shouldLog(level LogLevel) bool {
+  return level >= currentLevel
 }
 
-// 快捷方法
-
-// Debug 记录调试日志
-func Debug(event string, fields ...map[string]interface{}) {
-	Log(LevelDebug, event, fields...)
+// getCallerInfo 获取调用者信息
+func getCallerInfo() (string, int) {
+  // 跳过3层调用栈：getCallerInfo -> log函数 -> 实际调用者
+  _, file, line, ok := runtime.Caller(3)
+  if !ok {
+    return "unknown", 0
+  }
+  
+  // 只保留文件名
+  return filepath.Base(file), line
 }
 
-// Info 记录信息日志
-func Info(event string, fields ...map[string]interface{}) {
-	Log(LevelInfo, event, fields...)
+// formatMessage 格式化消息
+func formatMessage(level string, msg string, fields map[string]interface{}) string {
+  if enableStructuredLog {
+    // 结构化日志格式
+    parts := []string{
+      fmt.Sprintf("level=%s", level),
+      fmt.Sprintf("msg=%q", msg),
+    }
+    
+    // 添加调用者信息
+    file, line := getCallerInfo()
+    parts = append(parts, fmt.Sprintf("caller=%s:%d", file, line))
+    
+    // 添加时间戳
+    parts = append(parts, fmt.Sprintf("time=%s", time.Now().Format(time.RFC3339)))
+    
+    // 添加自定义字段
+    for k, v := range fields {
+      parts = append(parts, fmt.Sprintf("%s=%v", k, v))
+    }
+    
+    return strings.Join(parts, " ")
+  } else {
+    // 传统日志格式
+    file, line := getCallerInfo()
+    timestamp := time.Now().Format("2006-01-02 15:04:05.000")
+    return fmt.Sprintf("[%s] [%s] %s:%d - %s", timestamp, level, file, line, msg)
+  }
 }
 
-// Warn 记录警告日志
-func Warn(event string, fields ...map[string]interface{}) {
-	Log(LevelWarn, event, fields...)
+// Debug 调试日志
+func Debug(msg string, fields ...map[string]interface{}) {
+  if !shouldLog(DEBUG) {
+    return
+  }
+  
+  var fieldMap map[string]interface{}
+  if len(fields) > 0 {
+    fieldMap = fields[0]
+  } else {
+    fieldMap = make(map[string]interface{})
+  }
+  
+  log.Println(formatMessage("DEBUG", msg, fieldMap))
 }
 
-// Error 记录错误日志
-func Error(event string, fields ...map[string]interface{}) {
-	Log(LevelError, event, fields...)
+// Info 信息日志
+func Info(msg string, fields ...map[string]interface{}) {
+  if !shouldLog(INFO) {
+    return
+  }
+  
+  var fieldMap map[string]interface{}
+  if len(fields) > 0 {
+    fieldMap = fields[0]
+  } else {
+    fieldMap = make(map[string]interface{})
+  }
+  
+  log.Println(formatMessage("INFO", msg, fieldMap))
 }
 
-// APIError 记录API错误
-func APIError(event string, chunkID int, promptVersion, inputPreview, rawError string) {
-	Log(LevelError, event, map[string]interface{}{
-		"chunk_id":       chunkID,
-		"prompt_version": promptVersion,
-		"input_preview":  inputPreview,
-		"raw_error":      rawError,
-		"error_type":     "api_error",
-	})
+// Warn 警告日志
+func Warn(msg string, fields ...map[string]interface{}) {
+  if !shouldLog(WARN) {
+    return
+  }
+  
+  var fieldMap map[string]interface{}
+  if len(fields) > 0 {
+    fieldMap = fields[0]
+  } else {
+    fieldMap = make(map[string]interface{})
+  }
+  
+  log.Println(formatMessage("WARN", msg, fieldMap))
 }
 
-// APIRefusal 记录API拒绝错误
-func APIRefusal(chunkID int, promptVersion, inputPreview, rawError string) {
-	Log(LevelError, "api_refusal", map[string]interface{}{
-		"chunk_id":       chunkID,
-		"prompt_version": promptVersion,
-		"input_preview":  inputPreview,
-		"raw_error":      rawError,
-		"error_type":     "api_refusal",
-	})
+// Error 错误日志
+func Error(msg string, err error, fields ...map[string]interface{}) {
+  if !shouldLog(ERROR) {
+    return
+  }
+  
+  var fieldMap map[string]interface{}
+  if len(fields) > 0 {
+    fieldMap = fields[0]
+  } else {
+    fieldMap = make(map[string]interface{})
+  }
+  
+  if err != nil {
+    fieldMap["error"] = err.Error()
+  }
+  
+  log.Println(formatMessage("ERROR", msg, fieldMap))
 }
 
-// ChunkProcessing 记录块处理日志
-func ChunkProcessing(fileMd5 string, chunkID, totalChunks int, action string) {
-	Log(LevelInfo, "chunk_processing", map[string]interface{}{
-		"file_md5":    fileMd5,
-		"chunk_id":    chunkID,
-		"total_chunks": totalChunks,
-		"action":      action,
-	})
+// Fatal 致命错误日志
+func Fatal(msg string, err error, fields ...map[string]interface{}) {
+  if !shouldLog(FATAL) {
+    return
+  }
+  
+  var fieldMap map[string]interface{}
+  if len(fields) > 0 {
+    fieldMap = fields[0]
+  } else {
+    fieldMap = make(map[string]interface{})
+  }
+  
+  if err != nil {
+    fieldMap["error"] = err.Error()
+  }
+  
+  log.Println(formatMessage("FATAL", msg, fieldMap))
+  os.Exit(1)
 }
 
-// CacheHit 记录缓存命中
-func CacheHit(fileMd5 string, chunkID int, chunkHash string) {
-	Log(LevelDebug, "cache_hit", map[string]interface{}{
-		"file_md5":   fileMd5,
-		"chunk_id":   chunkID,
-		"chunk_hash": chunkHash,
-	})
+// WithFields 创建带字段的日志记录器
+func WithFields(fields map[string]interface{}) *Logger {
+  return &Logger{fields: fields}
 }
 
-// CacheMiss 记录缓存未命中
-func CacheMiss(fileMd5 string, chunkID int, chunkHash string) {
-	Log(LevelDebug, "cache_miss", map[string]interface{}{
-		"file_md5":   fileMd5,
-		"chunk_id":   chunkID,
-		"chunk_hash": chunkHash,
-	})
+// Logger 带字段的日志记录器
+type Logger struct {
+  fields map[string]interface{}
 }
 
-// WorkerPool 记录Worker池状态
-func WorkerPool(action string, workerID, totalWorkers, queueSize int) {
-	Log(LevelDebug, "worker_pool", map[string]interface{}{
-		"action":       action,
-		"worker_id":    workerID,
-		"total_workers": totalWorkers,
-		"queue_size":   queueSize,
-	})
+// Debug 调试日志
+func (l *Logger) Debug(msg string, fields ...map[string]interface{}) {
+  mergedFields := mergeFields(l.fields, fields...)
+  Debug(msg, mergedFields)
 }
 
-// PromptLoaded 记录提示词加载
-func PromptLoaded(version, source string, length int) {
-	Log(LevelInfo, "prompt_loaded", map[string]interface{}{
-		"prompt_version": version,
-		"source":         source,
-		"length":         length,
-	})
+// Info 信息日志
+func (l *Logger) Info(msg string, fields ...map[string]interface{}) {
+  mergedFields := mergeFields(l.fields, fields...)
+  Info(msg, mergedFields)
 }
 
-// EvolverTriggered 记录Evolver触发
-func EvolverTriggered(reason string, errorCount, threshold int) {
-	Log(LevelWarn, "evolver_triggered", map[string]interface{}{
-		"reason":       reason,
-		"error_count":  errorCount,
-		"threshold":    threshold,
-	})
+// Warn 警告日志
+func (l *Logger) Warn(msg string, fields ...map[string]interface{}) {
+  mergedFields := mergeFields(l.fields, fields...)
+  Warn(msg, mergedFields)
 }
 
-// PromptUpdated 记录提示词更新
-func PromptUpdated(oldVersion, newVersion string, changes int) {
-	Log(LevelInfo, "prompt_updated", map[string]interface{}{
-		"old_version": oldVersion,
-		"new_version": newVersion,
-		"changes":     changes,
-	})
+// Error 错误日志
+func (l *Logger) Error(msg string, err error, fields ...map[string]interface{}) {
+  mergedFields := mergeFields(l.fields, fields...)
+  Error(msg, err, mergedFields)
 }
 
-// RetryQueued 记录重试队列
-func RetryQueued(fileMd5 string, chunkID int, reason string) {
-	Log(LevelWarn, "retry_queued", map[string]interface{}{
-		"file_md5": fileMd5,
-		"chunk_id": chunkID,
-		"reason":   reason,
-	})
+// Fatal 致命错误日志
+func (l *Logger) Fatal(msg string, err error, fields ...map[string]interface{}) {
+  mergedFields := mergeFields(l.fields, fields...)
+  Fatal(msg, err, mergedFields)
 }
 
-// RetryProcessed 记录重试处理
-func RetryProcessed(fileMd5 string, chunkID int, success bool) {
-	level := LevelInfo
-	if !success {
-		level = LevelError
-	}
-	Log(level, "retry_processed", map[string]interface{}{
-		"file_md5": fileMd5,
-		"chunk_id": chunkID,
-		"success":  success,
-	})
+// mergeFields 合并字段
+func mergeFields(base map[string]interface{}, additional ...map[string]interface{}) map[string]interface{} {
+  result := make(map[string]interface{})
+  
+  // 复制基础字段
+  for k, v := range base {
+    result[k] = v
+  }
+  
+  // 合并附加字段
+  for _, fields := range additional {
+    for k, v := range fields {
+      result[k] = v
+    }
+  }
+  
+  return result
 }
 
-// ProcessingSource 记录处理来源（混合架构新增）
-func ProcessingSource(fileMd5 string, chunkID int, source string, confidence float64, durationMs int64, cacheHit bool) {
-	extra := map[string]interface{}{
-		"file_md5":   fileMd5,
-		"chunk_id":   chunkID,
-		"source":     source,
-		"confidence": confidence,
-		"duration":   durationMs,
-		"cache_hit":  cacheHit,
-	}
-	
-	Log(LevelInfo, "processing_source", extra)
+// 包级日志记录器
+var (
+  // 默认日志记录器
+  defaultLogger = &Logger{}
+  
+  // 处理相关日志记录器
+  processingLogger = WithFields(map[string]interface{}{"component": "processor"})
+  
+  // 数据库相关日志记录器
+  databaseLogger = WithFields(map[string]interface{}{"component": "database"})
+  
+  // API相关日志记录器
+  apiLogger = WithFields(map[string]interface{}{"component": "api"})
+  
+  // 文件相关日志记录器
+  fileLogger = WithFields(map[string]interface{}{"component": "file"})
+)
+
+// 包级快捷方法
+func Debugf(format string, args ...interface{}) {
+  Debug(fmt.Sprintf(format, args...))
 }
 
-// LocalModelProcessed 记录本地模型处理结果
-func LocalModelProcessed(fileMd5 string, chunkID int, success bool, confidence float64, durationMs int64, errorMsg string) {
-	level := LevelInfo
-	if !success {
-		level = LevelError
-	}
-	
-	extra := map[string]interface{}{
-		"file_md5":   fileMd5,
-		"chunk_id":   chunkID,
-		"success":    success,
-		"confidence": confidence,
-		"duration":   durationMs,
-		"source":     "local",
-	}
-	
-	if errorMsg != "" {
-		extra["error"] = errorMsg
-	}
-	
-	Log(level, "local_model_processed", extra)
+func Infof(format string, args ...interface{}) {
+  Info(fmt.Sprintf(format, args...))
 }
 
-// RemoteAPIFallback 记录远程API降级处理
-func RemoteAPIFallback(fileMd5 string, chunkID int, success bool, durationMs int64, errorMsg string) {
-	level := LevelInfo
-	if !success {
-		level = LevelError
-	}
-	
-	extra := map[string]interface{}{
-		"file_md5": fileMd5,
-		"chunk_id": chunkID,
-		"success":  success,
-		"duration": durationMs,
-		"source":   "remote",
-	}
-	
-	if errorMsg != "" {
-		extra["error"] = errorMsg
-	}
-	
-	Log(level, "remote_api_fallback", extra)
+func Warnf(format string, args ...interface{}) {
+  Warn(fmt.Sprintf(format, args...))
 }
 
-// HealthCheckResult 记录健康检查结果
-func HealthCheckResult(service string, healthy bool, durationMs int64, errorMsg string) {
-	level := LevelInfo
-	if !healthy {
-		level = LevelWarn
-	}
-	
-	extra := map[string]interface{}{
-		"service":  service,
-		"healthy":  healthy,
-		"duration": durationMs,
-	}
-	
-	if errorMsg != "" {
-		extra["error"] = errorMsg
-	}
-	
-	Log(level, "health_check", extra)
+func Errorf(format string, err error, args ...interface{}) {
+  Error(fmt.Sprintf(format, args...), err)
 }
 
-// StateCheckpoint 记录状态检查点
-func StateCheckpoint(fileMd5 string, checkpointType string, data map[string]interface{}) {
-	extra := map[string]interface{}{
-		"file_md5":        fileMd5,
-		"checkpoint_type": checkpointType,
-	}
-	
-	for k, v := range data {
-		extra[k] = v
-	}
-	
-	Log(LevelInfo, "state_checkpoint", extra)
+func Fatalf(format string, err error, args ...interface{}) {
+  Fatal(fmt.Sprintf(format, args...), err)
+}
+
+// 组件级快捷方法
+func ProcessingDebug(msg string, fields ...map[string]interface{}) {
+  processingLogger.Debug(msg, fields...)
+}
+
+func ProcessingInfo(msg string, fields ...map[string]interface{}) {
+  processingLogger.Info(msg, fields...)
+}
+
+func ProcessingWarn(msg string, fields ...map[string]interface{}) {
+  processingLogger.Warn(msg, fields...)
+}
+
+func ProcessingError(msg string, err error, fields ...map[string]interface{}) {
+  processingLogger.Error(msg, err, fields...)
+}
+
+func DatabaseDebug(msg string, fields ...map[string]interface{}) {
+  databaseLogger.Debug(msg, fields...)
+}
+
+func DatabaseInfo(msg string, fields ...map[string]interface{}) {
+  databaseLogger.Info(msg, fields...)
+}
+
+func DatabaseWarn(msg string, fields ...map[string]interface{}) {
+  databaseLogger.Warn(msg, fields...)
+}
+
+func DatabaseError(msg string, err error, fields ...map[string]interface{}) {
+  databaseLogger.Error(msg, err, fields...)
+}
+
+func APIDebug(msg string, fields ...map[string]interface{}) {
+  apiLogger.Debug(msg, fields...)
+}
+
+func APIInfo(msg string, fields ...map[string]interface{}) {
+  apiLogger.Info(msg, fields...)
+}
+
+func APIWarn(msg string, fields ...map[string]interface{}) {
+  apiLogger.Warn(msg, fields...)
+}
+
+func APIError(msg string, err error, fields ...map[string]interface{}) {
+  apiLogger.Error(msg, err, fields...)
+}
+
+func FileDebug(msg string, fields ...map[string]interface{}) {
+  fileLogger.Debug(msg, fields...)
+}
+
+func FileInfo(msg string, fields ...map[string]interface{}) {
+  fileLogger.Info(msg, fields...)
+}
+
+func FileWarn(msg string, fields ...map[string]interface{}) {
+  fileLogger.Warn(msg, fields...)
+}
+
+func FileError(msg string, err error, fields ...map[string]interface{}) {
+  fileLogger.Error(msg, err, fields...)
 }

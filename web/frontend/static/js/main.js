@@ -2,6 +2,53 @@ let currentFileMd5 = null;
 let reviewItems = [];
 let pollingTimer = null;
 
+// 初始化应用
+function initApp() {
+  // 检查认证状态
+  checkAuthStatus();
+  
+  // 显示文件列表
+  showSection('file-list');
+}
+
+// 检查认证状态
+function checkAuthStatus() {
+  if (AppConfig.isAuthEnabled()) {
+    // 已认证，可以正常访问
+    document.getElementById('app').style.display = 'block';
+    document.getElementById('auth-section').style.display = 'none';
+  } else {
+    // 未认证，显示登录界面
+    document.getElementById('app').style.display = 'none';
+    document.getElementById('auth-section').style.display = 'block';
+  }
+}
+
+// 处理登录
+function handleLogin() {
+  const tokenInput = document.getElementById('auth-token');
+  const token = tokenInput.value.trim();
+  
+  if (!token) {
+    showFeedback('请输入认证token', 'error');
+    return;
+  }
+  
+  if (AppConfig.setAuthToken(token)) {
+    showFeedback('登录成功', 'success');
+    checkAuthStatus();
+  } else {
+    showFeedback('token无效', 'error');
+  }
+}
+
+// 处理登出
+function handleLogout() {
+  AppConfig.clearAuthToken();
+  showFeedback('已登出', 'success');
+  checkAuthStatus();
+}
+
 function showSection(section) {
   const sections = [
     "file-list",
@@ -94,66 +141,38 @@ function getStepText(step) {
 // ========== 文件列表 ==========
 
 function refreshFileList() {
-  fetch("/api/files")
-    .then((r) => r.json())
+  AppConfig.apiRequest("/files")
     .then((data) => {
       if (!data.success) return;
       const container = document.getElementById("file-list-container");
       if (!data.files || data.files.length === 0) {
-        container.innerHTML =
-          '<div class="empty-state">暂无文件，请上传文件开始处理</div>';
+        container.innerHTML = "";
+        const emptyState = DomUtils.createElement('div', { className: 'empty-state' });
+        DomUtils.setTextContent(emptyState, '暂无文件，请上传文件开始处理');
+        container.appendChild(emptyState);
         return;
       }
 
-      container.innerHTML = data.files
-        .map(
-          (f) => `
-        <div class="file-card ${getStatusClass(f.status)}">
-          <div class="file-info">
-            <div class="file-title">${escapeHtml(f.title || f.fileName)}</div>
-            <div class="file-meta">
-              ${f.author ? `<span>作者: ${escapeHtml(f.author)}</span>` : ""}
-              <span>状态: <strong>${getStatusText(f.status)}</strong></span>
-              <span>步骤: ${getStepText(f.currentStep)}</span>
-              <span>进度: ${f.progress}%</span>
-              <span>更新: ${formatTime(f.updatedAt)}</span>
-            </div>
-            ${f.errorMsg ? `<div class="file-error">错误: ${escapeHtml(f.errorMsg)}</div>` : ""}
-          </div>
-          <div class="file-actions">
-            ${getActionButtons(f)}
-          </div>
-        </div>
-      `,
-        )
-        .join("");
+      // 清空容器
+      container.innerHTML = "";
+      
+      // 使用安全的DOM操作创建文件卡片
+      data.files.forEach(file => {
+        const card = DomUtils.createFileCard(file);
+        container.appendChild(card);
+      });
     })
     .catch((err) => showFeedback("加载文件列表失败: " + err.message, "error"));
 }
 
-function getActionButtons(f) {
-  const md5 = f.md5;
-  const deleteBtn = `<button class="btn-danger" onclick="deleteFile('${md5}', '${escapeHtml(f.title || f.fileName)}')">删除</button>`;
-  switch (f.status) {
-    case "pending":
-      return `<button class="btn-primary" onclick="configureRules('${md5}')">配置并处理</button>${deleteBtn}`;
-    case "processing":
-      return `<button class="btn-primary" onclick="viewProgress('${md5}')">查看进度</button>
-              <button class="btn-secondary" onclick="resumeFile('${md5}')">继续处理</button>
-              <button class="btn-secondary" onclick="downloadFile('${md5}')">下载</button>${deleteBtn}`;
-    case "reviewing":
-      return `<button class="btn-primary" onclick="viewProgress('${md5}')">查看进度</button>
-              <button class="btn-secondary" onclick="downloadFile('${md5}')">下载</button>${deleteBtn}`;
-    case "completed":
-      return `<button class="btn-primary" onclick="downloadFile('${md5}')">下载最终文件</button>
-              <button class="btn-secondary" onclick="viewReport('${md5}')">查看报告</button>
-              <button class="btn-secondary" onclick="reprocessFile('${md5}')">重新处理</button>${deleteBtn}`;
-    case "failed":
-      return `<button class="btn-primary" onclick="resumeFile('${md5}')">从失败处恢复</button>${deleteBtn}`;
-    default:
-      return deleteBtn;
-  }
-}
+// 为DomUtils设置回调函数
+DomUtils.deleteFile = deleteFile;
+DomUtils.configureRules = configureRules;
+DomUtils.viewProgress = viewProgress;
+DomUtils.resumeFile = resumeFile;
+DomUtils.downloadFile = downloadFile;
+DomUtils.viewReport = viewReport;
+DomUtils.reprocessFile = reprocessFile;
 
 function deleteFile(md5, fileName) {
   if (
@@ -164,36 +183,34 @@ function deleteFile(md5, fileName) {
     return;
   if (!confirm("二次确认：真的要删除吗？此操作不可撤销！")) return;
 
-  fetch(`/api/files/${md5}`, { method: "DELETE" })
-    .then((r) => r.json())
+  AppConfig.apiRequest(`/files/${md5}`, { method: "DELETE" })
     .then((data) => {
       if (data.success) {
         showFeedback("文件已删除");
         refreshFileList();
       } else showFeedback(data.message, "error");
-    });
+    })
+    .catch((err) => showFeedback("删除失败: " + err.message, "error"));
 }
 
 function reprocessFile(md5) {
   if (!confirm("确定重新处理该文件？之前的处理结果将被清除。")) return;
-  fetch(`/api/files/${md5}/resume`, { method: "POST" })
-    .then((r) => r.json())
+  AppConfig.apiRequest(`/files/${md5}/resume`, { method: "POST" })
     .then((data) => {
       if (data.success) {
         currentFileMd5 = md5;
         configureRules(md5);
       } else showFeedback(data.message, "error");
-    });
+    })
+    .catch((err) => showFeedback("重新处理失败: " + err.message, "error"));
 }
 
 function resumeFile(md5) {
-  fetch(`/api/files/${md5}/resume`, { method: "POST" })
-    .then((r) => r.json())
+  AppConfig.apiRequest(`/files/${md5}/resume`, { method: "POST" })
     .then((data) => {
       if (data.success) {
         currentFileMd5 = md5;
-        fetch(`/api/files/${md5}/run`, { method: "POST" })
-          .then((r2) => r2.json())
+        AppConfig.apiRequest(`/files/${md5}/run`, { method: "POST" })
           .then((data2) => {
             if (data2.success) {
               showSection("processing");
@@ -201,17 +218,63 @@ function resumeFile(md5) {
             } else {
               showFeedback(data2.message, "error");
             }
-          });
+          })
+          .catch((err) => showFeedback("启动处理失败: " + err.message, "error"));
       } else showFeedback(data.message, "error");
-    });
+    })
+    .catch((err) => showFeedback("恢复文件失败: " + err.message, "error"));
 }
 
 function downloadFile(md5) {
-  window.open(`/api/files/${md5}/download`, "_blank");
+  const token = AppConfig.getAuthToken();
+  const url = `/api/files/${md5}/download`;
+  const headers = {};
+  if (token) {
+    headers['X-API-Token'] = token;
+  }
+  
+  // 使用fetch下载文件
+  fetch(url, { headers })
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`下载失败: ${response.status}`);
+      }
+      return response.blob();
+    })
+    .then(blob => {
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `file_${md5}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    })
+    .catch(err => showFeedback(err.message, "error"));
 }
 
 function viewReport(md5) {
-  window.open(`/api/files/${md5}/report?format=html`, "_blank");
+  const token = AppConfig.getAuthToken();
+  const url = `/api/files/${md5}/report?format=html`;
+  const headers = {};
+  if (token) {
+    headers['X-API-Token'] = token;
+  }
+  
+  fetch(url, { headers })
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`获取报告失败: ${response.status}`);
+      }
+      return response.blob();
+    })
+    .then(blob => {
+      const url = window.URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      window.URL.revokeObjectURL(url);
+    })
+    .catch(err => showFeedback(err.message, "error"));
 }
 
 // ========== 文件上传 ==========
@@ -220,68 +283,41 @@ function handleFileUpload(event) {
   const file = event.target.files[0];
   if (!file) return;
 
-  const formData = new FormData();
-  formData.append("file", file);
-
   const resultDiv = document.getElementById("upload-result");
   resultDiv.style.display = "block";
-  resultDiv.innerHTML = '<div class="upload-loading">正在上传...</div>';
+  resultDiv.innerHTML = "";
+  
+  const loadingDiv = DomUtils.createElement('div', { className: 'upload-loading' });
+  DomUtils.setTextContent(loadingDiv, '正在上传...');
+  resultDiv.appendChild(loadingDiv);
 
-  fetch("/api/files/upload", { method: "POST", body: formData })
-    .then((r) => r.json())
+  AppConfig.uploadFile(file, (progress) => {
+    DomUtils.setTextContent(loadingDiv, `正在上传... ${progress}%`);
+  })
     .then((data) => {
-      if (!data.success) {
-        resultDiv.innerHTML = `
-          <div class="upload-error">
-            <p>上传失败: ${escapeHtml(data.message || "未知错误")}</p>
-            <div class="upload-actions">
-              <button class="btn-secondary" onclick="document.getElementById('upload-result').style.display='none'">关闭</button>
-            </div>
-          </div>`;
-        return;
-      }
-
-      if (data.exists) {
-        resultDiv.innerHTML = `
-          <div class="upload-exists">
-            <p>${escapeHtml(data.message)}</p>
-            <p>当前状态: ${getStatusText(data.status)} ${data.currentStep ? "(" + getStepText(data.currentStep) + ")" : ""}</p>
-            <div class="upload-actions">
-              <button class="btn-primary" onclick="currentFileMd5='${data.md5}'; resumeFile('${data.md5}')">${data.suggestion || "继续处理"}</button>
-              <button class="btn-secondary" onclick="showSection('file-list')">返回列表</button>
-            </div>
-          </div>`;
-      } else if (data.isIntermediate) {
-        currentFileMd5 = data.md5;
-        resultDiv.innerHTML = `
-          <div class="upload-intermediate">
-            <p>检测到中间版本文件</p>
-            <p>可从步骤 "${getStepText(data.resumeStep)}" 继续处理</p>
-            <div class="upload-actions">
-              <button class="btn-primary" onclick="currentFileMd5='${data.md5}'; configureRules('${data.md5}')">配置并继续</button>
-              <button class="btn-secondary" onclick="showSection('file-list')">返回列表</button>
-            </div>
-          </div>`;
-      } else {
-        currentFileMd5 = data.md5;
-        resultDiv.innerHTML = `
-          <div class="upload-success">
-            <p>文件上传成功</p>
-            <div class="upload-actions">
-              <button class="btn-primary" onclick="configureRules('${data.md5}')">配置规则并处理</button>
-              <button class="btn-secondary" onclick="showSection('file-list')">返回列表</button>
-            </div>
-          </div>`;
-      }
+      resultDiv.innerHTML = "";
+      const resultContent = DomUtils.createUploadResult(data);
+      resultDiv.appendChild(resultContent);
     })
     .catch((err) => {
-      resultDiv.innerHTML = `
-        <div class="upload-error">
-          <p>上传失败: ${escapeHtml(err.message)}</p>
-          <div class="upload-actions">
-            <button class="btn-secondary" onclick="document.getElementById('upload-result').style.display='none'">关闭</button>
-          </div>
-        </div>`;
+      resultDiv.innerHTML = "";
+      const errorDiv = DomUtils.createElement('div', { className: 'upload-error' });
+      const errorMsg = DomUtils.createElement('p');
+      DomUtils.setTextContent(errorMsg, `上传失败: ${err.message}`);
+      errorDiv.appendChild(errorMsg);
+      
+      const actions = DomUtils.createElement('div', { className: 'upload-actions' });
+      const closeBtn = DomUtils.createElement('button', {
+        className: 'btn-secondary',
+        onclick: () => {
+          resultDiv.style.display = 'none';
+        }
+      });
+      DomUtils.setTextContent(closeBtn, '关闭');
+      actions.appendChild(closeBtn);
+      errorDiv.appendChild(actions);
+      
+      resultDiv.appendChild(errorDiv);
     });
 
   event.target.value = "";
@@ -292,176 +328,56 @@ function handleFileUpload(event) {
 function configureRules(md5) {
   currentFileMd5 = md5;
 
-  fetch(`/api/files/${md5}`)
-    .then((r) => r.json())
+  AppConfig.apiRequest(`/files/${md5}`)
     .then((data) => {
       if (!data.success) {
         showFeedback(data.message, "error");
         return;
       }
 
-      let rules = {};
-      if (data.file.rulesConfig) {
-        try {
-          rules = JSON.parse(data.file.rulesConfig);
-        } catch {}
-      }
-
-      document.getElementById("rule-basic-cleaning").checked =
-        rules.enableBasicCleaning !== false;
-      document.getElementById("rule-traditional-simple").checked =
-        rules.traditionalToSimple === true;
-      document.getElementById("rule-vector-detection").checked =
-        rules.enableVectorDetection !== false;
-      document.getElementById("rule-similarity").value =
-        rules.similarityThreshold || 0.95;
-      document.getElementById("rule-model-repair").checked =
-        rules.enableModelRepair !== false;
-
-      if (rules.typoMap) {
-        document.getElementById("rule-typo-map").value = Object.entries(
-          rules.typoMap,
-        )
-          .map(([k, v]) => k + "=" + v)
-          .join("\n");
-      }
-      if (rules.adBlacklist) {
-        document.getElementById("rule-ad-blacklist").value =
-          rules.adBlacklist.join("\n");
+      const file = data.file;
+      const infoDiv = document.getElementById("file-info-display");
+      if (infoDiv) {
+        const parts = [];
+        if (file.title) parts.push(`标题: ${file.title}`);
+        if (file.author) parts.push(`作者: ${file.author}`);
+        if (file.fileSize) parts.push(`大小: ${formatFileSize(file.fileSize)}`);
+        DomUtils.setTextContent(infoDiv, parts.join(" | "));
       }
 
       showSection("rules-config");
-    });
-}
-
-function buildRulesConfig() {
-  const typoMapText = document.getElementById("rule-typo-map").value.trim();
-  const typoMap = {};
-  if (typoMapText) {
-    typoMapText.split("\n").forEach((line) => {
-      const parts = line.split("=");
-      if (parts.length >= 2) {
-        typoMap[parts[0].trim()] = parts.slice(1).join("=").trim();
-      }
-    });
-  }
-
-  const adBlacklistText = document
-    .getElementById("rule-ad-blacklist")
-    .value.trim();
-  const adBlacklist = adBlacklistText
-    ? adBlacklistText
-        .split("\n")
-        .map((l) => l.trim())
-        .filter((l) => l)
-    : [];
-
-  return {
-    enableBasicCleaning: document.getElementById("rule-basic-cleaning").checked,
-    traditionalToSimple: document.getElementById("rule-traditional-simple")
-      .checked,
-    enableVectorDetection: document.getElementById("rule-vector-detection")
-      .checked,
-    similarityThreshold:
-      parseFloat(document.getElementById("rule-similarity").value) || 0.95,
-    enableModelRepair: document.getElementById("rule-model-repair").checked,
-    typoMap: typoMap,
-    adBlacklist: adBlacklist,
-  };
-}
-
-function saveRulesAndProcess() {
-  if (!currentFileMd5) return;
-
-  const rulesConfig = buildRulesConfig();
-
-  fetch(`/api/files/${currentFileMd5}/rules`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ rulesConfig: JSON.stringify(rulesConfig) }),
-  })
-    .then((r) => r.json())
-    .then((data) => {
-      if (!data.success) {
-        showFeedback(data.message, "error");
-        return;
-      }
-      startProcessing();
-    });
-}
-
-// ========== 处理流程 ==========
-
-function startProcessing() {
-  if (!currentFileMd5) return;
-
-  fetch(`/api/files/${currentFileMd5}/run`, { method: "POST" })
-    .then((r) => r.json())
-    .then((data) => {
-      if (!data.success) {
-        showFeedback(data.message, "error");
-        return;
-      }
-
-      showSection("processing");
-      startPolling();
     })
-    .catch((err) => {
-      showFeedback("启动处理失败: " + err.message, "error");
-    });
+    .catch((err) => showFeedback("获取文件信息失败: " + err.message, "error"));
 }
+
+function formatFileSize(bytes) {
+  const kb = 1024;
+  const mb = kb * 1024;
+  const gb = mb * 1024;
+  switch (true) {
+    case bytes >= gb:
+      return (bytes / gb).toFixed(1) + "GB";
+    case bytes >= mb:
+      return (bytes / mb).toFixed(1) + "MB";
+    case bytes >= kb:
+      return (bytes / kb).toFixed(1) + "KB";
+    default:
+      return bytes + "B";
+  }
+}
+
+// ========== 处理进度相关函数 ==========
 
 function viewProgress(md5) {
   currentFileMd5 = md5;
-  fetch(`/api/files/${md5}/status`)
-    .then((r) => r.json())
-    .then((data) => {
-      if (!data.success) return;
-
-      if (data.status === "reviewing") {
-        showSection("review");
-        loadReviewItems();
-      } else if (data.status === "completed") {
-        showCompleted();
-      } else {
-        showSection("processing");
-        updateProcessingUI(data);
-        startPolling();
-      }
-    });
+  showSection("processing");
+  startPolling();
 }
 
 function startPolling() {
   stopPolling();
-  pollingTimer = setInterval(() => {
-    if (!currentFileMd5) {
-      stopPolling();
-      return;
-    }
-
-    fetch(`/api/files/${currentFileMd5}/status`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (!data.success) {
-          stopPolling();
-          return;
-        }
-
-        updateProcessingUI(data);
-
-        if (data.status === "reviewing") {
-          stopPolling();
-          showSection("review");
-          loadReviewItems();
-        } else if (data.status === "completed") {
-          stopPolling();
-          showCompleted();
-        } else if (data.status === "failed") {
-          stopPolling();
-          showFeedback("处理失败: " + (data.errorMsg || "未知错误"), "error");
-        }
-      });
-  }, 2000);
+  pollingTimer = setInterval(updateProgress, 2000);
+  updateProgress();
 }
 
 function stopPolling() {
@@ -471,414 +387,491 @@ function stopPolling() {
   }
 }
 
-function updateProcessingUI(data) {
-  const progress = data.progress || 0;
-  const progressBar = document.getElementById("overall-progress");
-  const progressText = document.getElementById("progress-text");
-  if (progressBar) progressBar.style.width = progress + "%";
-  if (progressText) progressText.textContent = progress + "%";
-
-  const stepMap = {
-    cleaning: 0,
-    indexing: 1,
-    llm_fix: 2,
-    review: 3,
-    finalizing: 4,
-  };
-  const currentIdx = stepMap[data.currentStep] || 0;
-
-  document.querySelectorAll(".step-item").forEach((el, idx) => {
-    el.classList.remove("active", "completed");
-    if (idx < currentIdx) el.classList.add("completed");
-    else if (idx === currentIdx) el.classList.add("active");
-  });
-
-  const msgEl = document.getElementById("processing-message");
-  if (msgEl) msgEl.textContent = data.message || "";
-
-  const fileInfoEl = document.getElementById("file-info-display");
-  if (fileInfoEl) {
-    const parts = [];
-    if (data.author) parts.push(data.author);
-    if (data.title) parts.push(data.title);
-    const displayName =
-      parts.length > 0 ? parts.join(" - ") : data.fileName || currentFileMd5;
-    fileInfoEl.textContent = `文件: ${displayName}`;
-  }
-
-  const actionEl = document.getElementById("current-action");
-  if (actionEl) actionEl.textContent = data.currentAction || "";
-
-  updateChunkProgress(data.chunkProgress);
-
-  updateProcessingLogs(data.logs);
+function updateProgress() {
+  if (!currentFileMd5) return;
+  
+  AppConfig.apiRequest(`/files/${currentFileMd5}/status`)
+    .then((data) => {
+      if (!data.success) return;
+      
+      // 更新进度显示
+      const progressBar = document.getElementById("overall-progress");
+      const progressText = document.getElementById("progress-text");
+      const processingMessage = document.getElementById("processing-message");
+      const currentAction = document.getElementById("current-action");
+      
+      if (progressBar && progressText) {
+        const progress = data.progress || 0;
+        progressBar.style.width = progress + "%";
+        DomUtils.setTextContent(progressText, progress + "%");
+      }
+      
+      if (processingMessage) {
+        let message = `状态: ${getStatusText(data.status)}`;
+        if (data.currentStep) {
+          message += ` | 当前步骤: ${getStepText(data.currentStep)}`;
+        }
+        DomUtils.setTextContent(processingMessage, message);
+      }
+      
+      if (currentAction && data.currentAction) {
+        DomUtils.setTextContent(currentAction, data.currentAction);
+      }
+      
+      // 更新步骤状态
+      updateStepProgress(data.currentStep);
+      
+      // 如果处理完成或失败，停止轮询
+      if (data.status === "completed" || data.status === "failed" || data.status === "reviewing") {
+        stopPolling();
+        if (data.status === "reviewing") {
+          showSection("review");
+          loadReviewItems();
+        } else if (data.status === "completed") {
+          showSection("completed");
+          updateCompletedInfo();
+        }
+      }
+    })
+    .catch((err) => {
+      console.error("轮询失败:", err);
+    });
 }
 
-function updateChunkProgress(chunkProgress) {
-  const container = document.getElementById("chunk-progress-container");
-  if (!container) return;
-
-  if (!chunkProgress || chunkProgress.totalChunks === 0) {
-    container.style.display = "none";
-    return;
-  }
-
-  container.style.display = "block";
-
-  const progressBar = document.getElementById("chunk-progress-bar");
-  const etaEl = document.getElementById("chunk-eta");
-  const countEl = document.getElementById("chunk-count");
-  const apiStatsEl = document.getElementById("chunk-api-stats");
-  const avgTimeEl = document.getElementById("chunk-avg-time");
-
-  const progress = chunkProgress.progress || 0;
-  if (progressBar) progressBar.style.width = progress + "%";
-
-  if (countEl) {
-    countEl.textContent = `已处理: ${chunkProgress.processedChunks}/${chunkProgress.totalChunks} 块`;
-  }
-
-  if (apiStatsEl) {
-    apiStatsEl.textContent = `API调用: ${chunkProgress.apiCalls}次 | 缓存命中: ${chunkProgress.cacheHits}次`;
-  }
-
-  if (avgTimeEl) {
-    avgTimeEl.textContent = `平均耗时: ${chunkProgress.avgChunkTimeMs}ms/块`;
-  }
-
-  if (etaEl) {
-    const remainingSecs = chunkProgress.estimatedRemainingSecs || 0;
-    if (remainingSecs > 0) {
-      etaEl.textContent = `预计剩余: ${formatEta(remainingSecs)}`;
-    } else if (progress < 100) {
-      etaEl.textContent = "计算中...";
-    } else {
-      etaEl.textContent = "处理完成";
+function updateStepProgress(currentStep) {
+  const steps = ["cleaning", "indexing", "llm_fix", "review", "finalizing"];
+  const stepIndex = steps.indexOf(currentStep);
+  
+  steps.forEach((step, index) => {
+    const stepItem = document.querySelector(`.step-item[data-step="${step}"]`);
+    if (stepItem) {
+      stepItem.classList.remove("active", "completed");
+      if (index < stepIndex) {
+        stepItem.classList.add("completed");
+      } else if (index === stepIndex) {
+        stepItem.classList.add("active");
+      }
     }
-  }
+  });
 }
 
-function formatEta(seconds) {
-  if (seconds < 60) {
-    return `${seconds}秒`;
-  }
-  const minutes = Math.floor(seconds / 60);
-  const remainingSecs = seconds % 60;
-  if (minutes < 60) {
-    return remainingSecs > 0 ? `${minutes}分${remainingSecs}秒` : `${minutes}分钟`;
-  }
-  const hours = Math.floor(minutes / 60);
-  const remainingMins = minutes % 60;
-  return `${hours}小时${remainingMins}分钟`;
-}
-
-function updateProcessingLogs(logs) {
-  const listEl = document.getElementById("logs-list");
-  if (!listEl || !logs || logs.length === 0) return;
-
-  const stepLabels = {
-    cleaning: "基础清洗",
-    indexing: "向量检测",
-    llm_fix: "LLM修复",
-    review: "人工审核",
-    finalizing: "生成文件",
-  };
-
-  const html = logs.map((log) => {
-    const time = log.timestamp ? new Date(log.timestamp).toLocaleTimeString("zh-CN") : "";
-    const step = stepLabels[log.step] || log.step || "";
-    const detail = log.details || "";
-    const statusClass = log.status === "running" ? "log-running" : log.status === "success" ? "log-success" : "log-default";
-    return `<div class="log-item ${statusClass}"><span class="log-time">${time}</span><span class="log-step">[${step}]</span><span class="log-detail">${detail}</span></div>`;
-  }).join("");
-
-  listEl.innerHTML = html;
-}
-
-function toggleLogs() {
-  const content = document.getElementById("logs-content");
-  const icon = document.getElementById("logs-toggle-icon");
-  if (!content || !icon) return;
-  const isHidden = content.style.display === "none";
-  content.style.display = isHidden ? "block" : "none";
-  icon.textContent = isHidden ? "▲" : "▼";
-}
-
-function downloadCurrentVersion() {
-  if (currentFileMd5)
-    window.open(`/api/files/${currentFileMd5}/download`, "_blank");
-}
-
-// ========== 审核界面 ==========
+// ========== 审核相关函数 ==========
 
 function loadReviewItems() {
   if (!currentFileMd5) return;
-
-  const statusFilter = document.getElementById("review-status-filter").value;
-
-  fetch(`/api/files/${currentFileMd5}/review-items?status=${statusFilter}`)
-    .then((r) => r.json())
+  
+  AppConfig.apiRequest(`/files/${currentFileMd5}/review-items`)
     .then((data) => {
       if (!data.success) return;
-
-      reviewItems = data.suggestions || [];
+      reviewItems = data.items || [];
       renderReviewItems();
       updateReviewProgress();
+    })
+    .catch((err) => {
+      console.error("加载审核项失败:", err);
     });
 }
 
 function renderReviewItems() {
-  const list = document.getElementById("review-items-list");
-  if (!reviewItems || reviewItems.length === 0) {
-    list.innerHTML = '<div class="empty-state">没有审核项</div>';
-    return;
+  const container = document.getElementById("review-items-list");
+  if (!container) return;
+  
+  container.innerHTML = "";
+  
+  const statusFilter = document.getElementById("review-status-filter");
+  const filterValue = statusFilter ? statusFilter.value : "pending";
+  
+  const filteredItems = reviewItems.filter(item => {
+    if (filterValue === "all") return true;
+    return item.status === filterValue;
+  });
+  
+  filteredItems.forEach((item, index) => {
+    const itemElement = createReviewItemElement(item, index);
+    container.appendChild(itemElement);
+  });
+}
+
+function createReviewItemElement(item, index) {
+  const itemDiv = DomUtils.createElement('div', { className: 'review-item' });
+  
+  const header = DomUtils.createElement('div', { className: 'review-item-header' });
+  
+  const indexSpan = DomUtils.createElement('span', { className: 'review-item-index' });
+  DomUtils.setTextContent(indexSpan, `#${index + 1}`);
+  header.appendChild(indexSpan);
+  
+  const typeSpan = DomUtils.createElement('span', { className: 'review-item-type' });
+  DomUtils.setTextContent(typeSpan, getModificationTypeText(item.modificationType));
+  header.appendChild(typeSpan);
+  
+  const confidenceSpan = DomUtils.createElement('span', { className: 'review-item-confidence' });
+  DomUtils.setTextContent(confidenceSpan, `置信度: ${(item.confidence * 100).toFixed(1)}%`);
+  header.appendChild(confidenceSpan);
+  
+  itemDiv.appendChild(header);
+  
+  const contentDiv = DomUtils.createElement('div', { className: 'review-item-content' });
+  
+  const originalDiv = DomUtils.createElement('div', { className: 'review-original' });
+  const originalLabel = DomUtils.createElement('strong');
+  DomUtils.setTextContent(originalLabel, '原文: ');
+  originalDiv.appendChild(originalLabel);
+  const originalText = DomUtils.createElement('span');
+  DomUtils.setTextContent(originalText, item.originalText || '');
+  originalDiv.appendChild(originalText);
+  contentDiv.appendChild(originalDiv);
+  
+  const suggestedDiv = DomUtils.createElement('div', { className: 'review-suggested' });
+  const suggestedLabel = DomUtils.createElement('strong');
+  DomUtils.setTextContent(suggestedLabel, '建议: ');
+  suggestedDiv.appendChild(suggestedLabel);
+  const suggestedText = DomUtils.createElement('span');
+  DomUtils.setTextContent(suggestedText, item.suggestedText || '');
+  suggestedDiv.appendChild(suggestedText);
+  contentDiv.appendChild(suggestedDiv);
+  
+  if (item.editedText) {
+    const editedDiv = DomUtils.createElement('div', { className: 'review-edited' });
+    const editedLabel = DomUtils.createElement('strong');
+    DomUtils.setTextContent(editedLabel, '编辑后: ');
+    editedDiv.appendChild(editedLabel);
+    const editedText = DomUtils.createElement('span');
+    DomUtils.setTextContent(editedText, item.editedText);
+    editedDiv.appendChild(editedText);
+    contentDiv.appendChild(editedDiv);
   }
+  
+  itemDiv.appendChild(contentDiv);
+  
+  const actionsDiv = DomUtils.createElement('div', { className: 'review-item-actions' });
+  
+  if (item.status === 'pending') {
+    const approveBtn = DomUtils.createElement('button', {
+      className: 'btn-approve',
+      onclick: () => approveReviewItem(item.id)
+    });
+    DomUtils.setTextContent(approveBtn, '通过');
+    actionsDiv.appendChild(approveBtn);
+    
+    const rejectBtn = DomUtils.createElement('button', {
+      className: 'btn-reject',
+      onclick: () => rejectReviewItem(item.id)
+    });
+    DomUtils.setTextContent(rejectBtn, '拒绝');
+    actionsDiv.appendChild(rejectBtn);
+    
+    const editBtn = DomUtils.createElement('button', {
+      className: 'btn-edit',
+      onclick: () => editReviewItem(item.id)
+    });
+    DomUtils.setTextContent(editBtn, '编辑');
+    actionsDiv.appendChild(editBtn);
+  } else if (item.status === 'edited') {
+    const restoreBtn = DomUtils.createElement('button', {
+      className: 'btn-restore',
+      onclick: () => restoreReviewItem(item.id)
+    });
+    DomUtils.setTextContent(restoreBtn, '恢复原文');
+    actionsDiv.appendChild(restoreBtn);
+  }
+  
+  const statusSpan = DomUtils.createElement('span', { className: `review-status review-status-${item.status}` });
+  DomUtils.setTextContent(statusSpan, getReviewStatusText(item.status));
+  actionsDiv.appendChild(statusSpan);
+  
+  itemDiv.appendChild(actionsDiv);
+  
+  return itemDiv;
+}
 
-  list.innerHTML = reviewItems
-    .map((item) => {
-      const confidenceHtml =
-        item.confidence > 0
-          ? `<span class="confidence-badge">置信度: ${(item.confidence * 100).toFixed(0)}%</span>`
-          : "";
+function getModificationTypeText(type) {
+  const map = {
+    typo: '错别字',
+    duplicate_paragraph: '重复段落',
+    advertisement: '广告',
+    grammar: '语法错误',
+    style: '风格问题'
+  };
+  return map[type] || type;
+}
 
-      let actionsHtml = "";
-      if (item.status === "pending") {
-        actionsHtml = `
-        <div class="item-actions">
-          <button class="btn-approve" onclick="approveItem(${item.id})">通过</button>
-          <button class="btn-reject" onclick="rejectItem(${item.id})">拒绝</button>
-          <button class="btn-edit" onclick="showEditDialog(${item.id})">编辑</button>
-        </div>`;
-      } else if (item.status === "approved" || item.status === "rejected") {
-        actionsHtml = `
-        <div class="item-actions">
-          <button class="btn-restore" onclick="restoreItem(${item.id})">恢复</button>
-        </div>`;
-      } else if (item.status === "edited") {
-        actionsHtml = `
-        <div class="item-actions">
-          <span class="edited-text">已编辑为: ${escapeHtml(item.editedText)}</span>
-          <button class="btn-restore" onclick="restoreItem(${item.id})">恢复</button>
-        </div>`;
+function getReviewStatusText(status) {
+  const map = {
+    pending: '待审核',
+    approved: '已通过',
+    rejected: '已拒绝',
+    edited: '已编辑'
+  };
+  return map[status] || status;
+}
+
+function approveReviewItem(itemId) {
+  if (!currentFileMd5) return;
+  
+  AppConfig.apiRequest(`/files/${currentFileMd5}/approve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ itemId })
+  })
+    .then((data) => {
+      if (data.success) {
+        showFeedback('已通过修改建议', 'success');
+        loadReviewItems();
+      } else {
+        showFeedback(data.message, 'error');
       }
-
-      const statusBadge = `<span class="status-badge ${item.status}">${getStatusText(item.status)}</span>`;
-
-      return `
-      <div class="review-item ${item.status}">
-        <div class="item-header">
-          <span class="line-number">第 ${item.lineNum} 行</span>
-          ${statusBadge}
-          ${confidenceHtml}
-          <span class="item-type">${item.type}</span>
-        </div>
-        <div class="item-context">
-          ${item.prevLine ? `<div class="context-line prev">${escapeHtml(item.prevLine)}</div>` : ""}
-          <div class="current-line">${highlightInLine(item.fullLine, item.original)}</div>
-          ${item.nextLine ? `<div class="context-line next">${escapeHtml(item.nextLine)}</div>` : ""}
-        </div>
-        <div class="item-detail">
-          <div class="original"><strong>待修复:</strong> ${escapeHtml(item.original)}</div>
-          <div class="suggested"><strong>修正为:</strong> ${escapeHtml(item.suggested)}</div>
-        </div>
-        ${actionsHtml}
-      </div>`;
     })
-    .join("");
-}
-
-function highlightInLine(fullLine, target) {
-  if (!fullLine || !target) return escapeHtml(fullLine);
-  const escaped = escapeHtml(fullLine);
-  const escapedTarget = escapeHtml(target);
-  return escaped.replace(escapedTarget, `<mark>${escapedTarget}</mark>`);
-}
-
-function approveItem(itemId) {
-  fetch(`/api/files/${currentFileMd5}/approve`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ itemId }),
-  })
-    .then((r) => r.json())
-    .then((data) => {
-      if (data.success) {
-        showFeedback("已通过");
-        loadReviewItems();
-      } else showFeedback(data.message, "error");
+    .catch((err) => {
+      showFeedback('操作失败: ' + err.message, 'error');
     });
 }
 
-function rejectItem(itemId) {
-  fetch(`/api/files/${currentFileMd5}/reject`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ itemId }),
+function rejectReviewItem(itemId) {
+  if (!currentFileMd5) return;
+  
+  AppConfig.apiRequest(`/files/${currentFileMd5}/reject`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ itemId })
   })
-    .then((r) => r.json())
     .then((data) => {
       if (data.success) {
-        showFeedback("已拒绝");
+        showFeedback('已拒绝修改建议', 'success');
         loadReviewItems();
-      } else showFeedback(data.message, "error");
+      } else {
+        showFeedback(data.message, 'error');
+      }
+    })
+    .catch((err) => {
+      showFeedback('操作失败: ' + err.message, 'error');
     });
 }
 
-function showEditDialog(itemId) {
-  const item = reviewItems.find((i) => i.id === itemId);
+function editReviewItem(itemId) {
+  const item = reviewItems.find(i => i.id === itemId);
   if (!item) return;
-
-  const editedText = prompt("请输入修改后的文本:", item.suggested);
+  
+  const editedText = prompt('请输入编辑后的文本:', item.suggestedText || item.originalText);
   if (editedText === null) return;
-
-  fetch(`/api/files/${currentFileMd5}/edit`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ itemId, editedText }),
+  
+  AppConfig.apiRequest(`/files/${currentFileMd5}/edit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ itemId, editedText })
   })
-    .then((r) => r.json())
     .then((data) => {
       if (data.success) {
-        showFeedback("已编辑");
+        showFeedback('已保存编辑', 'success');
         loadReviewItems();
-      } else showFeedback(data.message, "error");
+      } else {
+        showFeedback(data.message, 'error');
+      }
+    })
+    .catch((err) => {
+      showFeedback('编辑失败: ' + err.message, 'error');
     });
 }
 
-function restoreItem(itemId) {
-  fetch(`/api/files/${currentFileMd5}/restore`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ itemId }),
+function restoreReviewItem(itemId) {
+  AppConfig.apiRequest(`/files/${currentFileMd5}/restore`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ itemId })
   })
-    .then((r) => r.json())
     .then((data) => {
       if (data.success) {
-        showFeedback("已恢复");
+        showFeedback('已恢复原文', 'success');
         loadReviewItems();
-      } else showFeedback(data.message, "error");
+      } else {
+        showFeedback(data.message, 'error');
+      }
+    })
+    .catch((err) => {
+      showFeedback('恢复失败: ' + err.message, 'error');
     });
 }
 
 function batchApproveAll() {
-  const pendingItems = reviewItems.filter((i) => i.status === "pending");
-  if (pendingItems.length === 0) {
-    showFeedback("没有待审核项");
-    return;
-  }
-  if (!confirm(`确定通过全部 ${pendingItems.length} 条待审核建议？`)) return;
-
-  const itemIds = pendingItems.map((i) => i.id);
-  fetch(`/api/files/${currentFileMd5}/batch-approve`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ itemIds }),
+  if (!currentFileMd5 || !confirm('确定通过所有待审核项？')) return;
+  
+  AppConfig.apiRequest(`/files/${currentFileMd5}/batch-approve`, {
+    method: 'POST'
   })
-    .then((r) => r.json())
     .then((data) => {
       if (data.success) {
-        showFeedback(data.message);
+        showFeedback('已通过所有待审核项', 'success');
         loadReviewItems();
-      } else showFeedback(data.message, "error");
+      } else {
+        showFeedback(data.message, 'error');
+      }
+    })
+    .catch((err) => {
+      showFeedback('批量操作失败: ' + err.message, 'error');
     });
 }
 
 function batchRejectAll() {
-  const pendingItems = reviewItems.filter((i) => i.status === "pending");
-  if (pendingItems.length === 0) {
-    showFeedback("没有待审核项");
-    return;
-  }
-  if (!confirm(`确定拒绝全部 ${pendingItems.length} 条待审核建议？`)) return;
-
-  const itemIds = pendingItems.map((i) => i.id);
-  fetch(`/api/files/${currentFileMd5}/batch-reject`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ itemIds }),
+  if (!currentFileMd5 || !confirm('确定拒绝所有待审核项？')) return;
+  
+  AppConfig.apiRequest(`/files/${currentFileMd5}/batch-reject`, {
+    method: 'POST'
   })
-    .then((r) => r.json())
     .then((data) => {
       if (data.success) {
-        showFeedback(data.message);
+        showFeedback('已拒绝所有待审核项', 'success');
         loadReviewItems();
-      } else showFeedback(data.message, "error");
+      } else {
+        showFeedback(data.message, 'error');
+      }
+    })
+    .catch((err) => {
+      showFeedback('批量操作失败: ' + err.message, 'error');
     });
 }
 
 function updateReviewProgress() {
-  fetch(`/api/files/${currentFileMd5}/status`)
-    .then((r) => r.json())
-    .then((data) => {
-      if (!data.success) return;
-
-      const progressText = document.getElementById("review-progress-text");
-      if (progressText && data.reviewTotal !== undefined) {
-        progressText.textContent = `${data.reviewResolved}/${data.reviewTotal}`;
-      }
-
-      const finalizeBtn = document.getElementById("finalize-btn");
-      if (finalizeBtn) {
-        const allDone =
-          data.reviewTotal > 0 && data.reviewResolved === data.reviewTotal;
-        finalizeBtn.style.display = allDone ? "inline-block" : "none";
-      }
-    });
+  const total = reviewItems.length;
+  const pending = reviewItems.filter(item => item.status === 'pending').length;
+  const progressText = document.getElementById('review-progress-text');
+  const finalizeBtn = document.getElementById('finalize-btn');
+  
+  if (progressText) {
+    DomUtils.setTextContent(progressText, `${total - pending}/${total}`);
+  }
+  
+  if (finalizeBtn) {
+    finalizeBtn.style.display = pending === 0 ? 'inline-block' : 'none';
+  }
 }
 
 function finalizeFile() {
-  if (!confirm("确定完成审核并生成最终文件？")) return;
-
-  fetch(`/api/files/${currentFileMd5}/finalize`, { method: "POST" })
-    .then((r) => r.json())
+  if (!currentFileMd5 || !confirm('确定完成审核并生成最终文件？')) return;
+  
+  AppConfig.apiRequest(`/files/${currentFileMd5}/finalize`, {
+    method: 'POST'
+  })
     .then((data) => {
       if (data.success) {
-        showFeedback(data.message);
-        showCompleted();
-      } else showFeedback(data.message, "error");
+        showFeedback('文件处理完成', 'success');
+        showSection('completed');
+        updateCompletedInfo();
+      } else {
+        showFeedback(data.message, 'error');
+      }
+    })
+    .catch((err) => {
+      showFeedback('完成处理失败: ' + err.message, 'error');
     });
 }
 
-// ========== 完成界面 ==========
-
-function showCompleted() {
-  showSection("completed");
-  const infoEl = document.getElementById("completed-info");
-  if (infoEl && currentFileMd5) {
-    infoEl.innerHTML = `<p>文件处理完成！</p><p>MD5: ${currentFileMd5}</p>`;
-  }
+function updateCompletedInfo() {
+  const infoDiv = document.getElementById('completed-info');
+  if (!infoDiv || !currentFileMd5) return;
+  
+  AppConfig.apiRequest(`/files/${currentFileMd5}`)
+    .then((data) => {
+      if (!data.success) return;
+      
+      const file = data.file;
+      const info = DomUtils.createElement('div');
+      
+      const title = DomUtils.createElement('h3');
+      DomUtils.setTextContent(title, file.title || file.fileName);
+      info.appendChild(title);
+      
+      const details = DomUtils.createElement('p');
+      const parts = [];
+      if (file.author) parts.push(`作者: ${file.author}`);
+      parts.push(`大小: ${formatFileSize(file.fileSize)}`);
+      parts.push(`状态: ${getStatusText(file.status)}`);
+      parts.push(`完成时间: ${formatTime(file.updatedAt)}`);
+      DomUtils.setTextContent(details, parts.join(' | '));
+      info.appendChild(details);
+      
+      infoDiv.innerHTML = '';
+      infoDiv.appendChild(info);
+    })
+    .catch((err) => {
+      console.error('获取完成信息失败:', err);
+    });
 }
 
 function downloadFinalFile() {
-  if (currentFileMd5)
-    window.open(`/api/files/${currentFileMd5}/download`, "_blank");
+  if (currentFileMd5) {
+    downloadFile(currentFileMd5);
+  }
 }
 
-// ========== 初始化 ==========
+// ========== 规则配置相关函数 ==========
 
-document.addEventListener("DOMContentLoaded", () => {
-  refreshFileList();
-
-  const uploadArea = document.getElementById("upload-area");
-  if (uploadArea) {
-    uploadArea.addEventListener("dragover", (e) => {
-      e.preventDefault();
-      uploadArea.classList.add("drag-over");
-    });
-    uploadArea.addEventListener("dragleave", () => {
-      uploadArea.classList.remove("drag-over");
-    });
-    uploadArea.addEventListener("drop", (e) => {
-      e.preventDefault();
-      uploadArea.classList.remove("drag-over");
-      const file = e.dataTransfer.files[0];
-      if (file) {
-        const input = document.getElementById("file-input");
-        const dt = new DataTransfer();
-        dt.items.add(file);
-        input.files = dt.files;
-        handleFileUpload({ target: input });
+function saveRulesAndProcess() {
+  if (!currentFileMd5) return;
+  
+  const rulesConfig = {
+    enableBasicCleaning: document.getElementById('rule-basic-cleaning').checked,
+    traditionalToSimple: document.getElementById('rule-traditional-simple').checked,
+    enableVectorDetection: document.getElementById('rule-vector-detection').checked,
+    vectorSimilarityThreshold: parseFloat(document.getElementById('rule-similarity').value) || 0.95,
+    enableModelRepair: document.getElementById('rule-model-repair').checked,
+    typoMap: document.getElementById('rule-typo-map').value,
+    adBlacklist: document.getElementById('rule-ad-blacklist').value
+  };
+  
+  AppConfig.apiRequest(`/files/${currentFileMd5}/rules`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rulesConfig: JSON.stringify(rulesConfig) })
+  })
+    .then((data) => {
+      if (data.success) {
+        showFeedback('规则已保存', 'success');
+        startProcessing();
+      } else {
+        showFeedback(data.message, 'error');
       }
+    })
+    .catch((err) => {
+      showFeedback('保存规则失败: ' + err.message, 'error');
     });
+}
+
+function startProcessing() {
+  if (!currentFileMd5) return;
+  
+  AppConfig.apiRequest(`/files/${currentFileMd5}/run`, { method: 'POST' })
+    .then((data) => {
+      if (data.success) {
+        showSection('processing');
+        startPolling();
+      } else {
+        showFeedback(data.message, 'error');
+      }
+    })
+    .catch((err) => {
+      showFeedback('启动处理失败: ' + err.message, 'error');
+    });
+}
+
+function downloadCurrentVersion() {
+  if (currentFileMd5) {
+    downloadFile(currentFileMd5);
   }
-});
+}
+
+function toggleLogs() {
+  const logsContent = document.getElementById('logs-content');
+  const toggleIcon = document.getElementById('logs-toggle-icon');
+  if (logsContent && toggleIcon) {
+    if (logsContent.style.display === 'none') {
+      logsContent.style.display = 'block';
+      toggleIcon.textContent = '▲';
+    } else {
+      logsContent.style.display = 'none';
+      toggleIcon.textContent = '▼';
+    }
+  }
+}
+
+// 页面加载时初始化
+document.addEventListener('DOMContentLoaded', initApp);

@@ -7,7 +7,38 @@
     <link rel="stylesheet" href="/static/css/style.css?v=5" />
   </head>
   <body>
-    <div id="app">
+    <!-- 认证界面 -->
+    <div id="auth-section" style="display: none;">
+      <div class="auth-container">
+        <div class="auth-card">
+          <h1>湮文 VoidText</h1>
+          <p class="auth-description">文本处理与审核系统</p>
+          
+          <div class="auth-form">
+            <div class="form-group">
+              <label for="auth-token">认证 Token</label>
+              <input 
+                type="password" 
+                id="auth-token" 
+                placeholder="请输入认证token" 
+                class="auth-input"
+                onkeypress="if(event.key === 'Enter') handleLogin()"
+              />
+            </div>
+            <div class="form-group">
+              <button class="btn-primary" onclick="handleLogin()">登录</button>
+            </div>
+            <div class="auth-hint">
+              <p>提示：认证token在服务端配置文件中设置</p>
+              <p>如需禁用认证，请设置环境变量 ENABLE_AUTH=false</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 主应用界面 -->
+    <div id="app" style="display: none;">
       <header>
         <h1>湮文</h1>
         <nav>
@@ -16,6 +47,9 @@
           </button>
           <button class="nav-btn" onclick="showSection('upload')">
             上传文件
+          </button>
+          <button class="nav-btn" onclick="handleLogout()" style="margin-left: auto;">
+            退出登录
           </button>
         </nav>
       </header>
@@ -247,6 +281,14 @@
 
       <div id="feedback" class="feedback" style="display: none"></div>
     </div>
-    <script src="/static/js/main.js?v=4"></script>
+    <script src="/static/js/config.js?v=1"></script>
+    <script src="/static/js/dom-utils.js?v=1"></script>
+    <!-- 模块化JS文件 -->
+    <script src="/static/js/modules/auth.js?v=1"></script>
+    <script src="/static/js/modules/file-manager.js?v=1"></script>
+    <script src="/static/js/modules/processing.js?v=1"></script>
+    <script src="/static/js/modules/review.js?v=1"></script>
+    <script src="/static/js/modules/rules-config.js?v=1"></script>
+    <script src="/static/js/modules/app.js?v=1"></script>
   </body>
 </html>

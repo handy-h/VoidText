@@ -1,0 +1,226 @@
+// 处理进度模块
+const ProcessingModule = (function() {
+  // 私有变量
+  let pollingTimer = null;
+  let currentFileMd5 = null;
+  
+  // 初始化
+  function init() {
+    // 绑定事件
+    bindEvents();
+  }
+  
+  // 绑定事件
+  function bindEvents() {
+    // 处理日志切换
+    const logsHeader = document.getElementById('logs-header');
+    if (logsHeader) {
+      logsHeader.addEventListener('click', toggleLogs);
+    }
+  }
+  
+  // 查看处理进度
+  function viewProgress(md5) {
+    currentFileMd5 = md5;
+    FileManager.showSection('processing');
+    startPolling();
+  }
+  
+  // 开始轮询
+  function startPolling() {
+    stopPolling();
+    pollingTimer = setInterval(updateProgress, 2000);
+    updateProgress();
+  }
+  
+  // 停止轮询
+  function stopPolling() {
+    if (pollingTimer) {
+      clearInterval(pollingTimer);
+      pollingTimer = null;
+    }
+  }
+  
+  // 更新进度
+  function updateProgress() {
+    if (!currentFileMd5) return;
+    
+    AppConfig.apiRequest(`/files/${currentFileMd5}/status`)
+      .then((data) => {
+        if (!data.success) return;
+        
+        // 更新进度显示
+        const progressBar = document.getElementById("overall-progress");
+        const progressText = document.getElementById("progress-text");
+        const processingMessage = document.getElementById("processing-message");
+        const currentAction = document.getElementById("current-action");
+        
+        if (progressBar && progressText) {
+          const progress = data.progress || 0;
+          progressBar.style.width = progress + "%";
+          DomUtils.setTextContent(progressText, progress + "%");
+        }
+        
+        if (processingMessage) {
+          let message = `状态: ${getStatusText(data.status)}`;
+          if (data.currentStep) {
+            message += ` | 当前步骤: ${getStepText(data.currentStep)}`;
+          }
+          DomUtils.setTextContent(processingMessage, message);
+        }
+        
+        if (currentAction && data.currentAction) {
+          DomUtils.setTextContent(currentAction, data.currentAction);
+        }
+        
+        // 更新步骤状态
+        updateStepProgress(data.currentStep);
+        
+        // 如果处理完成或失败，停止轮询
+        if (data.status === "completed" || data.status === "failed" || data.status === "reviewing") {
+          stopPolling();
+          if (data.status === "reviewing") {
+            FileManager.showSection("review");
+            ReviewModule.loadReviewItems();
+          } else if (data.status === "completed") {
+            FileManager.showSection("completed");
+            updateCompletedInfo();
+          }
+        }
+      })
+      .catch((err) => {
+        console.error("轮询失败:", err);
+      });
+  }
+  
+  // 更新步骤进度
+  function updateStepProgress(currentStep) {
+    const steps = ["cleaning", "indexing", "llm_fix", "review", "finalizing"];
+    const stepIndex = steps.indexOf(currentStep);
+    
+    steps.forEach((step, index) => {
+      const stepItem = document.querySelector(`.step-item[data-step="${step}"]`);
+      if (stepItem) {
+        stepItem.classList.remove("active", "completed");
+        if (index < stepIndex) {
+          stepItem.classList.add("completed");
+        } else if (index === stepIndex) {
+          stepItem.classList.add("active");
+        }
+      }
+    });
+  }
+  
+  // 获取状态文本
+  function getStatusText(status) {
+    const map = {
+      pending: "待处理",
+      processing: "处理中",
+      reviewing: "审核中",
+      completed: "已完成",
+      failed: "失败",
+    };
+    return map[status] || status;
+  }
+  
+  // 获取步骤文本
+  function getStepText(step) {
+    const map = {
+      cleaning: "基础清洗",
+      indexing: "向量检测",
+      llm_fix: "LLM修复",
+      review: "人工审核",
+      finalizing: "生成文件",
+    };
+    return map[step] || step || "-";
+  }
+  
+  // 切换日志显示
+  function toggleLogs() {
+    const logsContent = document.getElementById('logs-content');
+    const toggleIcon = document.getElementById('logs-toggle-icon');
+    if (logsContent && toggleIcon) {
+      if (logsContent.style.display === 'none') {
+        logsContent.style.display = 'block';
+        toggleIcon.textContent = '▲';
+      } else {
+        logsContent.style.display = 'none';
+        toggleIcon.textContent = '▼';
+      }
+    }
+  }
+  
+  // 更新完成信息
+  function updateCompletedInfo() {
+    const infoDiv = document.getElementById('completed-info');
+    if (!infoDiv || !currentFileMd5) return;
+    
+    AppConfig.apiRequest(`/files/${currentFileMd5}`)
+      .then((data) => {
+        if (!data.success) return;
+        
+        const file = data.file;
+        const info = DomUtils.createElement('div');
+        
+        const title = DomUtils.createElement('h3');
+        DomUtils.setTextContent(title, file.title || file.fileName);
+        info.appendChild(title);
+        
+        const details = DomUtils.createElement('p');
+        const parts = [];
+        if (file.author) parts.push(`作者: ${file.author}`);
+        parts.push(`大小: ${formatFileSize(file.fileSize)}`);
+        parts.push(`状态: ${getStatusText(file.status)}`);
+        parts.push(`完成时间: ${formatTime(file.updatedAt)}`);
+        DomUtils.setTextContent(details, parts.join(' | '));
+        info.appendChild(details);
+        
+        infoDiv.innerHTML = '';
+        infoDiv.appendChild(info);
+      })
+      .catch((err) => {
+        console.error('获取完成信息失败:', err);
+      });
+  }
+  
+  // 格式化文件大小
+  function formatFileSize(bytes) {
+    const kb = 1024;
+    const mb = kb * 1024;
+    const gb = mb * 1024;
+    switch (true) {
+      case bytes >= gb:
+        return (bytes / gb).toFixed(1) + "GB";
+      case bytes >= mb:
+        return (bytes / mb).toFixed(1) + "MB";
+      case bytes >= kb:
+        return (bytes / kb).toFixed(1) + "KB";
+      default:
+        return bytes + "B";
+    }
+  }
+  
+  // 格式化时间
+  function formatTime(ts) {
+    if (!ts) return "";
+    try {
+      return new Date(ts).toLocaleString("zh-CN");
+    } catch {
+      return ts;
+    }
+  }
+  
+  // 公共API
+  return {
+    init,
+    viewProgress,
+    startPolling,
+    stopPolling,
+    updateProgress,
+    getCurrentFileMd5: () => currentFileMd5,
+    setCurrentFileMd5: (md5) => { currentFileMd5 = md5; }
+  };
+})();
+
+// 导出到全局作用域
+window.ProcessingModule = ProcessingModule;
