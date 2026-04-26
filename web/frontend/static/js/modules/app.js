@@ -1,8 +1,12 @@
 // 主应用模块
 const AppModule = (function() {
   // 初始化应用
-  function init() {
+  async function init() {
     console.log('初始化应用模块...');
+    
+    // 先从后端获取认证配置
+    await AppConfig.fetchAuthConfig();
+    console.log('认证配置:', AppConfig.authConfig);
     
     // 初始化所有模块
     AuthModule.init();

@@ -343,7 +343,7 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, _ *data
 	// 保存中间文件
 	if err := saveIntermediateFile(fileMd5, StepLlmFix, repairResult.Content); err != nil {
 		// 记录错误但不终止，因为修复结果可能仍可用
-		logging.Error("intermediate_save_failed", map[string]interface{}{
+		logging.Error("intermediate_save_failed", nil, map[string]interface{}{
 			"file_md5": fileMd5,
 			"step":     StepLlmFix,
 			"error":    err.Error(),
@@ -479,7 +479,7 @@ func checkAPIErrorRate(fileMd5 string, stats map[string]int) {
 	criticalThreshold := 30.0 // 30%错误率触发严重警告
 
 	if errorRate >= criticalThreshold {
-		logging.Error("api_error_rate_critical", map[string]interface{}{
+		logging.Error("api_error_rate_critical", nil, map[string]interface{}{
 			"file_md5":       fileMd5,
 			"total_chunks":   totalChunks,
 			"api_errors":     apiErrors,

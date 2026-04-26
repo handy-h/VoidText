@@ -16,10 +16,35 @@ const AppConfig = {
     return '';
   },
   
+  // 认证配置（从后端获取）
+  authConfig: {
+    enabled: null  // null表示尚未获取，true/false表示后端配置
+  },
+  
+  // 从后端获取认证配置
+  fetchAuthConfig: async function() {
+    try {
+      const response = await fetch('/health');
+      if (response.ok) {
+        const data = await response.json();
+        if (data.services && data.services.authentication) {
+          this.authConfig.enabled = data.services.authentication.status === 'enabled';
+        }
+      }
+    } catch (error) {
+      console.error('获取认证配置失败:', error);
+    }
+    return this.authConfig.enabled;
+  },
+  
   // 是否启用认证
   isAuthEnabled: function() {
-    const token = this.getAuthToken();
-    return token && token.length > 0;
+    // 如果已获取后端配置，使用后端配置
+    if (this.authConfig.enabled !== null) {
+      return this.authConfig.enabled;
+    }
+    // 否则默认启用认证（安全起见）
+    return true;
   },
   
   // 设置认证token

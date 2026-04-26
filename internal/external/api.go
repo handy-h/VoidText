@@ -488,7 +488,7 @@ func (api *API) doRequestWithRetry(req *http.Request) (*http.Response, error) {
 		duration := time.Since(startTime).Milliseconds()
 
 		if lastErr != nil {
-			logging.Error("api_request_error", map[string]interface{}{
+			logging.Error("api_request_error", nil, map[string]interface{}{
 				"retry":    retry,
 				"duration": duration,
 				"error":    lastErr.Error(),
@@ -537,7 +537,7 @@ func (api *API) doRequestWithRetry(req *http.Request) (*http.Response, error) {
 			
 		case statusCode >= 500: // 服务器错误
 			shouldRetry = true
-			logging.Error("api_server_error", map[string]interface{}{
+			logging.Error("api_server_error", nil, map[string]interface{}{
 				"retry":     retry,
 				"status":    statusCode,
 				"error":     errorBody,
@@ -545,7 +545,7 @@ func (api *API) doRequestWithRetry(req *http.Request) (*http.Response, error) {
 			})
 			
 		case statusCode == 400: // 客户端错误（通常不重试）
-			logging.Error("api_client_error", map[string]interface{}{
+			logging.Error("api_client_error", nil, map[string]interface{}{
 				"retry":     retry,
 				"status":    statusCode,
 				"error":     errorBody,
@@ -554,7 +554,7 @@ func (api *API) doRequestWithRetry(req *http.Request) (*http.Response, error) {
 			lastErr = fmt.Errorf("API错误 (状态码: %d): %s", statusCode, errorBody)
 			
 		default: // 其他错误
-			logging.Error("api_other_error", map[string]interface{}{
+			logging.Error("api_other_error", nil, map[string]interface{}{
 				"retry":     retry,
 				"status":    statusCode,
 				"error":     errorBody,
@@ -617,7 +617,7 @@ func (api *API) GenerateEmbedding(texts []string) (*EmbeddingResponse, error) {
 
 	resp, err := api.doJSONRequestWithRetry(url, req)
 	if err != nil {
-		logging.Error("embedding_api_failed", map[string]interface{}{
+		logging.Error("embedding_api_failed", nil, map[string]interface{}{
 			"url":        url,
 			"model":      api.embeddingModelName,
 			"text_count": len(texts),
@@ -635,7 +635,7 @@ func (api *API) GenerateEmbedding(texts []string) (*EmbeddingResponse, error) {
 			StatusCode: resp.StatusCode,
 			Message:    apiErrResp.Error.Message,
 		}
-		logging.Error("embedding_api_error", map[string]interface{}{
+		logging.Error("embedding_api_error", nil, map[string]interface{}{
 			"url":      url,
 			"model":    api.embeddingModelName,
 			"status":   resp.StatusCode,
@@ -647,7 +647,7 @@ func (api *API) GenerateEmbedding(texts []string) (*EmbeddingResponse, error) {
 
 	var embeddingResp EmbeddingResponse
 	if err := json.NewDecoder(resp.Body).Decode(&embeddingResp); err != nil {
-		logging.Error("embedding_decode_failed", map[string]interface{}{
+		logging.Error("embedding_decode_failed", nil, map[string]interface{}{
 			"url":      url,
 			"model":    api.embeddingModelName,
 			"duration": time.Since(startTime).Milliseconds(),
@@ -691,7 +691,7 @@ func (api *API) GenerateCompletion(prompt string, maxTokens int, temperature flo
 
 	resp, err := api.doJSONRequestWithRetry(url, req)
 	if err != nil {
-		logging.Error("completion_api_failed", map[string]interface{}{
+		logging.Error("completion_api_failed", nil, map[string]interface{}{
 			"url":      url,
 			"model":    api.completionModelName,
 			"duration": 0,
@@ -708,7 +708,7 @@ func (api *API) GenerateCompletion(prompt string, maxTokens int, temperature flo
 			StatusCode: resp.StatusCode,
 			Message:    apiErrResp.Error.Message,
 		}
-		logging.Error("completion_api_error", map[string]interface{}{
+		logging.Error("completion_api_error", nil, map[string]interface{}{
 			"url":    url,
 			"model":  api.completionModelName,
 			"status": resp.StatusCode,
@@ -719,7 +719,7 @@ func (api *API) GenerateCompletion(prompt string, maxTokens int, temperature flo
 
 	var completionResp CompletionResponse
 	if err := json.NewDecoder(resp.Body).Decode(&completionResp); err != nil {
-		logging.Error("completion_decode_failed", map[string]interface{}{
+		logging.Error("completion_decode_failed", nil, map[string]interface{}{
 			"url":   url,
 			"model": api.completionModelName,
 			"error": err.Error(),
@@ -767,7 +767,7 @@ func (api *API) GenerateChatCompletion(systemPrompt, userPrompt string, maxToken
 
 	resp, err := api.doJSONRequestWithRetry(url, req)
 	if err != nil {
-		logging.Error("chat_completion_api_failed", map[string]interface{}{
+		logging.Error("chat_completion_api_failed", nil, map[string]interface{}{
 			"url":         url,
 			"model":       api.completionModelName,
 			"input_len":   len(userPrompt),
@@ -792,7 +792,7 @@ func (api *API) GenerateChatCompletion(systemPrompt, userPrompt string, maxToken
 			logging.APIRefusal(0, "v1", userPrompt[:min(100, len(userPrompt))], apiErrResp.Error.Message)
 		}
 
-		logging.Error("chat_completion_api_error", map[string]interface{}{
+		logging.Error("chat_completion_api_error", nil, map[string]interface{}{
 			"url":        url,
 			"model":      api.completionModelName,
 			"status":     resp.StatusCode,
@@ -805,7 +805,7 @@ func (api *API) GenerateChatCompletion(systemPrompt, userPrompt string, maxToken
 
 	var chatResp ChatCompletionResponse
 	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
-		logging.Error("chat_completion_decode_failed", map[string]interface{}{
+		logging.Error("chat_completion_decode_failed", nil, map[string]interface{}{
 			"url":      url,
 			"model":    api.completionModelName,
 			"duration": time.Since(startTime).Milliseconds(),

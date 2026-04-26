@@ -73,12 +73,6 @@ func DefaultRateLimitConfig() *RateLimitConfig {
 
 // GetRateLimitConfig 获取限流配置
 func GetRateLimitConfig() *RateLimitConfig {
-  if AppConfigInstance == nil {
-    return DefaultRateLimitConfig()
-  }
-  
-  // 如果配置中有限流设置，使用配置的值
-  // 否则返回默认配置
   if AppConfigInstance.RateLimit != nil {
     return AppConfigInstance.RateLimit
   }

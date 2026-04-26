@@ -122,7 +122,7 @@ func Load() error {
 		EnableLocalModel:         getEnvBool("ENABLE_LOCAL_MODEL", false),
 		LocalModelURL:            getEnvStr("LOCAL_MODEL_URL", "http://localhost:11434"),
 		LocalModelName:           getEnvStr("LOCAL_MODEL_NAME", "qwen2.5:7b-instruct-q4_K_M"),
-		LocalModelTimeout:        getEnvInt("LOCAL_MODEL_TIMEOUT", 60),
+		LocalModelTimeout:        getEnvInt("LOCAL_MODEL_TIMEOUT", 180),
 		LocalConfidenceThreshold: getEnvFloat("LOCAL_CONFIDENCE_THRESHOLD", 0.7),
 		LocalFallbackEnabled:     getEnvBool("LOCAL_FALLBACK_ENABLED", true),
 		

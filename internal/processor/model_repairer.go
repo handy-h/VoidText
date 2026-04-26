@@ -4,6 +4,7 @@ import (
 	"crypto/md5"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -40,7 +41,7 @@ type ModelRepairer struct {
 	config        ModelRepairerConfig
 	promptManager *PromptManager           // 动态提示词管理器
 	cacheRepo     *database.ChunkCacheRepo // 块缓存仓库
-	workerPool    *WorkerPool              // 工作池（用于并发处理）
+	workerPool    *ChunkWorkerPool              // 工作池（用于并发处理）
 	monitor       *EvolverMonitor          // 自进化监控器（可选）
 	ollamaClient  *external.OllamaClient   // Ollama客户端（本地模型）
 }
@@ -81,7 +82,7 @@ func NewModelRepairer(modelType, modelName string) *ModelRepairer {
 	repo := database.NewChunkCacheRepo()
 
 	// 初始化工作池（默认10个worker）
-	workerPool := NewWorkerPool(1, repo, pm)
+	workerPool := NewChunkWorkerPool(1, repo, pm)
 
 	// 创建自进化监控器（可选，可根据配置启用）
 	monitor := NewEvolverMonitor(pm)
@@ -193,7 +194,18 @@ func (mr *ModelRepairer) RepairTextWithFileMd5(fileMd5, content string, resume b
 // 3. 当合并后超过maxChars时，将最后一个段落放入下一个Chunk
 // 4. 保持段落完整性，不拆分单个段落
 func (mr *ModelRepairer) SplitIntoChunks(content string, minChars, maxChars int) []ChunkInfo {
-	// 按换行符分割原始段落
+	// 首先尝试按章节分割
+	chapters := mr.splitByChapters(content, maxChars)
+	if len(chapters) > 0 {
+		logging.Info("chunking_by_chapters", map[string]interface{}{
+			"total_chapters": len(chapters),
+			"min_chars":      minChars,
+			"max_chars":      maxChars,
+		})
+		return chapters
+	}
+
+	// 如果没有找到章节，回退到按换行符分割
 	rawParagraphs := strings.Split(content, "\n")
 	if len(rawParagraphs) == 0 {
 		return []ChunkInfo{}
@@ -314,6 +326,98 @@ func (mr *ModelRepairer) SplitIntoParagraphs(content string) []string {
 	return strings.Split(content, "\n")
 }
 
+// splitByChapters 按章节分割文本
+func (mr *ModelRepairer) splitByChapters(content string, maxChars int) []ChunkInfo {
+	// 定义章节模式
+	chapterPatterns := []string{
+		`第[一二三四五六七八九十百千万零\d]+章`,      // 第1章, 第一章
+		`第[一二三四五六七八九十百千万零\d]+节`,      // 第1节, 第一节
+		`第[一二三四五六七八九十百千万零\d]+回`,      // 第1回, 第一回
+		`第[一二三四五六七八九十百千万零\d]+集`,      // 第1集, 第一集
+		`第[一二三四五六七八九十百千万零\d]+部分`,     // 第1部分, 第一部分
+		`第[一二三四五六七八九十百千万零\d]+卷`,      // 第1卷, 第一卷
+		`第[一二三四五六七八九十百千万零\d]+篇`,      // 第1篇, 第一篇
+		`第[一二三四五六七八九十百千万零\d]+幕`,      // 第1幕, 第一幕
+		`第[一二三四五六七八九十百千万零\d]+场`,      // 第1场, 第一场
+		`第[一二三四五六七八九十百千万零\d]+段`,      // 第1段, 第一段
+	}
+
+	// 合并所有模式
+	pattern := strings.Join(chapterPatterns, "|")
+	re := regexp.MustCompile(pattern)
+
+	// 查找所有章节标记
+	matches := re.FindAllStringIndex(content, -1)
+	if len(matches) == 0 {
+		return []ChunkInfo{}
+	}
+
+	chunks := []ChunkInfo{}
+	
+	// 将内容转换为rune数组以便正确处理中文字符
+	runes := []rune(content)
+	
+	// 将字节索引转换为rune索引
+	runeIndices := make([]int, len(matches))
+	for i, match := range matches {
+		// 将字节索引转换为rune索引
+		bytePos := match[0]
+		runePos := utf8.RuneCountInString(content[:bytePos])
+		runeIndices[i] = runePos
+	}
+	
+	// 处理每个章节
+	for i, runePos := range runeIndices {
+		start := runePos
+		end := len(runes)
+		
+		// 如果不是最后一个章节，结束位置是下一个章节的开始
+		if i < len(runeIndices)-1 {
+			end = runeIndices[i+1]
+		}
+		
+		// 提取章节内容
+		chapterRunes := runes[start:end]
+		chapterLen := len(chapterRunes)
+		
+		// 如果章节内容超过maxChars，需要进一步分割
+		if chapterLen <= maxChars {
+			// 章节大小合适，直接作为一个chunk
+			chunks = append(chunks, ChunkInfo{
+				Content:      string(chapterRunes),
+				StartIndex:   start,
+				EndIndex:     end - 1,
+				OriginalSize: chapterLen,
+			})
+		} else {
+			// 章节太大，需要按maxChars分割
+			for chunkStart := 0; chunkStart < chapterLen; chunkStart += maxChars {
+				chunkEnd := chunkStart + maxChars
+				if chunkEnd > chapterLen {
+					chunkEnd = chapterLen
+				}
+				
+				// 提取子chunk
+				chunkText := string(chapterRunes[chunkStart:chunkEnd])
+				chunkSize := chunkEnd - chunkStart
+				
+				// 计算在原始文本中的位置
+				chunkStartInOriginal := start + chunkStart
+				chunkEndInOriginal := start + chunkEnd - 1
+				
+				chunks = append(chunks, ChunkInfo{
+					Content:      chunkText,
+					StartIndex:   chunkStartInOriginal,
+					EndIndex:     chunkEndInOriginal,
+					OriginalSize: chunkSize,
+				})
+			}
+		}
+	}
+
+	return chunks
+}
+
 // RepairParagraph 修复单个段落（重构版）
 // 支持缓存查询、API重试和动态提示词
 func (mr *ModelRepairer) RepairParagraph(paragraph string) (string, []preprocess.Change) {
@@ -328,7 +432,7 @@ func (mr *ModelRepairer) RepairParagraph(paragraph string) (string, []preprocess
 	// 先尝试从缓存获取（幂等性）
 	cacheRecord, err := mr.cacheRepo.GetChunkRepair("", chunkHash) // fileMd5在workerPool中传递
 	if err != nil {
-		logging.Error("cache_query_failed", map[string]interface{}{
+		logging.Error("cache_query_failed", nil, map[string]interface{}{
 			"chunk_hash": chunkHash,
 			"error":      err.Error(),
 		})
@@ -369,7 +473,7 @@ func (mr *ModelRepairer) repairWithAPI(paragraph, chunkHash string) (string, []p
 			return mr.retryWithSimplifiedRequest(paragraph, chunkHash, prompt, version)
 		}
 
-		logging.Error("api_repair_failed", map[string]interface{}{
+		logging.Error("api_repair_failed", nil, map[string]interface{}{
 			"chunk_hash":     chunkHash,
 			"paragraph_len":  len(paragraph),
 			"duration_ms":    duration,
@@ -482,7 +586,7 @@ func (mr *ModelRepairer) retryWithSimplifiedRequest(paragraph, chunkHash, prompt
 	duration := time.Since(startTime).Milliseconds()
 
 	if err != nil || resp == nil || len(resp.Choices) == 0 {
-		logging.Error("api_simplified_retry_failed", map[string]interface{}{
+		logging.Error("api_simplified_retry_failed", nil, map[string]interface{}{
 			"chunk_hash":  chunkHash,
 			"duration_ms": duration,
 			"error":       err.Error(),
@@ -722,8 +826,8 @@ type ChunkResult struct {
 	CacheHit   bool                `json:"cache_hit"`
 }
 
-// WorkerPool 工作池（混合架构版）
-type WorkerPool struct {
+// ChunkWorkerPool 块处理工作池
+type ChunkWorkerPool struct {
 	workerCount     int
 	taskQueue       chan ChunkTask
 	results         chan ChunkResult
@@ -754,8 +858,8 @@ type ChunkTask struct {
 }
 
 // NewWorkerPool 创建工作池（混合架构版）
-func NewWorkerPool(workerCount int, cacheRepo *database.ChunkCacheRepo, promptManager *PromptManager) *WorkerPool {
-	wp := &WorkerPool{
+func NewChunkWorkerPool(workerCount int, cacheRepo *database.ChunkCacheRepo, promptManager *PromptManager) *ChunkWorkerPool {
+	wp := &ChunkWorkerPool{
 		workerCount:     workerCount,
 		taskQueue:       make(chan ChunkTask, workerCount*10),
 		results:         make(chan ChunkResult, workerCount*10),
@@ -779,7 +883,7 @@ func NewWorkerPool(workerCount int, cacheRepo *database.ChunkCacheRepo, promptMa
 		// 启动健康检查
 		if wp.healthManager != nil {
 			if err := wp.healthManager.Start(); err != nil {
-				logging.Error("health_check_start_failed", map[string]interface{}{
+				logging.Error("health_check_start_failed", nil, map[string]interface{}{
 					"error": err.Error(),
 				})
 			}
@@ -795,19 +899,19 @@ func NewWorkerPool(workerCount int, cacheRepo *database.ChunkCacheRepo, promptMa
 }
 
 // SetProgress 设置进度追踪器
-func (wp *WorkerPool) SetProgress(progress *ProcessingProgress) {
+func (wp *ChunkWorkerPool) SetProgress(progress *ProcessingProgress) {
 	wp.progress = progress
 }
 
 // worker 工作线程
-func (wp *WorkerPool) worker() {
+func (wp *ChunkWorkerPool) worker() {
 	for task := range wp.taskQueue {
 		wp.processTask(task)
 	}
 }
 
 // processTask 处理单个任务
-func (wp *WorkerPool) processTask(task ChunkTask) {
+func (wp *ChunkWorkerPool) processTask(task ChunkTask) {
 	defer wp.wg.Done()
 
 	// 调用processChunk处理
@@ -823,7 +927,7 @@ func calculateChunkHash(content string) string {
 }
 
 // processChunk 处理单个Chunk（混合架构版）
-func (wp *WorkerPool) processChunk(task ChunkTask) ChunkResult {
+func (wp *ChunkWorkerPool) processChunk(task ChunkTask) ChunkResult {
 	// 计算Chunk哈希
 	chunkHash := calculateChunkHash(task.Content)
 
@@ -835,7 +939,7 @@ func (wp *WorkerPool) processChunk(task ChunkTask) ChunkResult {
 	// 查询缓存
 	cacheRecord, err := wp.cacheRepo.GetChunkRepair(task.FileMd5, chunkHash)
 	if err != nil {
-		logging.Error("worker_cache_query_failed", map[string]interface{}{
+		logging.Error("worker_cache_query_failed", nil, map[string]interface{}{
 			"chunk_id":   task.ChunkID,
 			"chunk_hash": chunkHash,
 			"error":      err.Error(),
@@ -988,7 +1092,7 @@ func (wp *WorkerPool) processChunk(task ChunkTask) ChunkResult {
 		Source:           source,
 	}
 	if err := wp.cacheRepo.SaveChunkRepair(cacheRecordNew); err != nil {
-		logging.Error("worker_cache_save_failed", map[string]interface{}{
+		logging.Error("worker_cache_save_failed", nil, map[string]interface{}{
 			"chunk_id":   task.ChunkID,
 			"chunk_hash": chunkHash,
 			"error":      err.Error(),
@@ -1019,7 +1123,7 @@ func (wp *WorkerPool) processChunk(task ChunkTask) ChunkResult {
 }
 
 // detectChanges 比较原文和修复后的文本，生成变更列表
-func (wp *WorkerPool) detectChanges(original, repaired string) []preprocess.Change {
+func (wp *ChunkWorkerPool) detectChanges(original, repaired string) []preprocess.Change {
 	if original == repaired {
 		return []preprocess.Change{}
 	}
@@ -1070,7 +1174,7 @@ func (wp *WorkerPool) detectChanges(original, repaired string) []preprocess.Chan
 }
 
 // ProcessChunks 处理所有Chunk并返回结果（支持状态恢复）
-func (wp *WorkerPool) ProcessChunks(fileMd5 string, chunks []ChunkInfo, resume bool) []ChunkResult {
+func (wp *ChunkWorkerPool) ProcessChunks(fileMd5 string, chunks []ChunkInfo, resume bool) []ChunkResult {
 	totalTasks := len(chunks)
 
 	// 初始化状态管理器（恢复时也重新初始化，因为chunk数量可能变化）
@@ -1130,7 +1234,7 @@ func (wp *WorkerPool) ProcessChunks(fileMd5 string, chunks []ChunkInfo, resume b
 	// 同步状态到数据库
 	if wp.stateManager != nil {
 		if err := wp.stateManager.SyncWithDatabase(fileMd5); err != nil {
-			logging.Error("state_sync_failed", map[string]interface{}{
+			logging.Error("state_sync_failed", nil, map[string]interface{}{
 				"file_md5": fileMd5,
 				"error":    err.Error(),
 			})
@@ -1156,14 +1260,14 @@ func (wp *WorkerPool) ProcessChunks(fileMd5 string, chunks []ChunkInfo, resume b
 }
 
 // GetCacheHits 获取缓存命中数
-func (wp *WorkerPool) GetCacheHits() int {
+func (wp *ChunkWorkerPool) GetCacheHits() int {
 	wp.mu.RLock()
 	defer wp.mu.RUnlock()
 	return wp.cacheHits
 }
 
 // processWithLocalModel 使用本地模型处理文本
-func (wp *WorkerPool) processWithLocalModel(content string) (string, float64, string) {
+func (wp *ChunkWorkerPool) processWithLocalModel(content string) (string, float64, string) {
 	if wp.ollamaClient == nil {
 		return "", 0.0, "local model client not initialized"
 	}
@@ -1178,7 +1282,7 @@ func (wp *WorkerPool) processWithLocalModel(content string) (string, float64, st
 	duration := time.Since(startTime).Milliseconds()
 
 	if err != nil {
-		logging.Error("local_model_processing_failed", map[string]interface{}{
+		logging.Error("local_model_processing_failed", nil, map[string]interface{}{
 			"duration_ms": duration,
 			"error":       err.Error(),
 			"model":       wp.ollamaClient.GetModelName(),
@@ -1201,7 +1305,7 @@ func (wp *WorkerPool) processWithLocalModel(content string) (string, float64, st
 }
 
 // processWithRemoteAPI 使用远程API处理文本
-func (wp *WorkerPool) processWithRemoteAPI(task ChunkTask) (string, string, string) {
+func (wp *ChunkWorkerPool) processWithRemoteAPI(task ChunkTask) (string, string, string) {
 	startTime := time.Now()
 	prompt, _ := wp.promptManager.GetCurrentPrompt()
 	api := external.NewAPI()
@@ -1234,7 +1338,7 @@ var DefaultConfidenceConfig = ConfidenceConfig{
 }
 
 // calculateConfidence 计算本地模型处理结果的置信度
-func (wp *WorkerPool) calculateConfidence(original, repaired string) float64 {
+func (wp *ChunkWorkerPool) calculateConfidence(original, repaired string) float64 {
 	if original == repaired {
 		return DefaultConfidenceConfig.MaxConfidence
 	}
@@ -1260,7 +1364,7 @@ func (wp *WorkerPool) calculateConfidence(original, repaired string) float64 {
 }
 
 // calculateEditDistanceSimilarity 基于编辑距离计算相似度
-func (wp *WorkerPool) calculateEditDistanceSimilarity(str1, str2 string) float64 {
+func (wp *ChunkWorkerPool) calculateEditDistanceSimilarity(str1, str2 string) float64 {
 	runes1 := []rune(str1)
 	runes2 := []rune(str2)
 	maxLen := max(len(runes1), len(runes2))
@@ -1279,7 +1383,7 @@ func (wp *WorkerPool) calculateEditDistanceSimilarity(str1, str2 string) float64
 }
 
 // levenshteinDistance 计算 Levenshtein 编辑距离
-func (wp *WorkerPool) levenshteinDistance(a, b []rune) int {
+func (wp *ChunkWorkerPool) levenshteinDistance(a, b []rune) int {
 	m, n := len(a), len(b)
 
 	if m == 0 {
@@ -1330,7 +1434,7 @@ var CommonTypos = map[string]string{
 }
 
 // checkReasonableness 检查修改的合理性
-func (wp *WorkerPool) checkReasonableness(original, repaired string) float64 {
+func (wp *ChunkWorkerPool) checkReasonableness(original, repaired string) float64 {
 	origLen := len([]rune(original))
 	repLen := len([]rune(repaired))
 
@@ -1367,7 +1471,7 @@ func (wp *WorkerPool) checkReasonableness(original, repaired string) float64 {
 }
 
 // GetCacheMisses 获取缓存未命中数
-func (wp *WorkerPool) GetCacheMisses() int {
+func (wp *ChunkWorkerPool) GetCacheMisses() int {
 	wp.mu.RLock()
 	defer wp.mu.RUnlock()
 	return wp.cacheMisses
@@ -1382,14 +1486,14 @@ func max(a, b int) int {
 }
 
 // GetLocalStats 获取本地模型统计
-func (wp *WorkerPool) GetLocalStats() (int, int, int) {
+func (wp *ChunkWorkerPool) GetLocalStats() (int, int, int) {
 	wp.mu.RLock()
 	defer wp.mu.RUnlock()
 	return wp.localSuccess, wp.localFailure, wp.remoteFallback
 }
 
 // GetHealthStatus 获取健康状态
-func (wp *WorkerPool) GetHealthStatus() map[string]interface{} {
+func (wp *ChunkWorkerPool) GetHealthStatus() map[string]interface{} {
 	if wp.healthManager == nil {
 		return map[string]interface{}{
 			"error": "health manager not initialized",
@@ -1425,7 +1529,7 @@ func (wp *WorkerPool) GetHealthStatus() map[string]interface{} {
 }
 
 // Close 关闭工作池
-func (wp *WorkerPool) Close() {
+func (wp *ChunkWorkerPool) Close() {
 	close(wp.taskQueue)
 	wp.wg.Wait()
 	close(wp.results)

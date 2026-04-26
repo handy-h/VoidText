@@ -1149,6 +1149,57 @@ section h2::after {
   border-bottom: none;
 }
 
+.log-item {
+  display: flex;
+  gap: 10px;
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  align-items: baseline;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.log-item:last-child {
+  border-bottom: none;
+}
+
+.log-item.log-success {
+  color: var(--status-completed);
+}
+
+.log-item.log-running,
+.log-item.log-processing {
+  color: var(--annihilation-cyan);
+}
+
+.log-item.log-failed {
+  color: var(--status-failed);
+}
+
+.log-item.log-completed {
+  color: var(--status-completed);
+}
+
+.log-time {
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
+.log-step {
+  color: var(--ash-purple);
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-weight: 500;
+}
+
+.log-message {
+  color: var(--text-secondary);
+  word-break: break-all;
+  flex: 1;
+}
+
 /* 完成界面样式 */
 .completed-actions {
   display: flex;

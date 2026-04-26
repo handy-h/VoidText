@@ -61,7 +61,7 @@ func GetProcessingLogsByFileMd5(fileMd5 string) ([]ProcessingLogRecord, error) {
 func GetLatestProcessingLog(fileMd5 string) (*ProcessingLogRecord, error) {
 	row := db.QueryRow(`
 		SELECT id, file_md5, step, action, details, status, timestamp
-		FROM processing_logs WHERE file_md5 = ? ORDER BY timestamp DESC LIMIT 1`, fileMd5)
+		FROM processing_logs WHERE file_md5 = ? ORDER BY id DESC LIMIT 1`, fileMd5)
 
 	var record ProcessingLogRecord
 	err := row.Scan(

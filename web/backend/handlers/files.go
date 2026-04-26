@@ -38,7 +38,6 @@ func UploadFile(c *gin.Context) {
 	})
 
 	if f.Size > config.AppConfigInstance.MaxFileSize {
-		maxSizeStr := formatFileSize(config.AppConfigInstance.MaxFileSize)
 		logging.APIWarn("文件大小超过限制", map[string]interface{}{
 			"filename": f.Filename,
 			"size":     f.Size,

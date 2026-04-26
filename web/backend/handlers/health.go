@@ -5,8 +5,8 @@ import (
   "time"
   
   "github.com/gin-gonic/gin"
-  "github.com/gao/Builds/voidtext/internal/config"
-  "github.com/gao/Builds/voidtext/web/backend/middleware"
+  "voidtext/internal/config"
+  "voidtext/web/backend/middleware"
 )
 
 // HealthResponse 健康检查响应
@@ -87,8 +87,13 @@ func HealthCheck(c *gin.Context) {
   }
   
   // 添加服务状态
+  cfg := config.AppConfigInstance
+  authStatus := "disabled"
+  if cfg.EnableAuth {
+    authStatus = "enabled"
+  }
   response.Services["authentication"] = ServiceInfo{
-    Status:  "enabled",
+    Status:  authStatus,
     Message: "Token-based authentication",
   }
   

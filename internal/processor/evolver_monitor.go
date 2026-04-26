@@ -239,7 +239,7 @@ func (em *EvolverMonitor) triggerEvolver() {
 	duration := time.Since(startTime).Milliseconds()
 
 	if err != nil {
-		logging.Error("evolver_execution_failed", map[string]interface{}{
+		logging.Error("evolver_execution_failed", nil, map[string]interface{}{
 			"script_path": scriptPath,
 			"duration_ms": duration,
 			"error": err.Error(),
@@ -260,7 +260,7 @@ func (em *EvolverMonitor) triggerEvolver() {
 
 	// 应用Evolver修正
 	if err := em.promptManager.ApplyEvolverCorrection(newPrompt); err != nil {
-		logging.Error("evolver_correction_failed", map[string]interface{}{
+		logging.Error("evolver_correction_failed", nil, map[string]interface{}{
 			"script_path": scriptPath,
 			"new_prompt_length": len(newPrompt),
 			"error": err.Error(),

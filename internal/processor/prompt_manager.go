@@ -142,7 +142,7 @@ func (pm *PromptManager) loadFromFile() error {
 		SuccessfulUses: 0,
 	}
 	if err := pm.dbRepo.SavePromptVersion(record); err != nil {
-		logging.Error("prompt_save_failed", map[string]interface{}{
+		logging.Error("prompt_save_failed", nil, map[string]interface{}{
 			"name":  pm.promptName,
 			"version": version,
 			"error": err.Error(),
@@ -212,7 +212,7 @@ func (pm *PromptManager) UpdatePrompt(newPrompt, newVersion string, source strin
 		SuccessfulUses: 0,
 	}
 	if err := pm.dbRepo.SavePromptVersion(record); err != nil {
-		logging.Error("prompt_update_failed", map[string]interface{}{
+		logging.Error("prompt_update_failed", nil, map[string]interface{}{
 			"name":    pm.promptName,
 			"version": newVersion,
 			"error":   err.Error(),
@@ -293,7 +293,7 @@ func (pm *PromptManager) watchPromptFiles() {
 				})
 
 				if err := pm.loadFromFile(); err != nil {
-					logging.Error("prompt_reload_failed", map[string]interface{}{
+					logging.Error("prompt_reload_failed", nil, map[string]interface{}{
 						"name":  pm.promptName,
 						"file":  file,
 						"error": err.Error(),
@@ -312,7 +312,7 @@ func (pm *PromptManager) RecordUsage(success bool) {
 	pm.mu.RUnlock()
 
 	if err := pm.dbRepo.UpdatePromptUsage(pm.promptName, version, success); err != nil {
-		logging.Error("prompt_usage_record_failed", map[string]interface{}{
+		logging.Error("prompt_usage_record_failed", nil, map[string]interface{}{
 			"name":    pm.promptName,
 			"version": version,
 			"success": success,

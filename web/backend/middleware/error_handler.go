@@ -5,8 +5,8 @@ import (
   "runtime/debug"
   "time"
   
-  "github.com/gao/Builds/voidtext/internal/errors"
-  "github.com/gao/Builds/voidtext/internal/logging"
+  "voidtext/internal/errors"
+  "voidtext/internal/logging"
   "github.com/gin-gonic/gin"
 )
 

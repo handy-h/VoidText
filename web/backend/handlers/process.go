@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -111,7 +112,7 @@ func GetFileStatus(c *gin.Context) {
 
 	latestLog, _ := database.GetLatestProcessingLog(fileMd5)
 	if latestLog != nil {
-		response["currentAction"] = latestLog.Details
+		response["currentAction"] = formatLogDetails(latestLog)
 	}
 
 	if record.Status == "reviewing" || record.Status == "processing" || record.CurrentStep == "review" {
@@ -520,4 +521,86 @@ func buildReportHTML(data gin.H) string {
 		file["status"], file["progress"], review["total"], review["resolved"])
 
 	return html
+}
+
+func formatLogDetails(log *database.ProcessingLogRecord) string {
+	if log.Details == "" {
+		stepTexts := map[string]string{
+			"cleaning": "基础清洗", "indexing": "向量检测",
+			"llm_fix": "LLM修复", "review": "人工审核", "finalizing": "生成文件",
+		}
+		actionTexts := map[string]string{
+			"start": "开始", "progress": "处理中", "success": "成功", "error": "错误",
+		}
+		step := stepTexts[log.Step]
+		if step == "" {
+			step = log.Step
+		}
+		action := actionTexts[log.Action]
+		if action == "" {
+			action = log.Action
+		}
+		return step + " " + action
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(log.Details), &parsed); err != nil {
+		return log.Details
+	}
+
+	action, _ := parsed["action"].(string)
+	details, _ := parsed["details"].(map[string]interface{})
+
+	stepTexts := map[string]string{
+		"cleaning": "基础清洗", "indexing": "向量检测",
+		"llm_fix": "LLM修复", "review": "人工审核", "finalizing": "生成文件",
+	}
+	actionTexts := map[string]string{
+		"step_started": "步骤开始", "step_completed": "步骤完成",
+		"step_skipped": "步骤跳过", "step_failed": "步骤失败",
+	}
+
+	result := actionTexts[action]
+	if result == "" {
+		result = action
+	}
+
+	if details != nil {
+		if step, ok := details["step"].(string); ok {
+			if st := stepTexts[step]; st != "" {
+				result += " - " + st
+			} else {
+				result += " - " + step
+			}
+		}
+		if reason, ok := details["reason"].(string); ok {
+			result += " (" + reason + ")"
+		}
+		if res, ok := details["result"].(map[string]interface{}); ok {
+			var parts []string
+			if v, ok := res["changes_count"].(float64); ok {
+				parts = append(parts, fmt.Sprintf("修改数: %d", int(v)))
+			}
+			if v, ok := res["duplicates_detected"].(float64); ok {
+				parts = append(parts, fmt.Sprintf("重复: %d", int(v)))
+			}
+			if v, ok := res["total_chunks"].(float64); ok {
+				parts = append(parts, fmt.Sprintf("块数: %d", int(v)))
+			}
+			if v, ok := res["total_changes"].(float64); ok {
+				parts = append(parts, fmt.Sprintf("变更: %d", int(v)))
+			}
+			if v, ok := res["cache_hits"].(float64); ok {
+				parts = append(parts, fmt.Sprintf("缓存命中: %d", int(v)))
+			}
+			if len(parts) > 0 {
+				result += " [" + strings.Join(parts, ", ") + "]"
+			}
+		}
+	}
+
+	if result == "" {
+		return log.Details
+	}
+	return result
 }
