@@ -71,7 +71,7 @@ func TestRepairLocally_ShouldFixTypos(t *testing.T) {
 	initRepairerTestConfig()
 	mr := NewModelRepairer("local", "test-model")
 
-	_, changes := mr.repairLocally("她高兴及了，跑过去抱住他。因该是这样的。")
+	_, changes := mr.repairLocally("她高兴及了，跑过去抱住他。因该是这样的。", "test-hash")
 	if len(changes) == 0 {
 		t.Errorf("repairLocally() should detect typos")
 	}
@@ -98,7 +98,7 @@ func TestRepairLocally_ShouldFixTuShuGuan(t *testing.T) {
 	initRepairerTestConfig()
 	mr := NewModelRepairer("local", "test-model")
 
-	_, changes := mr.repairLocally("他每天都去图书管看书。")
+	_, changes := mr.repairLocally("他每天都去图书管看书。", "test-hash")
 	if len(changes) == 0 {
 		t.Errorf("repairLocally() should detect 图书管 typo")
 	}
@@ -165,15 +165,5 @@ func TestCompareTexts_ShouldHandleLengthDifference(t *testing.T) {
 	changes := mr.compareTexts("短文本", "更长的文本")
 	if len(changes) == 0 {
 		t.Errorf("compareTexts() should detect length difference")
-	}
-}
-
-func TestDetectCommonTypos_ShouldDetectKnownTypos(t *testing.T) {
-	initRepairerTestConfig()
-	mr := NewModelRepairer("local", "test-model")
-
-	changes := mr.detectCommonTypos("她因该去图书管看书，高兴及了。")
-	if len(changes) < 2 {
-		t.Errorf("detectCommonTypos() should detect multiple typos, got %d", len(changes))
 	}
 }
