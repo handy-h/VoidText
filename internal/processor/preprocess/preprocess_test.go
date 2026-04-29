@@ -1,6 +1,7 @@
 package preprocess
 
 import (
+	"strings"
 	"testing"
 	"unicode/utf8"
 )
@@ -93,6 +94,28 @@ func TestCleanSpecialCharacters_ShouldRemoveControlChars(t *testing.T) {
 		if c < 0x20 && c != '\n' && c != '\r' && c != '\t' {
 			t.Errorf("cleanSpecialCharacters() should remove control characters, found: %d", c)
 		}
+	}
+}
+
+func TestCleanSpecialCharacters_ShouldPreserveNewlines(t *testing.T) {
+	result := PreprocessResult{
+		Content:  "第一行\n第二行\r\n第三行\t缩进",
+		Original: "第一行\n第二行\r\n第三行\t缩进",
+		Changes:  []Change{},
+	}
+	result = cleanSpecialCharacters(result)
+
+	if !strings.Contains(result.Content, "\n") {
+		t.Errorf("cleanSpecialCharacters() should preserve \\n")
+	}
+	if !strings.Contains(result.Content, "\r") {
+		t.Errorf("cleanSpecialCharacters() should preserve \\r")
+	}
+	if !strings.Contains(result.Content, "\t") {
+		t.Errorf("cleanSpecialCharacters() should preserve \\t")
+	}
+	if result.Content != "第一行\n第二行\r\n第三行\t缩进" {
+		t.Errorf("cleanSpecialCharacters() = %q, want %q", result.Content, "第一行\n第二行\r\n第三行\t缩进")
 	}
 }
 

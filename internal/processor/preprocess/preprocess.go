@@ -335,10 +335,10 @@ func removeAdvertisements(result PreprocessResult) PreprocessResult {
 	return result
 }
 
-// cleanSpecialCharacters 清理特殊字符
+// cleanSpecialCharacters 清理特殊字符（保留 \n, \r, \t 以维护段落结构）
 func cleanSpecialCharacters(result PreprocessResult) PreprocessResult {
-	// 移除控制字符
-	regex := regexp.MustCompile(`[\x00-\x1F\x7F]`)
+	// 移除控制字符，但保留 \t(0x09), \n(0x0A), \r(0x0D)
+	regex := regexp.MustCompile(`[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]`)
 	result.Content = regex.ReplaceAllString(result.Content, "")
 
 	return result
@@ -346,9 +346,18 @@ func cleanSpecialCharacters(result PreprocessResult) PreprocessResult {
 
 // normalizeWhitespace 规范化空白字符
 func normalizeWhitespace(result PreprocessResult) PreprocessResult {
-	// 将多个空白字符替换为单个空格
-	regex := regexp.MustCompile(`\s+`)
-	result.Content = regex.ReplaceAllString(result.Content, " ")
+	// 保留换行符，仅规范化水平空白字符（空格、制表符等）
+	// 注意：不替换 \n 和 \r\n，保留原文段落结构
+	horizontalWS := regexp.MustCompile(`[ \t\f\r]+`)
+	result.Content = horizontalWS.ReplaceAllString(result.Content, " ")
+
+	// 清理行首行尾多余空格（由水平空白规范化产生）
+	result.Content = strings.ReplaceAll(result.Content, " \n", "\n")
+	result.Content = strings.ReplaceAll(result.Content, "\n ", "\n")
+
+	// 压缩连续空行（3个以上变2个），保留段落分隔
+	multiBlank := regexp.MustCompile(`\n{3,}`)
+	result.Content = multiBlank.ReplaceAllString(result.Content, "\n\n")
 
 	// 去除首尾空白
 	result.Content = strings.TrimSpace(result.Content)

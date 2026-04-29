@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>湮文 VoidText</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=5" />
+    <link rel="stylesheet" href="/static/css/style.css?v=6" />
   </head>
   <body>
     <!-- 认证界面 -->
@@ -231,17 +231,17 @@
             </div>
           </div>
           <div class="review-filters">
-            <select id="review-status-filter" onchange="loadReviewItems()">
+            <select id="review-status-filter">
               <option value="pending">待审核</option>
               <option value="all">全部</option>
               <option value="approved">已通过</option>
               <option value="rejected">已拒绝</option>
               <option value="edited">已编辑</option>
             </select>
-            <button class="btn-secondary" onclick="batchApproveAll()">
+            <button class="btn-secondary" id="batch-approve-btn">
               全部通过
             </button>
-            <button class="btn-secondary" onclick="batchRejectAll()">
+            <button class="btn-secondary" id="batch-reject-btn">
               全部拒绝
             </button>
           </div>
@@ -250,7 +250,6 @@
             <button
               class="btn-primary"
               id="finalize-btn"
-              onclick="finalizeFile()"
               style="display: none"
             >
               完成审核并生成文件
@@ -281,16 +280,17 @@
 
       <div id="feedback" class="feedback" style="display: none"></div>
     </div>
-    <script src="/static/js/config.js?v=1"></script>
-    <script src="/static/js/dom-utils.js?v=1"></script>
+    <script src="/static/js/config.js?v=3"></script>
+    <script src="/static/js/dom-utils.js?v=3"></script>
+    <script src="/static/js/diff-utils.js?v=3"></script>
     <!-- 模块化JS文件 -->
-    <script src="/static/js/modules/auth.js?v=1"></script>
-    <script src="/static/js/modules/file-manager.js?v=1"></script>
-    <script src="/static/js/modules/processing.js?v=1"></script>
-    <script src="/static/js/modules/review.js?v=1"></script>
-    <script src="/static/js/modules/rules-config.js?v=1"></script>
-    <script src="/static/js/modules/app.js?v=1"></script>
+    <script src="/static/js/modules/auth.js?v=3"></script>
+    <script src="/static/js/modules/file-manager.js?v=3"></script>
+    <script src="/static/js/modules/processing.js?v=3"></script>
+    <script src="/static/js/modules/review.js?v=3"></script>
+    <script src="/static/js/modules/rules-config.js?v=3"></script>
+    <script src="/static/js/modules/app.js?v=3"></script>
     <!-- 主JS文件 -->
-    <script src="/static/js/main.js?v=1"></script>
+    <script src="/static/js/main.js?v=3"></script>
   </body>
 </html>

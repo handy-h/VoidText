@@ -1276,3 +1276,215 @@ section h2::after {
     margin: 16px;
   }
 }
+
+/* ========== Feedback Toast ========== */
+#feedback {
+  position: fixed;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  padding: 14px 28px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  animation: feedbackSlideIn 0.3s var(--ease-annihilation);
+  pointer-events: none;
+  white-space: nowrap;
+  max-width: 90vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@keyframes feedbackSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+#feedback.success {
+  background: rgba(0, 212, 170, 0.15);
+  border: 1px solid var(--annihilation-cyan);
+  color: var(--annihilation-cyan);
+  backdrop-filter: blur(12px);
+}
+
+#feedback.error {
+  background: rgba(255, 71, 87, 0.15);
+  border: 1px solid var(--status-failed);
+  color: var(--status-failed);
+  backdrop-filter: blur(12px);
+}
+
+#feedback.info {
+  background: rgba(107, 92, 231, 0.15);
+  border: 1px solid var(--ash-purple);
+  color: var(--ash-glow);
+  backdrop-filter: blur(12px);
+}
+
+/* ========== Diff 审核样式 ========== */
+
+.review-group {
+  border: 1px solid var(--void-border);
+  border-radius: 10px;
+  margin-bottom: 16px;
+  background: var(--void-card);
+  overflow: hidden;
+}
+
+.review-group-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--void-border);
+  transition: background var(--duration-normal) var(--ease-annihilation);
+}
+
+.review-group-header:hover {
+  background: rgba(0, 212, 170, 0.03);
+}
+
+.review-group-diff {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.review-group-count {
+  font-size: 12px;
+  padding: 2px 10px;
+  border-radius: 10px;
+  background: var(--annihilation-cyan);
+  color: var(--void-void);
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.review-group-actions {
+  flex-shrink: 0;
+  display: flex;
+  gap: 8px;
+}
+
+.review-group-body {
+  padding: 0;
+}
+
+.review-group-body.collapsed {
+  display: none;
+}
+
+.review-item-compact {
+  padding: 12px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  font-size: 13px;
+}
+
+.review-item-compact:last-child {
+  border-bottom: none;
+}
+
+.review-item-compact .item-context {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.review-item-compact .item-context-line {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 2px 8px;
+  background: var(--void-deep);
+  border-radius: 4px;
+  margin-bottom: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-item-compact .item-context-line-highlight {
+  border-left: 2px solid var(--annihilation-cyan);
+  color: var(--text-primary);
+}
+
+.review-item-compact .item-actions {
+  margin-top: 6px;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* Diff 高亮 */
+.diff-del {
+  background: rgba(255, 71, 87, 0.25);
+  color: #ff6b7a;
+  text-decoration: line-through;
+  border-radius: 3px;
+  padding: 0 2px;
+}
+
+.diff-ins {
+  background: rgba(0, 212, 170, 0.2);
+  color: var(--annihilation-cyan);
+  border-radius: 3px;
+  padding: 0 2px;
+}
+
+.diff-equal {
+  color: var(--text-secondary);
+}
+
+.diff-trunc {
+  color: var(--text-muted);
+  font-weight: 700;
+  letter-spacing: 2px;
+  user-select: none;
+}
+
+.review-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin: 20px 0 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--void-border);
+  font-family: var(--font-mono);
+}
+
+.review-filters {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.review-filters select {
+  padding: 8px 12px;
+  border: 1px solid var(--void-border);
+  border-radius: 6px;
+  background: var(--void-card);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+}
+
+.review-filters select:focus {
+  outline: none;
+  border-color: var(--annihilation-cyan);
+}

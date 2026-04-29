@@ -114,12 +114,11 @@ const FileManager = (function() {
         const resultContent = DomUtils.createUploadResult(data);
         resultDiv.appendChild(resultContent);
         
-        // 上传成功后刷新文件列表
+        // 上传成功后显示 toast 并立即跳转
         if (data.success) {
-          setTimeout(() => {
-            refreshFileList();
-            showSection('file-list');
-          }, 1000);
+          showFeedback(`文件 "${file.name}" 上传成功！`, "success");
+          refreshFileList();
+          showSection('file-list');
         }
       })
       .catch((err) => {

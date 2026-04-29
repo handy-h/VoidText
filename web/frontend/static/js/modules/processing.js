@@ -84,6 +84,7 @@ const ProcessingModule = (function () {
           stopPolling();
           if (data.status === "reviewing") {
             FileManager.showSection("review");
+            ReviewModule.setCurrentFileMd5(currentFileMd5);
             ReviewModule.loadReviewItems();
           } else if (data.status === "completed") {
             FileManager.showSection("completed");

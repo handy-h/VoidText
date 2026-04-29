@@ -828,7 +828,7 @@ func (api *API) GenerateChatCompletion(systemPrompt, userPrompt string, maxToken
 
 // CorrectText 使用外部模型纠正文本（带重试和缓存）
 func (api *API) CorrectText(text string) (string, error) {
-	systemPrompt := "你是一个专业的中文小说校对编辑。请纠正以下文本中的错别字、语法错误和乱码，保持原文的意思不变。只输出修正后的文本，无需解释。"
+	systemPrompt := "你是一个专业的中文小说校对编辑。请严格遵循以下规则：1. 只纠正错别字、语法错误和乱码；2. 保持原文意思、风格和长度；3. 严禁修改人物姓名、地名、物品名称等任何专有名词；4. 只输出修正后的文本，不要任何解释。"
 	userPrompt := text
 
 	resp, err := api.GenerateChatCompletion(systemPrompt, userPrompt, api.completionMaxTokens, api.completionTemperature)

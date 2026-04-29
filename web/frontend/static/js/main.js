@@ -309,10 +309,17 @@ function handleFileUpload(event) {
   AppConfig.uploadFile(file, (progress) => {
     DomUtils.setTextContent(loadingDiv, `正在上传... ${progress}%`);
   })
-    .then((data) => {
+      .then((data) => {
       resultDiv.innerHTML = "";
       const resultContent = DomUtils.createUploadResult(data);
       resultDiv.appendChild(resultContent);
+
+      // 上传成功后显示 toast 并立即跳转
+      if (data.success) {
+        showFeedback(`文件 "${file.name}" 上传成功！`, "success");
+        refreshFileList();
+        showSection('file-list');
+      }
     })
     .catch((err) => {
       resultDiv.innerHTML = "";
@@ -448,7 +455,8 @@ function updateProgress() {
         stopPolling();
         if (data.status === "reviewing") {
           showSection("review");
-          loadReviewItems();
+          ReviewModule.setCurrentFileMd5(currentFileMd5);
+          ReviewModule.loadReviewItems();
         } else if (data.status === "completed") {
           showSection("completed");
           updateCompletedInfo();
@@ -621,7 +629,7 @@ function loadReviewItems() {
   AppConfig.apiRequest(`/files/${currentFileMd5}/review-items`)
     .then((data) => {
       if (!data.success) return;
-      reviewItems = data.items || [];
+      reviewItems = data.suggestions || data.items || [];
       renderReviewItems();
       updateReviewProgress();
     })
@@ -668,7 +676,7 @@ function createReviewItemElement(item, index) {
   });
   DomUtils.setTextContent(
     typeSpan,
-    getModificationTypeText(item.modificationType),
+    getModificationTypeText(item.type || item.modificationType),
   );
   header.appendChild(typeSpan);
 
@@ -694,7 +702,7 @@ function createReviewItemElement(item, index) {
   DomUtils.setTextContent(originalLabel, "原文: ");
   originalDiv.appendChild(originalLabel);
   const originalText = DomUtils.createElement("span");
-  DomUtils.setTextContent(originalText, item.originalText || "");
+  DomUtils.setTextContent(originalText, item.original || item.originalText || "");
   originalDiv.appendChild(originalText);
   contentDiv.appendChild(originalDiv);
 
@@ -704,9 +712,9 @@ function createReviewItemElement(item, index) {
   const suggestedLabel = DomUtils.createElement("strong");
   DomUtils.setTextContent(suggestedLabel, "建议: ");
   suggestedDiv.appendChild(suggestedLabel);
-  const suggestedText = DomUtils.createElement("span");
-  DomUtils.setTextContent(suggestedText, item.suggestedText || "");
-  suggestedDiv.appendChild(suggestedText);
+  const suggestedTextEl = DomUtils.createElement("span");
+  DomUtils.setTextContent(suggestedTextEl, item.suggested || item.suggestedText || "");
+  suggestedDiv.appendChild(suggestedTextEl);
   contentDiv.appendChild(suggestedDiv);
 
   if (item.editedText) {
@@ -838,7 +846,7 @@ function editReviewItem(itemId) {
 
   const editedText = prompt(
     "请输入编辑后的文本:",
-    item.suggestedText || item.originalText,
+    item.suggested || item.suggestedText || item.original || item.originalText || '',
   );
   if (editedText === null) return;
 

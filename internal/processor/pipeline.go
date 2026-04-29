@@ -287,6 +287,7 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, _ *data
 		config.AppConfigInstance.RepairModelType,
 		config.AppConfigInstance.RepairModelName,
 	)
+	defer repairer.Close() // Avoid goroutine leak from internal ChunkWorkerPool
 
 	// 记录开始处理
 	logging.Info("llm_fix_start", map[string]interface{}{
@@ -306,6 +307,28 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, _ *data
 	// 更新状态为处理中
 	StartProcessingStep(fileMd5, StepLlmFix)
 
+	// 使用defer确保步骤在任何情况下（包括panic）都能正确完成
+	var repairResult ModelRepairResult
+	defer func() {
+		if r := recover(); r != nil {
+			logging.Error("llm_fix_panic_recovered", nil, map[string]interface{}{
+				"file_md5": fileMd5,
+				"panic":    fmt.Sprintf("%v", r),
+			})
+			nextStep := GetNextStep(StepLlmFix)
+			progress := CalculateProgress(nextStep, 0)
+			CompleteProcessingStep(fileMd5, StepLlmFix, map[string]interface{}{
+				"error":  fmt.Sprintf("panic: %v", r),
+				"status": "recovered",
+			})
+			logging.Info("llm_fix_forced_complete_after_panic", map[string]interface{}{
+				"file_md5":    fileMd5,
+				"next_step":   nextStep,
+				"progress":    progress,
+			})
+		}
+	}()
+
 	// 使用新的RepairTextWithFileMd5方法（集成缓存、Worker Pool、智能分块）
 	// 检查是否需要恢复处理
 	resume := false
@@ -320,9 +343,15 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, _ *data
 		})
 	}
 	
-	repairResult := repairer.RepairTextWithFileMd5(fileMd5, content, resume)
+	repairResult = repairer.RepairTextWithFileMd5(fileMd5, content, resume)
 
-	// 获取处理进度信息并记录到日志
+	// 使用getStatsMap安全地获取Stats（避免nil map panic）
+	stats := repairResult.Stats
+	if stats == nil {
+		stats = make(map[string]int)
+	}
+
+	// 获取处理进度信息并记录到日志（此时记录，但不清理追踪器）
 	if progressInfo, exists := GlobalProgressTracker.GetProgress(fileMd5); exists {
 		database.CreateProcessingLog(&database.ProcessingLogRecord{
 			FileMd5: fileMd5,
@@ -336,8 +365,6 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, _ *data
 				progressInfo.AvgChunkTimeMs),
 			Status: "success",
 		})
-		// 清理进度追踪
-		GlobalProgressTracker.FinishTracking(fileMd5)
 	}
 
 	// 保存中间文件
@@ -368,36 +395,39 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, _ *data
 	// 记录完成统计
 	logging.Info("llm_fix_completed", map[string]interface{}{
 		"file_md5":      fileMd5,
-		"total_chunks":  repairResult.Stats["total_chunks"],
-		"total_changes": repairResult.Stats["total_changes"],
-		"cache_hits":    repairResult.Stats["cache_hits"],
-		"cache_misses":  repairResult.Stats["cache_misses"],
+		"total_chunks":  stats["total_chunks"],
+		"total_changes": stats["total_changes"],
+		"cache_hits":    stats["cache_hits"],
+		"cache_misses":  stats["cache_misses"],
 	})
 
 	// 检查错误阈值，触发自进化监控
-	checkErrorThresholds(fileMd5, repairResult.Stats)
+	checkErrorThresholds(fileMd5, stats)
 
 	// 检查API错误率，如果过高则告警
-	checkAPIErrorRate(fileMd5, repairResult.Stats)
+	checkAPIErrorRate(fileMd5, stats)
 
 	nextStep := GetNextStep(StepLlmFix)
 	progress := CalculateProgress(nextStep, 0)
 	
 	// 使用事务更新状态和记录日志
 	CompleteProcessingStep(fileMd5, StepLlmFix, map[string]interface{}{
-		"total_chunks":  repairResult.Stats["total_chunks"],
-		"total_changes": repairResult.Stats["total_changes"],
-		"cache_hits":    repairResult.Stats["cache_hits"],
+		"total_chunks":  stats["total_chunks"],
+		"total_changes": stats["total_changes"],
+		"cache_hits":    stats["cache_hits"],
 	})
+
+	// CompleteProcessingStep成功后才清理内存中的进度追踪器，避免竞态条件
+	GlobalProgressTracker.FinishTracking(fileMd5)
 
 	return &PipelineResult{
 		CurrentStep: StepLlmFix,
 		NextStep:    nextStep,
 		Progress:    progress,
 		Message: fmt.Sprintf("LLM修复完成：%d个块，%d处修改，缓存命中%d次",
-			repairResult.Stats["total_chunks"],
-			repairResult.Stats["total_changes"],
-			repairResult.Stats["cache_hits"]),
+			stats["total_chunks"],
+			stats["total_changes"],
+			stats["cache_hits"]),
 	}, nil
 }
 

@@ -914,6 +914,22 @@ func (wp *ChunkWorkerPool) worker() {
 func (wp *ChunkWorkerPool) processTask(task ChunkTask) {
 	defer wp.wg.Done()
 
+	// Recover from panic in processChunk to prevent ProcessChunks from hanging forever.
+	// Without this, a panic skips wp.results <- result, and ProcessChunks waits for
+	// N results that will never arrive.
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[ChunkWorkerPool] panic in processTask (chunk %d, file %s): %v", task.ChunkID, task.FileMd5, r)
+			// Send original content as fallback result so ProcessChunks can continue
+			wp.results <- ChunkResult{
+				ChunkID:    task.ChunkID,
+				Paragraphs: strings.Split(task.Content, "\n"),
+				Changes:    []preprocess.Change{},
+				CacheHit:   false,
+			}
+		}
+	}()
+
 	// 调用processChunk处理
 	result := wp.processChunk(task)
 
@@ -1211,18 +1227,26 @@ func (wp *ChunkWorkerPool) ProcessChunks(fileMd5 string, chunks []ChunkInfo, res
 
 	wp.wg.Add(len(chunksToProcess))
 
-	// 提交任务到队列
-	for _, chunk := range chunksToProcess {
-		task := ChunkTask{
-			ChunkID:       chunk.StartIndex, // 使用起始索引作为ChunkID
-			Content:       chunk.Content,
-			FileMd5:       fileMd5,
-			PromptVersion: "", // 由worker获取
+	// 在单独的 goroutine 中提交任务，避免与结果收集产生死锁。
+	// taskQueue 和 results 通道的缓冲大小均为 workerCount*10（默认10），
+	// 当待处理的 chunks 总数超过缓冲容量时，如果先全部提交再收集结果，
+	// 会导致：提交阻塞等待 taskQueue 有空位 → worker 无法取任务 → 
+	// worker 完成处理后 results 通道也被填满 → worker 也阻塞 → 全体死锁。
+	// 将提交放在 goroutine 中，让主 goroutine 可以同时收集结果，形成
+	// 提交→处理→收集 的流水线，各环节独立阻塞而不互相死锁。
+	go func() {
+		for _, chunk := range chunksToProcess {
+			task := ChunkTask{
+				ChunkID:       chunk.StartIndex, // 使用起始索引作为ChunkID
+				Content:       chunk.Content,
+				FileMd5:       fileMd5,
+				PromptVersion: "", // 由worker获取
+			}
+			wp.taskQueue <- task
 		}
-		wp.taskQueue <- task
-	}
+	}()
 
-	// 收集结果
+	// 收集结果（与任务提交并发执行，避免通道缓冲打满导致的死锁）
 	results := make([]ChunkResult, 0, len(chunksToProcess))
 	for i := 0; i < len(chunksToProcess); i++ {
 		result := <-wp.results
@@ -1533,4 +1557,11 @@ func (wp *ChunkWorkerPool) Close() {
 	close(wp.taskQueue)
 	wp.wg.Wait()
 	close(wp.results)
+}
+
+// Close 关闭ModelRepairer，释放工作池等资源
+func (mr *ModelRepairer) Close() {
+	if mr.workerPool != nil {
+		mr.workerPool.Close()
+	}
 }
