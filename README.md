@@ -174,24 +174,46 @@ LOCAL_MODEL_NAME=qwen2.5:7b-instruct-q4_K_M
 
 ### 3. 编译项目
 
-````bash
-# 编译 Linux/macOS
-go build -o voidtext ./cmd/txtclean/
+```bash
+# 使用 Makefile 编译（推荐）
+make build
+
+# 或直接使用 go 命令
+go build -o voidtext ./cmd/voidtext/
+```
 
 ### 4. 运行服务
 
 ```bash
-# 直接运行
-./voidtext
+# 开发者模式（控制台打印日志，便于调试）
+make dev
 
-# 或使用启动脚本（支持后台运行）
-chmod +x scripts/run.sh
-./scripts/run.sh
-````
+# 生产环境运行
+make run
+
+# 或直接运行编译好的二进制
+./voidtext
+```
 
 ### 5. 访问应用
 
 打开浏览器，访问 `http://localhost:8080`
+
+### 6. 项目管理
+
+项目提供 `Makefile` 管理常用操作，在项目根目录下直接执行：
+
+| 命令 | 功能 | 说明 |
+|------|------|------|
+| `make build` | 编译二进制 | 自动检查依赖并编译，输出 `./voidtext` |
+| `make dev` | 开发者模式 | `go run` 热启动，控制台打印结构化日志，Gin debug 模式 |
+| `make run` | 生产运行 | 运行已编译的二进制文件 `./voidtext` |
+| `make clean` | 清理 | 结束进程 + 删除编译产物 + 清理运行时数据 |
+| `make help` | 显示帮助 | 列出所有可用命令 |
+
+> **开发调试**建议使用 `make dev`，日志同时输出到文件和控制台，方便实时排查问题。
+>
+> **生产部署**建议先 `make build` 编译，再 `make run` 启动。
 
 ## 使用指南
 
