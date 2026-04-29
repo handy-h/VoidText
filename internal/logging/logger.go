@@ -2,6 +2,7 @@ package logging
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -39,6 +40,7 @@ var (
 type Config struct {
 	Level               LogLevel
 	EnableFileLog       bool
+	EnableConsoleLog    bool   // 同时输出到控制台（开发模式）
 	LogFilePath         string
 	EnableStructuredLog bool
 	MaxFileSize         int64 // 最大文件大小（字节）
@@ -66,8 +68,12 @@ func Init(config Config) error {
 		logFile = file
 		enableFileLog = true
 
-		// 设置日志输出到文件和控制台
-		log.SetOutput(file)
+		// 设置日志输出：文件 + 可选控制台（开发模式）
+		if config.EnableConsoleLog {
+			log.SetOutput(io.MultiWriter(file, os.Stdout))
+		} else {
+			log.SetOutput(file)
+		}
 		log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
 	}
 

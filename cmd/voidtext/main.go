@@ -28,6 +28,7 @@ func main() {
 	logConfig := logging.Config{
 		Level:              logging.INFO,
 		EnableFileLog:      true,
+		EnableConsoleLog:   os.Getenv("LOG_TO_CONSOLE") == "true",
 		LogFilePath:        filepath.Join(config.AppConfigInstance.DataDir, "logs", "voidtext.log"),
 		EnableStructuredLog: true,
 		MaxFileSize:        10 * 1024 * 1024, // 10MB
