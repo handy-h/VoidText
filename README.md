@@ -22,6 +22,7 @@
 - **自进化监控**：自动监控缓存命中率和API错误率，优化提示词
 - **智能分块**：自动将长文本分块处理，支持并发Worker池
 - **API限流与重试**：指数退避+抖动、失败区块重试队列
+- **动态提示词管理**：支持多版本提示词、热重载、自进化优化
 
 ## 环境依赖
 
@@ -31,6 +32,112 @@
   - 远程 LLM API（阿里云 DashScope、DeepSeek、OpenAI 等）
   - 本地 Ollama 模型（用于混合架构，低成本优先）
   - 向量模型（用于语义相似度检测，默认本地计算）
+
+## 提示词管理
+
+VoidText 采用动态提示词管理系统，支持多版本、热重载和自进化优化。
+
+### 提示词来源（按优先级）
+
+1. **数据库存储** (`prompt_versions` 表)
+   - Evolver 优化后的提示词自动保存到数据库
+   - 系统重启后从数据库加载最新版本
+
+2. **文件系统** (`config/prompts/` 目录)
+   - 支持热重载：修改文件后自动生效（无需重启）
+   - 文件命名格式：`{prompt_name}_{version}.txt`
+   - 示例：`config/prompts/novel_repair_v1.0.1.txt`
+
+3. **默认硬编码提示词**
+   - 当数据库和文件都不可用时使用
+   - 当前默认提示词：`"You are a professional Chinese novel proofreader. Please correct typos and grammatical errors in the following text while preserving the original meaning. Only output the corrected text, no explanations."`
+
+### 配置提示词
+
+#### 1. 文件方式（推荐用于开发环境）
+```bash
+# 创建提示词目录
+mkdir -p config/prompts
+
+# 创建提示词文件
+cat > config/prompts/novel_repair_v1.0.0.txt << 'EOF'
+你是一个专业的中文小说校对编辑。请修正以下段落中的错别字和语法错误，保持原文风格不变。只输出修正后的文本，无需解释。
+
+重要要求：
+1. 只修正明显的错别字和语法错误，不要改变原文意思
+2. 保持口语化表达，不要过度正式化
+3. 如果原文没有错误，直接返回原文
+4. 输出格式：只输出修正后的文本，不要添加任何额外说明
+
+示例：
+输入：她高兴及了，跑过去抱住他。
+输出：她高兴极了，跑过去抱住他。
+
+当前任务：请修正以下文本：
+EOF
+```
+
+#### 2. 数据库方式（生产环境）
+- 系统自动管理，无需手动干预
+- Evolver 优化后的提示词自动保存
+- 可通过 API 查看当前使用的提示词版本
+
+#### 3. 环境变量配置
+```env
+# 自进化监控配置
+ENABLE_EVOLVER=false                    # 是否启用自进化监控
+EVOLVER_ERROR_RATE_THRESHOLD=0.2        # 错误率阈值（>20%触发优化）
+EVOLVER_HIT_RATE_THRESHOLD=0.3          # 命中率阈值（<30%触发优化）
+EVOLVER_CHECK_INTERVAL=300              # 检查间隔（秒）
+```
+
+### 自进化监控（Evolver）
+
+当启用自进化监控时，系统会：
+1. **监控性能指标**：API错误率、缓存命中率
+2. **触发优化**：当错误率 >20% 或命中率 <30% 时自动优化提示词
+3. **调用优化脚本**：执行 `scripts/evolver.py` 生成优化后的提示词
+4. **保存新版本**：将优化后的提示词保存到数据库，并更新当前使用的提示词
+
+### 查看当前提示词
+
+#### 通过日志查看
+启动服务时，日志会显示当前使用的提示词版本：
+```
+[ModelRepairer] 提示词管理器初始化完成 (版本: v1.0.0, 来源: database, 长度: 256)
+```
+
+#### 通过数据库查看
+```sql
+-- 查看所有提示词版本
+SELECT prompt_name, prompt_version, source, success_rate, total_uses, created_at 
+FROM prompt_versions 
+ORDER BY created_at DESC;
+
+-- 查看最新版本
+SELECT prompt_name, prompt_version, prompt_content, source, success_rate
+FROM prompt_versions 
+WHERE prompt_name = 'novel_repair'
+ORDER BY created_at DESC 
+LIMIT 1;
+```
+
+### 手动管理提示词
+
+#### 重置为默认提示词
+```bash
+# 通过 API 重置（需要认证）
+curl -X POST http://localhost:8080/api/prompts/reset \
+  -H "X-API-Token: your_token" \
+  -H "Content-Type: application/json" \
+  -d '{"prompt_name": "novel_repair"}'
+```
+
+#### 查看提示词统计
+```bash
+curl http://localhost:8080/api/prompts/stats \
+  -H "X-API-Token: your_token"
+```
 
 ## 系统初始化
 
@@ -67,13 +174,9 @@ LOCAL_MODEL_NAME=qwen2.5:7b-instruct-q4_K_M
 
 ### 3. 编译项目
 
-```bash
+````bash
 # 编译 Linux/macOS
 go build -o voidtext ./cmd/txtclean/
-
-# 编译 ARM64（树莓派）
-GOOS=linux GOARCH=arm64 go build -o voidtext ./cmd/txtclean/
-```
 
 ### 4. 运行服务
 
@@ -82,9 +185,9 @@ GOOS=linux GOARCH=arm64 go build -o voidtext ./cmd/txtclean/
 ./voidtext
 
 # 或使用启动脚本（支持后台运行）
-chmod +x scripts/raspberrypi-start.sh
-./scripts/raspberrypi-start.sh
-```
+chmod +x scripts/run.sh
+./scripts/run.sh
+````
 
 ### 5. 访问应用
 
@@ -122,14 +225,14 @@ chmod +x scripts/raspberrypi-start.sh
 
 详细配置说明请参阅 [.env.template](.env.template)，主要配置分组：
 
-| 配置组 | 说明 |
-|--------|------|
-| 基础配置 | 服务端口、数据目录、最大文件上传大小、备份策略 |
-| 文件名解析 | 作者/标题分隔符自定义 |
-| 基础清洗 | 启用/禁用、繁体转简体 |
-| 向量检测 | 模型选择、相似度阈值、API配置 |
-| LLM修复 | 启用/禁用、自进化监控、API配置、生成参数 |
-| 本地模型 | 混合架构：Ollama配置、置信度阈值、降级策略 |
+| 配置组     | 说明                                           |
+| ---------- | ---------------------------------------------- |
+| 基础配置   | 服务端口、数据目录、最大文件上传大小、备份策略 |
+| 文件名解析 | 作者/标题分隔符自定义                          |
+| 基础清洗   | 启用/禁用、繁体转简体                          |
+| 向量检测   | 模型选择、相似度阈值、API配置                  |
+| LLM修复    | 启用/禁用、自进化监控、API配置、生成参数       |
+| 本地模型   | 混合架构：Ollama配置、置信度阈值、降级策略     |
 
 ## 常见问题
 
@@ -187,6 +290,62 @@ curl -s http://localhost:11434/api/tags | python3 -m json.tool
 # }
 ```
 
+### 6. 提示词相关配置与使用
+
+#### 6.1 启用自进化监控
+```env
+# 在 .env 文件中启用 Evolver
+ENABLE_EVOLVER=true
+EVOLVER_ERROR_RATE_THRESHOLD=0.2    # 错误率 >20% 时触发优化
+EVOLVER_HIT_RATE_THRESHOLD=0.3      # 命中率 <30% 时触发优化
+EVOLVER_CHECK_INTERVAL=300          # 每5分钟检查一次
+```
+
+#### 6.2 使用自定义提示词文件
+1. 创建提示词目录（如果不存在）：
+   ```bash
+   mkdir -p config/prompts
+   ```
+
+2. 创建提示词文件（命名格式：`{prompt_name}_{version}.txt`）：
+   ```bash
+   # 创建中文提示词
+   cat > config/prompts/novel_repair_v1.0.1.txt << 'EOF'
+   你是一个专业的中文小说校对编辑。请修正以下段落中的错别字和语法错误，保持原文风格不变。只输出修正后的文本，无需解释。
+
+   重要要求：
+   1. 只修正明显的错别字和语法错误，不要改变原文意思
+   2. 保持口语化表达，不要过度正式化
+   3. 如果原文没有错误，直接返回原文
+   4. 输出格式：只输出修正后的文本，不要添加任何额外说明
+
+   示例：
+   输入：她高兴及了，跑过去抱住他。
+   输出：她高兴极了，跑过去抱住他。
+
+   当前任务：请修正以下文本：
+   EOF
+   ```
+
+3. 重启服务或等待热重载（每5秒检查一次文件变化）
+
+#### 6.3 查看当前使用的提示词
+```bash
+# 查看日志中的提示词信息
+grep "提示词管理器" logs/app.log
+
+# 或通过数据库查询
+sqlite3 data/cleaning.db "SELECT prompt_version, source, LENGTH(prompt_content) as length FROM prompt_versions WHERE prompt_name='novel_repair' ORDER BY created_at DESC LIMIT 1;"
+```
+
+#### 6.4 手动触发提示词优化
+```bash
+# 通过 Evolver 脚本手动优化（需要安装 Node.js 和 Evolver CLI）
+python3 scripts/evolver.py \
+  --prompt "当前提示词内容" \
+  --context '{"error_type":"high_error_rate","error_count":10,"total_requests":50}'
+```
+
 #### 5.2 测试本地模型响应
 
 ```bash
@@ -223,13 +382,13 @@ curl -s http://localhost:11434/api/generate \
 
 在处理文件时，日志中会出现以下关键字：
 
-| 日志关键字 | 含义 |
-|-----------|------|
-| `local_model_processing_start` | 本地模型开始处理 |
+| 日志关键字                       | 含义                               |
+| -------------------------------- | ---------------------------------- |
+| `local_model_processing_start`   | 本地模型开始处理                   |
 | `local_model_processing_success` | 本地模型处理成功（含耗时、置信度） |
-| `local_model_processing_failed` | 本地模型处理失败，将触发远程降级 |
-| `ollama_generate_success` | Ollama API 调用成功 |
-| `ollama_request_failed` | Ollama API 调用失败 |
+| `local_model_processing_failed`  | 本地模型处理失败，将触发远程降级   |
+| `ollama_generate_success`        | Ollama API 调用成功                |
+| `ollama_request_failed`          | Ollama API 调用失败                |
 
 #### 5.5 查看处理统计信息
 
@@ -242,14 +401,14 @@ curl -s http://localhost:8080/api/files/<文件MD5>/status | python3 -m json.too
 
 响应中的 `stats` 字段包含以下统计：
 
-| 字段 | 说明 |
-|------|------|
-| `local_success` | 本地模型成功处理的块数 |
-| `local_failure` | 本地模型失败且未降级的块数 |
+| 字段              | 说明                            |
+| ----------------- | ------------------------------- |
+| `local_success`   | 本地模型成功处理的块数          |
+| `local_failure`   | 本地模型失败且未降级的块数      |
 | `remote_fallback` | 本地失败后降级到远程 API 的块数 |
-| `cache_hits` | 缓存命中次数（无需调用模型） |
-| `cache_misses` | 缓存未命中次数（需要调用模型） |
-| `total_chunks` | 总块数 |
+| `cache_hits`      | 缓存命中次数（无需调用模型）    |
+| `cache_misses`    | 缓存未命中次数（需要调用模型）  |
+| `total_chunks`    | 总块数                          |
 
 #### 5.6 常见问题排查
 
@@ -275,10 +434,12 @@ curl -X POST http://localhost:8080/api/files/<文件MD5>/run
 **问题：频繁触发远程降级**
 
 可能原因：
+
 - 本地模型置信度低于阈值（默认 0.7）
 - 本地模型响应超时（默认 60 秒）
 
 调整建议：
+
 - 降低置信度阈值：`LOCAL_CONFIDENCE_THRESHOLD=0.5`
 - 增加超时时间：`LOCAL_MODEL_TIMEOUT=120`
 - 关闭降级（仅使用本地模型）：`LOCAL_FALLBACK_ENABLED=false`

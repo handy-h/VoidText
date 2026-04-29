@@ -8,9 +8,6 @@ Chinese novel TXT cleaning tool. Go backend, SQLite, Gin web framework, SPA fron
 # Build
 go build -o voidtext ./cmd/voidtext/
 
-# Cross-compile for ARM64 (Raspberry Pi)
-GOOS=linux GOARCH=arm64 go build -o voidtext ./cmd/voidtext/
-
 # Run directly
 go run ./cmd/voidtext/
 
@@ -55,7 +52,7 @@ internal/
 web/
   backend/             — Gin router, handlers, middleware (auth, rate-limit, error, recovery)
   frontend/            — index.html + modular JS in static/js/modules/
-scripts/               — run.sh, raspberrypi-start.sh, evolver.py (Python, for prompt tuning)
+scripts/               — run.sh, evolver.py (Python, for prompt tuning)
 config/prompts/        — (directory exists, empty — intended for prompt templates)
 testing/
   unit_testing/        — test plans + run_unit_tests.sh
