@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>湮文 VoidText</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=6" />
+    <link rel="stylesheet" href="/static/css/style.css?v=7" />
   </head>
   <body>
     <!-- 认证界面 -->
@@ -13,14 +13,14 @@
         <div class="auth-card">
           <h1>湮文 VoidText</h1>
           <p class="auth-description">文本处理与审核系统</p>
-          
+
           <div class="auth-form">
             <div class="form-group">
               <label for="auth-token">认证 Token</label>
-              <input 
-                type="password" 
-                id="auth-token" 
-                placeholder="请输入认证token" 
+              <input
+                type="password"
+                id="auth-token"
+                placeholder="请输入认证token"
                 class="auth-input"
                 onkeypress="if(event.key === 'Enter') handleLogin()"
               />
@@ -40,50 +40,89 @@
     <!-- 主应用界面 -->
     <div id="app" style="display: none;">
       <header>
-        <h1>湮文</h1>
+        <div class="header-brand">
+          <h1>湮文</h1>
+        </div>
         <nav>
           <button class="nav-btn active" onclick="showSection('file-list')">
+            <span class="nav-icon">&#x1F4C1;</span>
             文件列表
           </button>
           <button class="nav-btn" onclick="showSection('upload')">
+            <span class="nav-icon">&#x2B06;</span>
             上传文件
           </button>
-          <button class="nav-btn" onclick="handleLogout()" style="margin-left: auto;">
+          <button class="nav-btn nav-logout" onclick="handleLogout()">
+            <span class="nav-icon">&#x2192;</span>
             退出登录
           </button>
         </nav>
       </header>
 
       <main>
-        <!-- 文件列表 -->
+        <!-- ===== 文件列表 ===== -->
         <section id="file-list-section">
           <div class="section-header">
             <h2>待处理文件</h2>
-            <button class="btn-primary" onclick="refreshFileList()">
-              刷新
-            </button>
+            <div class="section-header-actions">
+              <span id="file-count-badge" class="status-badge status-pending" style="display:none;">0 个文件</span>
+              <button class="btn-secondary btn-sm" onclick="refreshFileList()">
+                刷新
+              </button>
+            </div>
+          </div>
+          <!-- 拖拽上传区（文件列表为空时显示） -->
+          <div id="drop-zone-empty" class="drop-zone" style="display:none;">
+            <div class="drop-zone-content">
+              <div class="drop-zone-icon">
+                <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
+                  <rect x="8" y="16" width="48" height="40" rx="6" stroke="currentColor" stroke-width="2" fill="none"/>
+                  <path d="M32 12 L32 36 M24 28 L32 36 L40 28" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <circle cx="24" cy="30" r="3" fill="currentColor" opacity="0.4"/>
+                  <circle cx="40" cy="26" r="3" fill="currentColor" opacity="0.4"/>
+                </svg>
+              </div>
+              <p class="drop-zone-text">点击选择或拖拽小说文件（.txt / .docx）至此开始处理</p>
+              <p class="drop-zone-hint">支持 .txt 和 .docx 格式，单文件最大 100MB</p>
+              <input type="file" id="drop-zone-input" accept=".txt,.docx" class="drop-zone-input" />
+            </div>
           </div>
           <div id="file-list-container"></div>
         </section>
 
-        <!-- 上传文件 -->
+        <!-- ===== 上传文件 ===== -->
         <section id="upload-section" style="display: none">
           <h2>上传文件</h2>
           <div class="upload-area" id="upload-area">
             <input
               type="file"
               id="file-input"
-              accept=".txt"
+              accept=".txt,.docx"
               onchange="handleFileUpload(event)"
             />
-            <p>拖拽或点击上传 .txt 文件</p>
+            <p>拖拽或点击上传 .txt / .docx 文件</p>
           </div>
           <div id="upload-result" style="display: none"></div>
         </section>
 
-        <!-- 规则配置 -->
+        <!-- ===== 规则配置 ===== -->
         <section id="rules-config-section" style="display: none">
-          <h2>规则配置</h2>
+          <div class="section-header">
+            <h2>规则配置</h2>
+          </div>
+          <!-- 预设模板 -->
+          <div class="preset-templates">
+            <span class="preset-label">快速模板：</span>
+            <button class="preset-btn" data-preset="basic" onclick="RulesConfigModule.applyPreset('basic')">
+              基础清洗模式
+            </button>
+            <button class="preset-btn" data-preset="deep" onclick="RulesConfigModule.applyPreset('deep')">
+              深度修复模式
+            </button>
+            <button class="preset-btn" data-preset="minimal" onclick="RulesConfigModule.applyPreset('minimal')">
+              仅清洗
+            </button>
+          </div>
           <div class="rules-form">
             <div class="form-group">
               <label
@@ -138,7 +177,7 @@
               ></textarea>
             </div>
             <div class="form-actions">
-              <button class="btn-primary" onclick="saveRulesAndProcess()">
+              <button class="btn-primary" onclick="RulesConfigModule.saveRulesAndProcess()">
                 保存并开始处理
               </button>
               <button class="btn-secondary" onclick="showSection('file-list')">
@@ -148,11 +187,13 @@
           </div>
         </section>
 
-        <!-- 处理进度 -->
+        <!-- ===== 处理进度 ===== -->
         <section id="processing-section" style="display: none">
-          <h2>处理进度</h2>
+          <div class="section-header">
+            <h2>处理进度</h2>
+          </div>
           <div class="processing-info">
-            <div id="file-info-display"></div>
+            <div id="file-info-display" class="file-info-display"></div>
             <div class="steps-progress">
               <div class="step-item" data-step="cleaning">
                 <span class="step-icon">1</span>
@@ -183,8 +224,18 @@
               <div class="progress-bar" id="overall-progress"></div>
               <span id="progress-text">0%</span>
             </div>
-            <div id="processing-message"></div>
+            <div id="processing-message" class="processing-message"></div>
             <div id="current-action" class="current-action"></div>
+            <!-- 自动跳转开关 -->
+            <div class="auto-nav-toggle">
+              <label class="toggle-label">
+                <input type="checkbox" id="auto-nav-review" checked />
+                <span class="toggle-track">
+                  <span class="toggle-thumb"></span>
+                </span>
+                <span class="toggle-text">处理完成后自动进入审核页面</span>
+              </label>
+            </div>
             <div id="chunk-progress-container" class="chunk-progress" style="display: none;">
               <div class="chunk-progress-header">
                 <span>LLM修复进度</span>
@@ -202,7 +253,7 @@
             <div class="processing-logs">
               <div class="logs-header" onclick="toggleLogs()">
                 <span>处理日志</span>
-                <span id="logs-toggle-icon">▼</span>
+                <span id="logs-toggle-icon">&#x25BC;</span>
               </div>
               <div id="logs-content" class="logs-content">
                 <div id="logs-list" class="logs-list"></div>
@@ -219,48 +270,76 @@
           </div>
         </section>
 
-        <!-- 审核界面 -->
+        <!-- ===== 审核界面（双栏布局） ===== -->
         <section id="review-section" style="display: none">
-          <div class="section-header">
-            <h2>审核修改建议</h2>
-            <div class="review-progress-info">
-              <span id="review-progress-text">0/0</span>
-              <button class="btn-secondary" onclick="downloadCurrentVersion()">
-                下载当前版本
-              </button>
+          <div class="review-layout">
+            <!-- 左侧：修改项聚合导航面板 -->
+            <aside class="review-sidebar" id="review-sidebar">
+              <div class="sidebar-header">
+                <h3>修改项导航</h3>
+                <div class="sidebar-progress">
+                  <span id="review-progress-text">0/0</span>
+                </div>
+              </div>
+              <div class="sidebar-nav" id="sidebar-nav">
+                <!-- 动态生成：分类列表 -->
+              </div>
+              <div class="sidebar-footer">
+                <button class="btn-secondary btn-sm" id="batch-approve-btn">
+                  全部通过
+                </button>
+                <button class="btn-secondary btn-sm" id="batch-reject-btn">
+                  全部拒绝
+                </button>
+              </div>
+            </aside>
+
+            <!-- 右侧：沉浸式对比编辑区 -->
+            <div class="review-main">
+              <!-- 工具栏 -->
+              <div class="review-toolbar">
+                <div class="toolbar-left">
+                  <span id="review-current-category" class="review-current-category">全部待审核</span>
+                </div>
+                <div class="toolbar-right">
+                  <select id="review-status-filter">
+                    <option value="pending">待审核</option>
+                    <option value="all">全部</option>
+                    <option value="approved">已通过</option>
+                    <option value="rejected">已拒绝</option>
+                    <option value="edited">已编辑</option>
+                  </select>
+                  <span class="keyboard-hint">
+                    <kbd>&uarr;</kbd> <kbd>&darr;</kbd> 切换
+                    <kbd>Enter</kbd> 通过
+                    <kbd>Esc</kbd> 拒绝
+                  </span>
+                </div>
+              </div>
+
+              <!-- 审核列表 -->
+              <div class="review-items-scroll" id="review-items-scroll">
+                <div id="review-items-list"></div>
+              </div>
+
+              <!-- 底部操作栏 -->
+              <div class="review-bottom-bar">
+                <div class="bottom-bar-left">
+                  <button class="btn-primary" id="finalize-btn" style="display: none">
+                    完成审核并生成文件
+                  </button>
+                </div>
+                <div class="bottom-bar-right">
+                  <button class="btn-secondary" onclick="showSection('file-list')">
+                    返回列表
+                  </button>
+                </div>
+              </div>
             </div>
-          </div>
-          <div class="review-filters">
-            <select id="review-status-filter">
-              <option value="pending">待审核</option>
-              <option value="all">全部</option>
-              <option value="approved">已通过</option>
-              <option value="rejected">已拒绝</option>
-              <option value="edited">已编辑</option>
-            </select>
-            <button class="btn-secondary" id="batch-approve-btn">
-              全部通过
-            </button>
-            <button class="btn-secondary" id="batch-reject-btn">
-              全部拒绝
-            </button>
-          </div>
-          <div id="review-items-list"></div>
-          <div class="review-actions">
-            <button
-              class="btn-primary"
-              id="finalize-btn"
-              style="display: none"
-            >
-              完成审核并生成文件
-            </button>
-            <button class="btn-secondary" onclick="showSection('file-list')">
-              返回列表
-            </button>
           </div>
         </section>
 
-        <!-- 完成界面 -->
+        <!-- ===== 完成界面 ===== -->
         <section id="completed-section" style="display: none">
           <h2>处理完成</h2>
           <div id="completed-info"></div>
@@ -278,19 +357,20 @@
         </section>
       </main>
 
+      <!-- Toast 反馈 -->
       <div id="feedback" class="feedback" style="display: none"></div>
     </div>
-    <script src="/static/js/config.js?v=3"></script>
-    <script src="/static/js/dom-utils.js?v=3"></script>
-    <script src="/static/js/diff-utils.js?v=3"></script>
+    <script src="/static/js/config.js?v=4"></script>
+    <script src="/static/js/dom-utils.js?v=4"></script>
+    <script src="/static/js/diff-utils.js?v=4"></script>
     <!-- 模块化JS文件 -->
-    <script src="/static/js/modules/auth.js?v=3"></script>
-    <script src="/static/js/modules/file-manager.js?v=3"></script>
-    <script src="/static/js/modules/processing.js?v=3"></script>
-    <script src="/static/js/modules/review.js?v=3"></script>
-    <script src="/static/js/modules/rules-config.js?v=3"></script>
-    <script src="/static/js/modules/app.js?v=3"></script>
+    <script src="/static/js/modules/auth.js?v=4"></script>
+    <script src="/static/js/modules/file-manager.js?v=4"></script>
+    <script src="/static/js/modules/processing.js?v=4"></script>
+    <script src="/static/js/modules/review.js?v=4"></script>
+    <script src="/static/js/modules/rules-config.js?v=4"></script>
+    <script src="/static/js/modules/app.js?v=4"></script>
     <!-- 主JS文件 -->
-    <script src="/static/js/main.js?v=3"></script>
+    <script src="/static/js/main.js?v=4"></script>
   </body>
 </html>

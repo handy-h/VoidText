@@ -95,6 +95,21 @@ const DomUtils = {
       this.setTextContent(errorDiv, `错误: ${file.errorMsg}`);
       fileInfo.appendChild(errorDiv);
     }
+
+    // 进度条（仅处理中状态显示）
+    if (file.status === 'processing' && file.progress !== undefined && file.progress !== null) {
+      const progressContainer = this.createElement('div', { className: 'file-card-progress' });
+      const progressBar = this.createElement('div', { className: 'file-card-progress-bar' });
+      const progressFill = this.createElement('div', { className: 'file-card-progress-fill' });
+      progressFill.style.width = file.progress + '%';
+      progressBar.appendChild(progressFill);
+      progressContainer.appendChild(progressBar);
+      const progressText = this.createElement('span', { className: 'file-card-progress-text' });
+      const stepText = this.getStepText(file.currentStep);
+      this.setTextContent(progressText, stepText + '... ' + file.progress + '%');
+      progressContainer.appendChild(progressText);
+      fileInfo.appendChild(progressContainer);
+    }
     
     card.appendChild(fileInfo);
     

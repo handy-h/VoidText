@@ -3,10 +3,10 @@ const ProcessingModule = (function () {
   // 私有变量
   let pollingTimer = null;
   let currentFileMd5 = null;
+  let previousStatus = null; // 记录上次轮询到的状态，用于检测状态转换
 
   // 初始化
   function init() {
-    // 绑定事件
     bindEvents();
   }
 
@@ -22,6 +22,10 @@ const ProcessingModule = (function () {
   // 查看处理进度
   function viewProgress(md5) {
     currentFileMd5 = md5;
+    // 同步到全局，使下载等操作可用
+    window.currentFileMd5 = md5;
+    // 重置状态跟踪，后续轮询检测到状态变化时才自动跳转
+    previousStatus = null;
     FileManager.showSection("processing");
     startPolling();
   }
@@ -39,6 +43,12 @@ const ProcessingModule = (function () {
       clearInterval(pollingTimer);
       pollingTimer = null;
     }
+  }
+
+  // 检查自动跳转开关
+  function isAutoNavEnabled() {
+    const toggle = document.getElementById('auto-nav-review');
+    return toggle ? toggle.checked : true;
   }
 
   // 更新进度
@@ -61,9 +71,9 @@ const ProcessingModule = (function () {
         }
 
         if (processingMessage) {
-          let message = `状态: ${getStatusText(data.status)}`;
+          let message = '\u72B6\u6001: ' + getStatusText(data.status);
           if (data.currentStep) {
-            message += ` | 当前步骤: ${getStepText(data.currentStep)}`;
+            message += ' | \u5F53\u524D\u6B65\u9AA4: ' + getStepText(data.currentStep);
           }
           DomUtils.setTextContent(processingMessage, message);
         }
@@ -76,24 +86,48 @@ const ProcessingModule = (function () {
         updateLogs(data.logs);
         updateChunkProgress(data.chunkProgress);
 
+        // 检测状态转换：仅当状态从上一次轮询发生了变化才自动跳转
+        // 用户主动点"查看进度"时 previousStatus=null，不会触发跳转
+        // 流水线完成的自动跳转则 previousStatus 会从 processing→reviewing
+        var statusChanged = previousStatus !== null && previousStatus !== data.status;
+        previousStatus = data.status;
+
         if (
           data.status === "completed" ||
           data.status === "failed" ||
           data.status === "reviewing"
         ) {
-          stopPolling();
-          if (data.status === "reviewing") {
-            FileManager.showSection("review");
-            ReviewModule.setCurrentFileMd5(currentFileMd5);
-            ReviewModule.loadReviewItems();
-          } else if (data.status === "completed") {
-            FileManager.showSection("completed");
-            updateCompletedInfo();
+          if (statusChanged) {
+            stopPolling();
+
+            if (data.status === "reviewing") {
+              // 根据开关决定是否自动跳转
+              if (isAutoNavEnabled()) {
+                FileManager.showSection("review");
+                ReviewModule.setCurrentFileMd5(currentFileMd5);
+                ReviewModule.loadReviewItems();
+              } else {
+                showFeedback('\u5904\u7406\u5B8C\u6210\uFF0C\u6B63\u5728\u7B49\u5F85\u5BA1\u6838', 'success');
+                FileManager.refreshFileList();
+                FileManager.showSection('file-list');
+              }
+            } else if (data.status === "completed") {
+              FileManager.showSection("completed");
+              updateCompletedInfo();
+            } else if (data.status === "failed") {
+              showFeedback('\u5904\u7406\u5931\u8D25: ' + (data.error || '\u672A\u77E5\u9519\u8BEF'), 'error');
+              FileManager.refreshFileList();
+              FileManager.showSection('file-list');
+            }
+          } else {
+            // 状态未变化（用户主动查看已完成/审核中的状态页）
+            // 停留在当前进度页面，让用户查看并下载
+            stopPolling();
           }
         }
       })
       .catch((err) => {
-        console.error("轮询失败:", err);
+        console.error("\u8F6E\u8BE2\u5931\u8D25:", err);
       });
   }
 
@@ -120,11 +154,11 @@ const ProcessingModule = (function () {
   // 获取状态文本
   function getStatusText(status) {
     const map = {
-      pending: "待处理",
-      processing: "处理中",
-      reviewing: "审核中",
-      completed: "已完成",
-      failed: "失败",
+      pending: "\u5F85\u5904\u7406",
+      processing: "\u5904\u7406\u4E2D",
+      reviewing: "\u5BA1\u6838\u4E2D",
+      completed: "\u5DF2\u5B8C\u6210",
+      failed: "\u5931\u8D25",
     };
     return map[status] || status;
   }
@@ -132,16 +166,16 @@ const ProcessingModule = (function () {
   // 获取步骤文本
   function getStepText(step) {
     const map = {
-      cleaning: "基础清洗",
-      indexing: "向量检测",
-      llm_fix: "LLM修复",
-      review: "人工审核",
-      finalizing: "生成文件",
+      cleaning: "\u57FA\u7840\u6E05\u6D17",
+      indexing: "\u5411\u91CF\u68C0\u6D4B",
+      llm_fix: "LLM\u4FEE\u590D",
+      review: "\u4EBA\u5DE5\u5BA1\u6838",
+      finalizing: "\u751F\u6210\u6587\u4EF6",
     };
     return map[step] || step || "-";
   }
 
-  // 切换日志显示
+  // 更新日志
   function updateLogs(logs) {
     const logsList = document.getElementById("logs-list");
     if (!logsList || !logs || !logs.length) return;
@@ -178,10 +212,10 @@ const ProcessingModule = (function () {
         const parsed = JSON.parse(detail);
         if (parsed.action) {
           const actionMap = {
-            step_started: "步骤开始",
-            step_completed: "步骤完成",
-            step_skipped: "步骤跳过",
-            step_failed: "步骤失败",
+            step_started: "\u6B65\u9AA4\u5F00\u59CB",
+            step_completed: "\u6B65\u9AA4\u5B8C\u6210",
+            step_skipped: "\u6B65\u9AA4\u8DF3\u8FC7",
+            step_failed: "\u6B65\u9AA4\u5931\u8D25",
           };
           detail = actionMap[parsed.action] || parsed.action;
           if (parsed.details) {
@@ -194,21 +228,21 @@ const ProcessingModule = (function () {
             if (parsed.details.result) {
               const parts = [];
               if (parsed.details.result.changes_count !== undefined) {
-                parts.push("修改数: " + parsed.details.result.changes_count);
+                parts.push("\u4FEE\u6539\u6570: " + parsed.details.result.changes_count);
               }
               if (parsed.details.result.duplicates_detected !== undefined) {
                 parts.push(
-                  "重复: " + parsed.details.result.duplicates_detected,
+                  "\u91CD\u590D: " + parsed.details.result.duplicates_detected,
                 );
               }
               if (parsed.details.result.total_chunks !== undefined) {
-                parts.push("块数: " + parsed.details.result.total_chunks);
+                parts.push("\u5757\u6570: " + parsed.details.result.total_chunks);
               }
               if (parsed.details.result.total_changes !== undefined) {
-                parts.push("变更: " + parsed.details.result.total_changes);
+                parts.push("\u53D8\u66F4: " + parsed.details.result.total_changes);
               }
               if (parsed.details.result.cache_hits !== undefined) {
-                parts.push("缓存命中: " + parsed.details.result.cache_hits);
+                parts.push("\u7F13\u5B58\u547D\u4E2D: " + parsed.details.result.cache_hits);
               }
               if (parts.length > 0) {
                 detail += " [" + parts.join(", ") + "]";
@@ -224,13 +258,9 @@ const ProcessingModule = (function () {
 
       logsList.appendChild(logItem);
     });
-
-    const logsContent = document.getElementById("logs-content");
-    if (logsContent && logsContent.style.display !== "none") {
-      logsList.scrollTop = 0;
-    }
   }
 
+  // 更新块进度
   function updateChunkProgress(chunkProgress) {
     const container = document.getElementById("chunk-progress-container");
     if (!container) return;
@@ -251,7 +281,7 @@ const ProcessingModule = (function () {
     if (countEl) {
       DomUtils.setTextContent(
         countEl,
-        `已处理: ${chunkProgress.processedChunks}/${chunkProgress.totalChunks} 块`,
+        "\u5DF2\u5904\u7406: " + chunkProgress.processedChunks + "/" + chunkProgress.totalChunks + " \u5757",
       );
     }
 
@@ -259,7 +289,7 @@ const ProcessingModule = (function () {
     if (statsEl) {
       DomUtils.setTextContent(
         statsEl,
-        `API调用: ${chunkProgress.apiCalls || 0}次 | 缓存命中: ${chunkProgress.cacheHits || 0}次`,
+        "API\u8C03\u7528: " + (chunkProgress.apiCalls || 0) + "\u6B21 | \u7F13\u5B58\u547D\u4E2D: " + (chunkProgress.cacheHits || 0) + "\u6B21",
       );
     }
 
@@ -267,7 +297,7 @@ const ProcessingModule = (function () {
     if (avgEl) {
       DomUtils.setTextContent(
         avgEl,
-        `平均耗时: ${chunkProgress.avgChunkTimeMs || 0}ms/块`,
+        "\u5E73\u5747\u8017\u65F6: " + (chunkProgress.avgChunkTimeMs || 0) + "ms/\u5757",
       );
     }
 
@@ -280,8 +310,8 @@ const ProcessingModule = (function () {
         DomUtils.setTextContent(
           etaEl,
           mins > 0
-            ? `预计剩余: ${mins}分${remainSecs}秒`
-            : `预计剩余: ${remainSecs}秒`,
+            ? "\u9884\u8BA1\u5269\u4F59: " + mins + "\u5206" + remainSecs + "\u79D2"
+            : "\u9884\u8BA1\u5269\u4F59: " + remainSecs + "\u79D2",
         );
       } else {
         DomUtils.setTextContent(etaEl, "");
@@ -289,16 +319,17 @@ const ProcessingModule = (function () {
     }
   }
 
+  // 切换日志显示
   function toggleLogs() {
     const logsContent = document.getElementById("logs-content");
     const toggleIcon = document.getElementById("logs-toggle-icon");
     if (logsContent && toggleIcon) {
       if (logsContent.style.display === "none") {
         logsContent.style.display = "block";
-        toggleIcon.textContent = "▲";
+        toggleIcon.textContent = "\u25B2";
       } else {
         logsContent.style.display = "none";
-        toggleIcon.textContent = "▼";
+        toggleIcon.textContent = "\u25BC";
       }
     }
   }
@@ -321,10 +352,10 @@ const ProcessingModule = (function () {
 
         const details = DomUtils.createElement("p");
         const parts = [];
-        if (file.author) parts.push(`作者: ${file.author}`);
-        parts.push(`大小: ${formatFileSize(file.fileSize)}`);
-        parts.push(`状态: ${getStatusText(file.status)}`);
-        parts.push(`完成时间: ${formatTime(file.updatedAt)}`);
+        if (file.author) parts.push("\u4F5C\u8005: " + file.author);
+        parts.push("\u5927\u5C0F: " + formatFileSize(file.fileSize));
+        parts.push("\u72B6\u6001: " + getStatusText(file.status));
+        parts.push("\u5B8C\u6210\u65F6\u95F4: " + formatTime(file.updatedAt));
         DomUtils.setTextContent(details, parts.join(" | "));
         info.appendChild(details);
 
@@ -332,7 +363,7 @@ const ProcessingModule = (function () {
         infoDiv.appendChild(info);
       })
       .catch((err) => {
-        console.error("获取完成信息失败:", err);
+        console.error("\u83B7\u53D6\u5B8C\u6210\u4FE1\u606F\u5931\u8D25:", err);
       });
   }
 
@@ -361,6 +392,18 @@ const ProcessingModule = (function () {
     } catch {
       return ts;
     }
+  }
+
+  // 显示反馈
+  function showFeedback(message, type) {
+    const fb = document.getElementById("feedback");
+    if (!fb) return;
+    fb.textContent = message;
+    fb.className = "feedback " + (type || "success");
+    fb.style.display = "block";
+    setTimeout(() => {
+      fb.style.display = "none";
+    }, 3000);
   }
 
   // 公共API

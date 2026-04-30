@@ -648,7 +648,11 @@ func AdvanceFromReview(fileMd5 string) (*PipelineResult, error) {
 
 // saveIntermediateFile 保存中间文件并记录版本
 func saveIntermediateFile(fileMd5, step, content string) error {
-	filePath := filepath.Join(config.AppConfigInstance.DataDir, "uploads", fileMd5+"_"+step+".txt")
+	dir := filepath.Join(config.AppConfigInstance.DataDir, "uploads")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("创建上传目录失败: %w", err)
+	}
+	filePath := filepath.Join(dir, fileMd5+"_"+step+".txt")
 	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
 		return err
 	}

@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"voidtext/internal/config"
 	"voidtext/internal/database"
 	"voidtext/internal/processor"
 )
@@ -135,6 +137,9 @@ func GetFileStatus(c *gin.Context) {
 }
 
 // GetReviewItems 获取审核项
+// review_items 中的 PositionStart 是相对于创建时的文件版本，
+// 但流水线每个步骤都会修改文件内容（删除重复、LLM替换等）并更新 record.FilePath。
+// 因此本函数读取多个中间文件版本，按新旧顺序逐一尝试定位每个审核项。
 func GetReviewItems(c *gin.Context) {
 	fileMd5 := c.Param("md5")
 	statusFilter := c.Query("status")
@@ -145,8 +150,8 @@ func GetReviewItems(c *gin.Context) {
 		return
 	}
 
-	content, err := os.ReadFile(record.FilePath)
-	if err != nil {
+	contents := readAvailableContents(fileMd5, record.FilePath)
+	if len(contents) == 0 {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "读取文件失败"})
 		return
 	}
@@ -159,7 +164,7 @@ func GetReviewItems(c *gin.Context) {
 
 	suggestions := make([]map[string]interface{}, 0, len(items))
 	for _, item := range items {
-		lineNum, fullLine, prevLine, nextLine := getLineContext(string(content), item.PositionStart, item.OriginalText)
+		lineNum, fullLine, prevLines, nextLines := getLineContextMulti(contents, item.PositionStart, item.OriginalText, item.SuggestedText)
 
 		suggestions = append(suggestions, map[string]interface{}{
 			"id":         item.ID,
@@ -172,12 +177,56 @@ func GetReviewItems(c *gin.Context) {
 			"editedText": item.EditedText,
 			"lineNum":    lineNum,
 			"fullLine":   fullLine,
-			"prevLine":   prevLine,
-			"nextLine":   nextLine,
+			"prevLines":  prevLines,
+			"nextLines":  nextLines,
+			// 向后兼容：单行上下文
+			"prevLine": getLastOrEmpty(prevLines),
+			"nextLine": getFirstOrEmpty(nextLines),
 		})
 	}
 
 	c.JSON(http.StatusOK, gin.H{"success": true, "suggestions": suggestions})
+}
+
+// readAvailableContents 读取当前文件及所有中间版本文件的内容（从新到旧）
+func readAvailableContents(fileMd5, currentPath string) []string {
+	seen := map[string]bool{}
+	var contents []string
+
+	// 当前文件（最新版本）
+	if currentPath != "" {
+		if data, err := os.ReadFile(currentPath); err == nil {
+			contents = append(contents, string(data))
+			seen[currentPath] = true
+		}
+	}
+
+	// 中间步骤文件（从新到旧）
+	steps := []string{processor.StepLlmFix, processor.StepIndexing, processor.StepCleaning}
+	basePath := filepath.Join(config.AppConfigInstance.DataDir, "uploads")
+	for _, step := range steps {
+		path := filepath.Join(basePath, fileMd5+"_"+step+".txt")
+		if seen[path] {
+			continue
+		}
+		if data, err := os.ReadFile(path); err == nil {
+			contents = append(contents, string(data))
+			seen[path] = true
+		}
+	}
+
+	return contents
+}
+
+// getLineContextMulti 在多个版本的内容中依次尝试定位审核项，使用第一个成功的结果
+func getLineContextMulti(contents []string, position int, original, suggested string) (lineNum int, fullLine string, prevLines, nextLines []string) {
+	for _, content := range contents {
+		lineNum, fullLine, prevLines, nextLines = getLineContext(content, position, original, suggested)
+		if lineNum > 0 {
+			return
+		}
+	}
+	return 0, "", nil, nil
 }
 
 // ApproveReviewItem 批准审核项
@@ -401,99 +450,262 @@ func updateReviewProgress(fileMd5 string) {
 }
 
 // getLineContext 获取指定位置的行号和上下文
-func getLineContext(content string, position int, original string) (lineNum int, fullLine, prevLine, nextLine string) {
+// contextLineCount 返回的上下文行数（每侧）
+const contextLineCount = 3
+
+// getLineContext 查找文本中指定位置附近的上下文，返回行号、完整行、前后各3行
+// 如果 original 在文件中已不存在（如被LLM修复替换），会尝试搜索 suggested 文本定位
+func getLineContext(content string, position int, original string, suggested string) (lineNum int, fullLine string, prevLines, nextLines []string) {
 	lines := strings.Split(content, "\n")
 
+	// 查找匹配行索引（0-based）
+	matchIdx := findMatchLine(lines, content, position, original, suggested)
+
+	if matchIdx < 0 || matchIdx >= len(lines) {
+		// 最终兜底：逐行扫描任何包含原文或建议文本的行
+		matchIdx = finalScan(lines, original, suggested)
+	}
+
+	if matchIdx < 0 || matchIdx >= len(lines) {
+		return 0, "", nil, nil
+	}
+
+	lineNum = matchIdx + 1
+	fullLine = lines[matchIdx]
+	prevLines = getPrevLines(lines, matchIdx, contextLineCount)
+	nextLines = getNextLines(lines, matchIdx, contextLineCount)
+	return
+}
+
+// findMatchLine 在行列表中查找匹配位置所在的行的索引
+// 因为流水线各步骤会修改文件内容（删除重复、LLM替换等），
+// review_items 中存储的 byte 位置可能指向旧版本文件。
+// 本函数通过 位置+内容验证 以及 附近搜索 来处理位置偏移。
+// 对于 LLM 修复项，如果 original 已被替换，会尝试搜索 suggested 文本定位。
+func findMatchLine(lines []string, content string, position int, original string, suggested string) int {
+	// 辅助函数：在指定行附近 ±range 行内搜索文本
+	searchNearby := func(estimatedLine int, searchText string, searchRange int) int {
+		if searchText == "" {
+			return -1
+		}
+		if estimatedLine >= 0 && estimatedLine < len(lines) &&
+			strings.Contains(lines[estimatedLine], searchText) {
+			return estimatedLine
+		}
+		for offset := 1; offset <= searchRange; offset++ {
+			if estimatedLine-offset >= 0 && strings.Contains(lines[estimatedLine-offset], searchText) {
+				return estimatedLine - offset
+			}
+			if estimatedLine+offset < len(lines) && strings.Contains(lines[estimatedLine+offset], searchText) {
+				return estimatedLine + offset
+			}
+		}
+		return -1
+	}
+
+	// 辅助函数：全局搜索文本，附带逐步缩短的兜底
+	searchGlobal := func(searchText string) int {
+		if searchText == "" {
+			return -1
+		}
+		// 精确匹配整段文本
+		for i, line := range lines {
+			if strings.Contains(line, searchText) {
+				return i
+			}
+		}
+		// 去掉空格后再试
+		trimmed := strings.TrimSpace(searchText)
+		for i, line := range lines {
+			if strings.Contains(strings.TrimSpace(line), trimmed) {
+				return i
+			}
+		}
+		return -1
+	}
+
+	// 逐步缩短搜索：从完整文本到短片段，逐级尝试
+	searchProgressive := func(text string) int {
+		if text == "" {
+			return -1
+		}
+		// 尝试全文
+		if idx := searchGlobal(text); idx >= 0 {
+			return idx
+		}
+		// 尝试前半
+		if len(text) > 30 {
+			if idx := searchGlobal(text[:len(text)/2]); idx >= 0 {
+				return idx
+			}
+		}
+		// 尝试前 20 字
+		if len(text) > 20 {
+			runes := []rune(text)
+			if len(runes) > 20 {
+				if idx := searchGlobal(string(runes[:20])); idx >= 0 {
+					return idx
+				}
+			}
+		}
+		// 尝试前 10 字
+		if len(text) > 10 {
+			runes := []rune(text)
+			if len(runes) > 10 {
+				if idx := searchGlobal(string(runes[:10])); idx >= 0 {
+					return idx
+				}
+			}
+		}
+		return -1
+	}
+
+	// 1. 位置匹配 + 内容验证（最可靠的方式）
 	if position >= 0 && position <= len(content) {
 		currentPos := 0
+		estimatedLine := -1
 		for i, line := range lines {
 			lineEnd := currentPos + len(line)
 			if currentPos <= position && position <= lineEnd {
-				lineNum = i + 1
-				fullLine = line
-				if i > 0 {
-					prevLine = lines[i-1]
-				}
-				if i < len(lines)-1 {
-					nextLine = lines[i+1]
-				}
-				return lineNum, fullLine, prevLine, nextLine
+				estimatedLine = i
+				break
 			}
 			currentPos = lineEnd + 1
 		}
+
+		if estimatedLine >= 0 {
+			// 1a. 在位置附近搜索原文（处理内容轻微偏移）
+			if idx := searchNearby(estimatedLine, original, 8); idx >= 0 {
+				return idx
+			}
+
+			// 1b. 原文不存在（已被LLM替换），在位置附近搜索建议文本
+			if idx := searchNearby(estimatedLine, suggested, 8); idx >= 0 {
+				return idx
+			}
+
+			// 1c. 原文附近尝试逐步缩短搜索
+			if original != "" {
+				runes := []rune(original)
+				for shortenLen := 30; shortenLen >= 5; shortenLen -= 5 {
+					if len(runes) > shortenLen {
+						shortText := string(runes[:shortenLen])
+						if idx := searchNearby(estimatedLine, shortText, 8); idx >= 0 {
+							return idx
+						}
+					}
+				}
+			}
+		}
 	}
 
+	// 2. 全局逐步搜索原文（位置完全失效时）
 	if original != "" {
-		for i, line := range lines {
-			if strings.Contains(line, original) {
-				lineNum = i + 1
-				fullLine = line
-				if i > 0 {
-					prevLine = lines[i-1]
-				}
-				if i < len(lines)-1 {
-					nextLine = lines[i+1]
-				}
-				return lineNum, fullLine, prevLine, nextLine
-			}
-		}
-
-		trimmedOriginal := strings.TrimSpace(original)
-		for i, line := range lines {
-			if strings.Contains(strings.TrimSpace(line), trimmedOriginal) {
-				lineNum = i + 1
-				fullLine = line
-				if i > 0 {
-					prevLine = lines[i-1]
-				}
-				if i < len(lines)-1 {
-					nextLine = lines[i+1]
-				}
-				return lineNum, fullLine, prevLine, nextLine
-			}
-		}
-
-		if len(original) > 10 {
-			substr := original[:len(original)/2]
-			for i, line := range lines {
-				if strings.Contains(line, substr) {
-					lineNum = i + 1
-					fullLine = line
-					if i > 0 {
-						prevLine = lines[i-1]
-					}
-					if i < len(lines)-1 {
-						nextLine = lines[i+1]
-					}
-					return lineNum, fullLine, prevLine, nextLine
-				}
-			}
+		if idx := searchProgressive(original); idx >= 0 {
+			return idx
 		}
 	}
 
+	// 3. 全局逐步搜索建议文本（original 被替换时）
+	if suggested != "" {
+		if idx := searchProgressive(suggested); idx >= 0 {
+			return idx
+		}
+	}
+
+	// 4. 纯位置估算（最终兜底：至少返回一个近似行）
 	if position > 0 {
-		estimatedLine := 0
 		currentPos := 0
 		for i, line := range lines {
 			currentPos += len(line) + 1
 			if currentPos >= position {
-				estimatedLine = i
-				break
-			}
-		}
-		if estimatedLine < len(lines) {
-			lineNum = estimatedLine + 1
-			fullLine = lines[estimatedLine]
-			if estimatedLine > 0 {
-				prevLine = lines[estimatedLine-1]
-			}
-			if estimatedLine < len(lines)-1 {
-				nextLine = lines[estimatedLine+1]
+				return i
 			}
 		}
 	}
 
-	return lineNum, fullLine, prevLine, nextLine
+	return -1
+}
+
+// getPrevLines 获取匹配行之前的 n 行
+func getPrevLines(lines []string, idx int, n int) []string {
+	start := idx - n
+	if start < 0 {
+		start = 0
+	}
+	if start >= idx {
+		return nil
+	}
+	result := make([]string, idx-start)
+	for i := start; i < idx; i++ {
+		result[i-start] = lines[i]
+	}
+	return result
+}
+
+// getNextLines 获取匹配行之后的 n 行
+func getNextLines(lines []string, idx int, n int) []string {
+	end := idx + n + 1
+	if end > len(lines) {
+		end = len(lines)
+	}
+	if end <= idx+1 {
+		return nil
+	}
+	result := make([]string, end-(idx+1))
+	for i := idx + 1; i < end; i++ {
+		result[i-(idx+1)] = lines[i]
+	}
+	return result
+}
+
+// getLastOrEmpty 取切片最后一项，空切片返回空字符串（兼容旧版prevLine字段）
+func getLastOrEmpty(s []string) string {
+	if len(s) == 0 {
+		return ""
+	}
+	return s[len(s)-1]
+}
+
+// getFirstOrEmpty 取切片第一项，空切片返回空字符串（兼容旧版nextLine字段）
+func getFirstOrEmpty(s []string) string {
+	if len(s) == 0 {
+		return ""
+	}
+	return s[0]
+}
+
+// finalScan 绝望扫描：逐行检查原文/建议文本及其短片段
+func finalScan(lines []string, original, suggested string) int {
+	texts := []string{}
+	if original != "" {
+		texts = append(texts, original)
+	}
+	if suggested != "" && suggested != original {
+		texts = append(texts, suggested)
+	}
+
+	for _, text := range texts {
+		// 整段匹配
+		for i, line := range lines {
+			if strings.Contains(line, text) {
+				return i
+			}
+		}
+		// 逐步缩短后匹配
+		runes := []rune(text)
+		for shortenLen := 40; shortenLen >= 3; shortenLen -= 5 {
+			if len(runes) > shortenLen {
+				shortText := string(runes[:shortenLen])
+				for i, line := range lines {
+					if strings.Contains(line, shortText) {
+						return i
+					}
+				}
+			}
+		}
+	}
+	return -1
 }
 
 // buildReportHTML 构建HTML格式报告

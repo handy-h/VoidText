@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -418,7 +419,29 @@ func DownloadFile(c *gin.Context) {
 		return
 	}
 
-	c.FileAttachment(filePath, record.FileName)
+	// 使用 RFC 5987 编码支持中文文件名
+	// 同时提供 filename（ASCII fallback）和 filename*（UTF-8）
+	fileName := record.FileName
+	asciiName := fileName
+	if isASCII(fileName) {
+		asciiName = fileName
+	} else {
+		asciiName = "download.txt"
+	}
+	encodedName := url.PathEscape(fileName)
+	c.Header("Content-Disposition",
+		fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, asciiName, encodedName))
+	c.File(filePath)
+}
+
+// isASCII 判断字符串是否全部由 ASCII 字符组成
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] > 127 {
+			return false
+		}
+	}
+	return true
 }
 
 // DeleteFile 删除文件记录
