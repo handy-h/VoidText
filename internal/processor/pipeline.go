@@ -584,15 +584,14 @@ func processFinalizingStep(fileMd5, content string, record *database.FileRecord)
 	sortedChanges := buildSortedChanges(items)
 	finalContent = ApplyAllSuggestions(finalContent, sortedChanges)
 
-	author := record.Author
-	title := record.Title
-	namePrefix := fmt.Sprintf("%d", record.ID)
-	if author != "" && title != "" {
-		namePrefix = fmt.Sprintf("%s_%s", author, title)
-	} else if title != "" {
-		namePrefix = title
+	// 以原始文件名为基础，加上"清洗版"后缀
+	origFileName := record.FileName
+	if origFileName == "" {
+		origFileName = fmt.Sprintf("%d.txt", record.ID)
 	}
-	finalFileName := fmt.Sprintf("%s_cleaned_%d.txt", namePrefix, time.Now().Unix())
+	ext := filepath.Ext(origFileName)
+	baseName := strings.TrimSuffix(origFileName, ext)
+	finalFileName := fmt.Sprintf("%s_%s_%d%s", baseName, "清洗版", time.Now().Unix(), ext)
 
 	finalPath := filepath.Join(config.AppConfigInstance.DataDir, "uploads", fileMd5+"_final_"+finalFileName)
 	if err := os.WriteFile(finalPath, []byte(finalContent), 0644); err != nil {
@@ -609,10 +608,15 @@ func processFinalizingStep(fileMd5, content string, record *database.FileRecord)
 		Step:        StepFinalizing,
 	})
 
-	// 使用事务更新状态和记录日志
+	// 先更新步骤状态（会设 status=processing），再覆写为 completed
 	CompleteProcessingStep(fileMd5, StepFinalizing, map[string]interface{}{
 		"final_file": finalFileName,
 	})
+
+	// 更新 files 表：file_path 指向最终文件，file_name 含"清洗版"后缀，状态设为完成
+	db := database.GetDB()
+	db.Exec(`UPDATE files SET file_path = ?, file_name = ?, status = 'completed', current_step = '' WHERE md5 = ?`,
+		finalPath, finalFileName, fileMd5)
 
 	return &PipelineResult{
 		CurrentStep: StepFinalizing,
@@ -622,14 +626,26 @@ func processFinalizingStep(fileMd5, content string, record *database.FileRecord)
 	}, nil
 }
 
-// CheckReviewComplete 检查审核是否全部完成
+// CheckReviewComplete 检查审核是否全部完成（跳过无修改建议的非删除类项）
 func CheckReviewComplete(fileMd5 string) (bool, error) {
-	total, resolved, err := database.GetReviewProgress(fileMd5)
+	items, err := database.GetReviewItemsByFileMd5(fileMd5, "")
 	if err != nil {
 		return false, err
 	}
-	// 没有审核项时视为审核完成，有审核项时需全部解决
-	return total == 0 || total == resolved, nil
+	// 没有审核项时视为完成
+	if len(items) == 0 {
+		return true, nil
+	}
+	for _, item := range items {
+		// 跳过无修改建议的非删除类项（与 buildSortedChanges 逻辑一致）
+		if item.SuggestedText == "" && !isDeletionType(item.ModificationType) {
+			continue
+		}
+		if item.Status == "pending" {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // AdvanceFromReview 审核完成后推进到下一步
@@ -689,11 +705,25 @@ func removeAdContent(content, _ string) string {
 	return content
 }
 
+// isDeletionType 判断修改类型是否为"删除类"
+// 删除类修改的 SuggestedText 为空是有意为之（表示删除原文）
+// 而非删除类修改的 SuggestedText 为空表示系统未能给出修复建议，应保持原文
+func isDeletionType(modType string) bool {
+	return modType == "text_deletion" ||
+		modType == "advertisement" ||
+		modType == "duplicate_paragraph"
+}
+
 // buildSortedChanges 从审核项构建排序后的修改建议
 func buildSortedChanges(items []database.ReviewItemRecord) []preprocess.Change {
 	var changes []preprocess.Change
 	for _, item := range items {
 		if item.Status == "approved" {
+			// 非删除类修改的 SuggestedText 为空时，说明系统未能给出修复建议
+			// 此时应跳过该项，保持原文不变，而非用空字符串替换原文
+			if item.SuggestedText == "" && !isDeletionType(item.ModificationType) {
+				continue
+			}
 			changes = append(changes, preprocess.Change{
 				Original:    item.OriginalText,
 				Replacement: item.SuggestedText,

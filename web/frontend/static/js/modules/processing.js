@@ -121,8 +121,19 @@ const ProcessingModule = (function () {
             }
           } else {
             // 状态未变化（用户主动查看已完成/审核中的状态页）
-            // 停留在当前进度页面，让用户查看并下载
+            // 直接跳转到对应页面，而非停留在进度页
             stopPolling();
+            if (data.status === "reviewing") {
+              FileManager.showSection("review");
+              ReviewModule.setCurrentFileMd5(currentFileMd5);
+              ReviewModule.loadReviewItems();
+            } else if (data.status === "completed") {
+              FileManager.showSection("completed");
+              updateCompletedInfo();
+            } else if (data.status === "failed") {
+              showFeedback('\u5904\u7406\u5931\u8D25: ' + (data.error || '\u672A\u77E5\u9519\u8BEF'), 'error');
+              FileManager.showSection('file-list');
+            }
           }
         }
       })

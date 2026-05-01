@@ -164,6 +164,12 @@ func GetReviewItems(c *gin.Context) {
 
 	suggestions := make([]map[string]interface{}, 0, len(items))
 	for _, item := range items {
+		// 跳过无修改建议的非删除类项：点通过和点拒绝结果一样（都保留原文），展示无意义
+		if item.SuggestedText == "" && item.ModificationType != "text_deletion" &&
+			item.ModificationType != "advertisement" && item.ModificationType != "duplicate_paragraph" {
+			continue
+		}
+
 		lineNum, fullLine, prevLines, nextLines := getLineContextMulti(contents, item.PositionStart, item.OriginalText, item.SuggestedText)
 
 		suggestions = append(suggestions, map[string]interface{}{

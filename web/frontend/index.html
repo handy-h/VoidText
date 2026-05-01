@@ -8,7 +8,7 @@
   </head>
   <body>
     <!-- 认证界面 -->
-    <div id="auth-section" style="display: none;">
+    <div id="auth-section" style="display: none">
       <div class="auth-container">
         <div class="auth-card">
           <h1>湮文 VoidText</h1>
@@ -22,7 +22,7 @@
                 id="auth-token"
                 placeholder="请输入认证token"
                 class="auth-input"
-                onkeypress="if(event.key === 'Enter') handleLogin()"
+                onkeypress="if (event.key === 'Enter') handleLogin();"
               />
             </div>
             <div class="form-group">
@@ -38,7 +38,7 @@
     </div>
 
     <!-- 主应用界面 -->
-    <div id="app" style="display: none;">
+    <div id="app" style="display: none">
       <header>
         <div class="header-brand">
           <h1>湮文</h1>
@@ -65,26 +65,67 @@
           <div class="section-header">
             <h2>待处理文件</h2>
             <div class="section-header-actions">
-              <span id="file-count-badge" class="status-badge status-pending" style="display:none;">0 个文件</span>
+              <span
+                id="file-count-badge"
+                class="status-badge status-pending"
+                style="display: none"
+                >0 个文件</span
+              >
               <button class="btn-secondary btn-sm" onclick="refreshFileList()">
                 刷新
               </button>
             </div>
           </div>
           <!-- 拖拽上传区（文件列表为空时显示） -->
-          <div id="drop-zone-empty" class="drop-zone" style="display:none;">
+          <div id="drop-zone-empty" class="drop-zone" style="display: none">
             <div class="drop-zone-content">
               <div class="drop-zone-icon">
                 <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
-                  <rect x="8" y="16" width="48" height="40" rx="6" stroke="currentColor" stroke-width="2" fill="none"/>
-                  <path d="M32 12 L32 36 M24 28 L32 36 L40 28" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                  <circle cx="24" cy="30" r="3" fill="currentColor" opacity="0.4"/>
-                  <circle cx="40" cy="26" r="3" fill="currentColor" opacity="0.4"/>
+                  <rect
+                    x="8"
+                    y="16"
+                    width="48"
+                    height="40"
+                    rx="6"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    fill="none"
+                  />
+                  <path
+                    d="M32 12 L32 36 M24 28 L32 36 L40 28"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                  <circle
+                    cx="24"
+                    cy="30"
+                    r="3"
+                    fill="currentColor"
+                    opacity="0.4"
+                  />
+                  <circle
+                    cx="40"
+                    cy="26"
+                    r="3"
+                    fill="currentColor"
+                    opacity="0.4"
+                  />
                 </svg>
               </div>
-              <p class="drop-zone-text">点击选择或拖拽小说文件（.txt / .docx）至此开始处理</p>
-              <p class="drop-zone-hint">支持 .txt 和 .docx 格式，单文件最大 100MB</p>
-              <input type="file" id="drop-zone-input" accept=".txt,.docx" class="drop-zone-input" />
+              <p class="drop-zone-text">
+                点击选择或拖拽小说文件（.txt / .docx）至此开始处理
+              </p>
+              <p class="drop-zone-hint">
+                支持 .txt 和 .docx 格式，单文件最大 100MB
+              </p>
+              <input
+                type="file"
+                id="drop-zone-input"
+                accept=".txt,.docx"
+                class="drop-zone-input"
+              />
             </div>
           </div>
           <div id="file-list-container"></div>
@@ -113,13 +154,25 @@
           <!-- 预设模板 -->
           <div class="preset-templates">
             <span class="preset-label">快速模板：</span>
-            <button class="preset-btn" data-preset="basic" onclick="RulesConfigModule.applyPreset('basic')">
+            <button
+              class="preset-btn"
+              data-preset="basic"
+              onclick="RulesConfigModule.applyPreset('basic')"
+            >
               基础清洗模式
             </button>
-            <button class="preset-btn" data-preset="deep" onclick="RulesConfigModule.applyPreset('deep')">
+            <button
+              class="preset-btn"
+              data-preset="deep"
+              onclick="RulesConfigModule.applyPreset('deep')"
+            >
               深度修复模式
             </button>
-            <button class="preset-btn" data-preset="minimal" onclick="RulesConfigModule.applyPreset('minimal')">
+            <button
+              class="preset-btn"
+              data-preset="minimal"
+              onclick="RulesConfigModule.applyPreset('minimal')"
+            >
               仅清洗
             </button>
           </div>
@@ -177,7 +230,10 @@
               ></textarea>
             </div>
             <div class="form-actions">
-              <button class="btn-primary" onclick="RulesConfigModule.saveRulesAndProcess()">
+              <button
+                class="btn-primary"
+                onclick="RulesConfigModule.saveRulesAndProcess()"
+              >
                 保存并开始处理
               </button>
               <button class="btn-secondary" onclick="showSection('file-list')">
@@ -236,7 +292,11 @@
                 <span class="toggle-text">处理完成后自动进入审核页面</span>
               </label>
             </div>
-            <div id="chunk-progress-container" class="chunk-progress" style="display: none;">
+            <div
+              id="chunk-progress-container"
+              class="chunk-progress"
+              style="display: none"
+            >
               <div class="chunk-progress-header">
                 <span>LLM修复进度</span>
                 <span id="chunk-eta" class="chunk-eta"></span>
@@ -299,7 +359,11 @@
               <!-- 工具栏 -->
               <div class="review-toolbar">
                 <div class="toolbar-left">
-                  <span id="review-current-category" class="review-current-category">全部待审核</span>
+                  <span
+                    id="review-current-category"
+                    class="review-current-category"
+                    >全部待审核</span
+                  >
                 </div>
                 <div class="toolbar-right">
                   <select id="review-status-filter">
@@ -311,8 +375,8 @@
                   </select>
                   <span class="keyboard-hint">
                     <kbd>&uarr;</kbd> <kbd>&darr;</kbd> 切换
-                    <kbd>Enter</kbd> 通过
-                    <kbd>Esc</kbd> 拒绝
+                    <kbd>Enter</kbd> 通过 <kbd>Esc</kbd> 拒绝
+                    <kbd>E</kbd> 编辑 <kbd>Ctrl+Enter</kbd> 确认
                   </span>
                 </div>
               </div>
@@ -325,17 +389,33 @@
               <!-- 底部操作栏 -->
               <div class="review-bottom-bar">
                 <div class="bottom-bar-left">
-                  <button class="btn-primary" id="finalize-btn" style="display: none">
+                  <button
+                    class="btn-primary"
+                    id="finalize-btn"
+                    style="display: none"
+                  >
                     完成审核并生成文件
                   </button>
                 </div>
                 <div class="bottom-bar-right">
-                  <button class="btn-secondary" onclick="showSection('file-list')">
+                  <button
+                    class="btn-secondary"
+                    onclick="showSection('file-list')"
+                  >
                     返回列表
                   </button>
                 </div>
               </div>
             </div>
+          </div>
+          <!-- 审核加载遮罩 -->
+          <div
+            id="review-loading-overlay"
+            class="loading-overlay"
+            style="display: none"
+          >
+            <div class="loading-spinner"></div>
+            <div class="loading-text">操作处理中...</div>
           </div>
         </section>
 

@@ -270,12 +270,18 @@ const FileManager = (function() {
           throw new Error(`\u4E0B\u8F7D\u5931\u8D25: ${response.status}`);
         }
         // 从 Content-Disposition 头获取服务端文件名
+        // 优先使用 filename*=UTF-8''...（支持中文），fallback 到 filename="..."
         const disposition = response.headers.get('Content-Disposition');
         let filename = null;
         if (disposition) {
-          var match = disposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
-          if (match && match[1]) {
-            filename = match[1].replace(/['"]/g, '');
+          var matchUtf = disposition.match(/filename\*=UTF-8''([^;\s]+)/);
+          if (matchUtf && matchUtf[1]) {
+            filename = decodeURIComponent(matchUtf[1]);
+          } else {
+            var matchAscii = disposition.match(/filename="([^"]*)"/);
+            if (matchAscii && matchAscii[1]) {
+              filename = matchAscii[1];
+            }
           }
         }
         return response.blob().then(function(blob) {

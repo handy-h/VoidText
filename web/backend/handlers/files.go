@@ -420,17 +420,17 @@ func DownloadFile(c *gin.Context) {
 	}
 
 	// 使用 RFC 5987 编码支持中文文件名
-	// 同时提供 filename（ASCII fallback）和 filename*（UTF-8）
+	// filename*=UTF-8'' 在前，浏览器优先使用；filename 作为 ASCII fallback
 	fileName := record.FileName
-	asciiName := fileName
+	var asciiName string
 	if isASCII(fileName) {
 		asciiName = fileName
 	} else {
 		asciiName = "download.txt"
 	}
-	encodedName := url.PathEscape(fileName)
+	encodedName := url.QueryEscape(fileName)
 	c.Header("Content-Disposition",
-		fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, asciiName, encodedName))
+		fmt.Sprintf(`attachment; filename*=UTF-8''%s; filename="%s"`, encodedName, asciiName))
 	c.File(filePath)
 }
 

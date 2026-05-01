@@ -1689,7 +1689,11 @@ section h2::after {
 
 .preset-btn.active {
   color: var(--void-void);
-  background: linear-gradient(135deg, var(--annihilation-cyan), var(--ash-purple));
+  background: linear-gradient(
+    135deg,
+    var(--annihilation-cyan),
+    var(--ash-purple)
+  );
   border-color: transparent;
 }
 
@@ -1735,7 +1739,11 @@ section h2::after {
 }
 
 .toggle-label input:checked + .toggle-track {
-  background: linear-gradient(135deg, var(--annihilation-cyan), var(--ash-purple));
+  background: linear-gradient(
+    135deg,
+    var(--annihilation-cyan),
+    var(--ash-purple)
+  );
   border-color: var(--annihilation-cyan);
 }
 
@@ -1764,7 +1772,11 @@ section h2::after {
 
 .file-card-progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--annihilation-cyan), var(--ash-purple));
+  background: linear-gradient(
+    90deg,
+    var(--annihilation-cyan),
+    var(--ash-purple)
+  );
   border-radius: 2px;
   transition: width 0.5s var(--ease-annihilation);
 }
@@ -2038,7 +2050,9 @@ section h2::after {
 
 .diff-card.active {
   border-color: var(--annihilation-cyan);
-  box-shadow: 0 0 0 1px var(--annihilation-cyan), 0 4px 24px rgba(0, 212, 170, 0.15);
+  box-shadow:
+    0 0 0 1px var(--annihilation-cyan),
+    0 4px 24px rgba(0, 212, 170, 0.15);
 }
 
 .diff-card-header {
@@ -2398,6 +2412,45 @@ section h2::after {
   -webkit-backdrop-filter: blur(16px);
 }
 
+/* --- 加载遮罩 --- */
+.loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 10, 15, 0.85);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 100;
+  border-radius: 12px;
+  gap: 16px;
+}
+
+.loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--void-border);
+  border-top-color: var(--annihilation-cyan);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.loading-text {
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
 /* --- 响应式 --- */
 @media (max-width: 1024px) {
   .review-sidebar {
@@ -2453,4 +2506,214 @@ section h2::after {
   .preset-btn {
     text-align: center;
   }
+}
+
+/* ============================================
+   审核界面增强：已处理卡片状态、上下文折叠、自动前进
+   ============================================ */
+
+/* --- 已处理卡片状态样式 --- */
+.diff-card[data-status="approved"] {
+  border-color: rgba(0, 168, 132, 0.3);
+  background: rgba(0, 168, 132, 0.03);
+}
+
+.diff-card[data-status="approved"] .diff-card-header {
+  border-bottom-color: rgba(0, 168, 132, 0.15);
+}
+
+.diff-card[data-status="approved"] .diff-card-body {
+  opacity: 0.7;
+}
+
+.diff-card[data-status="approved"]::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 4px;
+  height: 100%;
+  background: var(--status-completed);
+  border-radius: 4px 0 0 4px;
+  box-shadow: 0 0 8px rgba(0, 168, 132, 0.3);
+}
+
+.diff-card[data-status="rejected"] {
+  border-color: rgba(255, 71, 87, 0.25);
+  background: rgba(255, 71, 87, 0.03);
+}
+
+.diff-card[data-status="rejected"] .diff-card-header {
+  border-bottom-color: rgba(255, 71, 87, 0.12);
+}
+
+.diff-card[data-status="rejected"] .diff-card-body {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+
+.diff-card[data-status="rejected"]::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 4px;
+  height: 100%;
+  background: var(--status-failed);
+  border-radius: 4px 0 0 4px;
+  box-shadow: 0 0 8px rgba(255, 71, 87, 0.2);
+}
+
+.diff-card[data-status="edited"] {
+  border-color: rgba(107, 92, 231, 0.3);
+  background: rgba(107, 92, 231, 0.03);
+}
+
+.diff-card[data-status="edited"] .diff-card-header {
+  border-bottom-color: rgba(107, 92, 231, 0.15);
+}
+
+.diff-card[data-status="edited"]::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 4px;
+  height: 100%;
+  background: var(--ash-purple);
+  border-radius: 4px 0 0 4px;
+  box-shadow: 0 0 8px rgba(107, 92, 231, 0.2);
+}
+
+/* --- 上下文折叠 --- */
+.diff-context-line.context-hidden {
+  display: none;
+}
+
+.diff-context-block[data-context-expanded="true"] .diff-context-line.context-hidden {
+  display: block;
+}
+
+.diff-context-block[data-context-expanded="true"] .diff-expand-toggle {
+  display: none;
+}
+
+.diff-context-block .diff-expand-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  margin: 4px 0 4px 10px;
+  background: transparent;
+  border: 1px solid var(--void-border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-annihilation);
+}
+
+.diff-context-block .diff-expand-toggle:hover {
+  color: var(--annihilation-cyan);
+  border-color: var(--annihilation-dim);
+  background: rgba(0, 212, 170, 0.05);
+}
+
+/* --- 自动前进过渡动画 --- */
+@keyframes card-exit {
+  0% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  50% {
+    opacity: 0.5;
+    transform: translateX(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.diff-card.action-just-taken {
+  animation: card-exit 0.3s var(--ease-annihilation);
+}
+
+/* --- 工具栏增强 --- */
+.toolbar-cat-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  font-size: 14px;
+  margin-right: 4px;
+}
+
+.toolbar-cat-icon.icon-all {
+  background: rgba(107, 92, 231, 0.15);
+  color: var(--ash-purple);
+}
+
+.toolbar-cat-icon.icon-typo {
+  background: rgba(0, 212, 170, 0.15);
+  color: var(--annihilation-cyan);
+}
+
+.toolbar-cat-icon.icon-semantic {
+  background: rgba(107, 92, 231, 0.15);
+  color: var(--ash-glow);
+}
+
+.toolbar-cat-icon.icon-cleaning {
+  background: rgba(255, 71, 87, 0.15);
+  color: var(--status-failed);
+}
+
+.toolbar-pending-count {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  padding: 2px 10px;
+  background: var(--void-card);
+  border: 1px solid var(--void-border);
+  border-radius: 12px;
+}
+
+/* --- 已完成状态徽章增强 --- */
+.diff-card .badge-ok {
+  color: var(--status-completed);
+}
+
+.diff-card .badge-fail {
+  color: var(--status-failed);
+}
+
+.diff-card .badge-warn {
+  color: var(--ash-purple);
+}
+
+/* --- 续行上下文：fullLine 中 original 之前的部分 --- */
+.diff-context-line.context-continuation {
+  border-left: 2px solid var(--ash-purple);
+  color: var(--text-secondary);
+  font-style: italic;
+  background: rgba(107, 92, 231, 0.04);
+  margin-top: 2px;
+  margin-bottom: 2px;
+}
+
+.diff-context-line.context-continuation::before {
+  content: "\2192";
+  position: static;
+  width: auto;
+  height: auto;
+  background: none;
+  color: var(--ash-purple);
+  opacity: 0.5;
+  margin-right: 6px;
+  font-style: normal;
+  display: inline;
 }
