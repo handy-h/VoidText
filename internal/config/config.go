@@ -19,11 +19,6 @@ type AppConfig struct {
 	MaxFileSize    int64
 	BackupKeepDays int
 
-	// 认证配置
-	EnableAuth      bool
-	AuthToken       string
-	AuthHeaderName  string
-
 	// 限流配置
 	RateLimit *RateLimitConfig
 
@@ -90,12 +85,7 @@ func Load() error {
 		BaseDir:                   getEnvStr("BASE_DIR", "."),
 		MaxFileSize:               getEnvInt64("MAX_FILE_SIZE", 100*1024*1024),
 		BackupKeepDays:            getEnvInt("BACKUP_KEEP_DAYS", 7),
-		
-		// 认证配置
-		EnableAuth:      getEnvBool("ENABLE_AUTH", false),
-		AuthToken:       getEnvStr("AUTH_TOKEN", ""),
-		AuthHeaderName:  getEnvStr("AUTH_HEADER_NAME", "X-API-Token"),
-		
+
 		// 限流配置
 		RateLimit: DefaultRateLimitConfig(),
 

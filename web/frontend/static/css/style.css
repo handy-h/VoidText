@@ -39,6 +39,7 @@
   --font-display: "Noto Serif SC", "Source Han Serif SC", serif;
   --font-body: "Inter", "Noto Sans SC", -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", "Fira Code", monospace;
+  --review-font-size: 13px;
 
   /* 动效 */
   --ease-annihilation: cubic-bezier(0.16, 1, 0.3, 1);
@@ -80,6 +81,18 @@ body {
   max-width: 1200px;
   margin: 0 auto;
   padding: 24px;
+}
+
+/* 审核模式：移除宽度限制，利用全屏 */
+#app.review-fullwidth {
+  max-width: 100%;
+  padding: 0;
+}
+
+#app.review-fullwidth .review-layout {
+  margin: 0;
+  height: calc(100vh - 200px);
+  width: 100%;
 }
 
 header {
@@ -931,99 +944,6 @@ section h2::after {
   margin-top: 10px;
 }
 
-/* 认证界面样式 */
-.auth-container {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: 100vh;
-  background: var(--void-black);
-  background-image:
-    radial-gradient(
-      ellipse at 20% 20%,
-      rgba(0, 212, 170, 0.03) 0%,
-      transparent 50%
-    ),
-    radial-gradient(
-      ellipse at 80% 80%,
-      rgba(107, 92, 231, 0.03) 0%,
-      transparent 50%
-    );
-}
-
-.auth-card {
-  background: var(--void-deep);
-  border: 1px solid var(--void-border);
-  border-radius: 12px;
-  padding: 40px;
-  width: 100%;
-  max-width: 400px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-  text-align: center;
-}
-
-.auth-card h1 {
-  font-family: var(--font-display);
-  font-size: 28px;
-  font-weight: 700;
-  background: linear-gradient(
-    135deg,
-    var(--text-primary) 0%,
-    var(--annihilation-cyan) 100%
-  );
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  letter-spacing: 4px;
-  margin-bottom: 8px;
-}
-
-.auth-description {
-  color: var(--text-secondary);
-  font-size: 14px;
-  margin-bottom: 32px;
-  font-family: var(--font-mono);
-}
-
-.auth-form {
-  margin-top: 24px;
-}
-
-.auth-input {
-  width: 100%;
-  padding: 12px 16px;
-  border: 1px solid var(--void-border);
-  border-radius: 8px;
-  background: var(--void-card);
-  color: var(--text-primary);
-  font-size: 14px;
-  font-family: var(--font-mono);
-  transition: all var(--duration-normal) var(--ease-annihilation);
-  margin-bottom: 16px;
-}
-
-.auth-input:focus {
-  outline: none;
-  border-color: var(--annihilation-cyan);
-  box-shadow: var(--glow-cyan);
-}
-
-.auth-hint {
-  margin-top: 24px;
-  padding: 16px;
-  background: rgba(0, 212, 170, 0.05);
-  border: 1px solid rgba(0, 212, 170, 0.1);
-  border-radius: 8px;
-  font-size: 12px;
-  color: var(--text-muted);
-  text-align: left;
-}
-
-.auth-hint p {
-  margin: 4px 0;
-  line-height: 1.4;
-}
-
 /* 审核项样式 */
 .review-item {
   padding: 16px;
@@ -1269,11 +1189,6 @@ section h2::after {
     width: 2px;
     height: 20px;
     margin: 0;
-  }
-
-  .auth-card {
-    padding: 24px;
-    margin: 16px;
   }
 }
 
@@ -1979,6 +1894,44 @@ section h2::after {
   border-color: var(--annihilation-cyan);
 }
 
+/* 字体缩放控件 */
+.font-scale-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-font-scale {
+  background: var(--void-deep);
+  border: 1px solid var(--void-border);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-annihilation);
+  line-height: 1;
+}
+
+.btn-font-scale:hover {
+  border-color: var(--annihilation-cyan);
+  color: var(--annihilation-cyan);
+}
+
+.btn-font-scale:active {
+  transform: scale(0.95);
+}
+
+.font-scale-value {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  min-width: 32px;
+  text-align: center;
+}
+
 .keyboard-hint {
   font-size: 11px;
   color: var(--text-muted);
@@ -2229,6 +2182,119 @@ section h2::after {
   text-decoration: line-through;
   border-radius: 3px;
   padding: 1px 3px;
+}
+
+/* VS Code 风格行内 Diff 视图 */
+.diff-view-container {
+  font-family: var(--font-mono);
+  font-size: var(--review-font-size, 13px);
+  line-height: 1.6;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--void-border);
+}
+
+.diff-view-container .diff-context-line {
+  padding: 2px 12px 2px 44px;
+  color: var(--text-muted);
+  background: var(--void-deep);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-left: 3px solid transparent;
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+}
+
+.diff-pair {
+  /* 修改区域容器 */
+}
+
+.diff-line {
+  display: flex;
+  align-items: stretch;
+  min-height: 24px;
+}
+
+.diff-gutter {
+  width: 40px;
+  min-width: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 12px;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.diff-line-content {
+  flex: 1;
+  padding: 2px 12px 2px 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.diff-deletion {
+  background: rgba(255, 71, 87, 0.08);
+  border-left: 3px solid rgba(255, 71, 87, 0.4);
+}
+
+.diff-deletion .diff-gutter {
+  background: rgba(255, 71, 87, 0.15);
+  color: var(--status-failed);
+}
+
+.diff-addition {
+  background: rgba(0, 212, 170, 0.08);
+  border-left: 3px solid rgba(0, 212, 170, 0.4);
+}
+
+.diff-addition .diff-gutter {
+  background: rgba(0, 212, 170, 0.15);
+  color: var(--annihilation-cyan);
+}
+
+.diff-edited {
+  background: rgba(107, 92, 231, 0.06);
+  border-left: 3px solid rgba(107, 92, 231, 0.4);
+}
+
+.diff-edited .diff-gutter {
+  background: rgba(107, 92, 231, 0.15);
+  color: var(--ash-purple);
+}
+
+.diff-card-footer {
+  margin-top: 8px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+/* 折叠按钮样式 */
+.diff-view-container .diff-expand-toggle {
+  display: block;
+  width: 100%;
+  padding: 4px 12px 4px 44px;
+  background: var(--void-deep);
+  border: none;
+  border-left: 3px solid transparent;
+  color: var(--annihilation-cyan);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  text-align: left;
+  transition: all var(--duration-fast) var(--ease-annihilation);
+}
+
+.diff-view-container .diff-expand-toggle:hover {
+  background: rgba(0, 212, 170, 0.05);
+}
+
+.diff-view-container .diff-context-line.context-hidden {
+  display: none;
 }
 
 /* 卡片右侧操作悬浮按钮 */

@@ -87,16 +87,6 @@ func HealthCheck(c *gin.Context) {
   }
   
   // 添加服务状态
-  cfg := config.AppConfigInstance
-  authStatus := "disabled"
-  if cfg.EnableAuth {
-    authStatus = "enabled"
-  }
-  response.Services["authentication"] = ServiceInfo{
-    Status:  authStatus,
-    Message: "Token-based authentication",
-  }
-  
   response.Services["rate_limiting"] = ServiceInfo{
     Status:  "enabled",
     Message: "IP-based rate limiting",

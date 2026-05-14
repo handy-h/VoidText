@@ -41,6 +41,43 @@ const ReviewModule = (function() {
   // ---------------------------------------------------------------
   function init() {
     bindEvents();
+    initFontScale();
+  }
+
+  // ---------------------------------------------------------------
+  // 字体缩放
+  // ---------------------------------------------------------------
+  var FONT_SIZE_MIN = 12;
+  var FONT_SIZE_MAX = 20;
+  var FONT_SIZE_DEFAULT = 13;
+  var FONT_SIZE_STEP = 1;
+  var FONT_SIZE_STORAGE_KEY = 'voidtext-review-font-size';
+
+  function initFontScale() {
+    var saved = localStorage.getItem(FONT_SIZE_STORAGE_KEY);
+    var currentSize = saved ? parseInt(saved, 10) : FONT_SIZE_DEFAULT;
+    currentSize = Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, currentSize));
+    applyFontSize(currentSize);
+
+    var upBtn = document.getElementById('font-scale-up');
+    var downBtn = document.getElementById('font-scale-down');
+    if (upBtn) upBtn.addEventListener('click', function() { adjustFontSize(FONT_SIZE_STEP); });
+    if (downBtn) downBtn.addEventListener('click', function() { adjustFontSize(-FONT_SIZE_STEP); });
+  }
+
+  function adjustFontSize(delta) {
+    var current = parseInt(
+      getComputedStyle(document.documentElement).getPropertyValue('--review-font-size')
+    ) || FONT_SIZE_DEFAULT;
+    var next = Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, current + delta));
+    applyFontSize(next);
+    localStorage.setItem(FONT_SIZE_STORAGE_KEY, String(next));
+  }
+
+  function applyFontSize(size) {
+    document.documentElement.style.setProperty('--review-font-size', size + 'px');
+    var display = document.getElementById('font-scale-value');
+    if (display) display.textContent = size + 'px';
   }
 
   function bindEvents() {
@@ -80,16 +117,32 @@ const ReviewModule = (function() {
         var toggle = e.target.closest('[data-action="toggle-context"]');
         if (!toggle) return;
         e.stopPropagation();
-        var block = toggle.closest('.diff-context-block');
-        if (!block) return;
-        var isExpanded = block.getAttribute('data-context-expanded') === 'true';
+        var container = toggle.closest('.diff-view-container');
+        if (!container) return;
+        var isExpanded = toggle.getAttribute('data-expanded') === 'true';
+        var children = Array.from(container.children);
         if (isExpanded) {
-          block.setAttribute('data-context-expanded', 'false');
-          var totalLines = block.querySelectorAll('.diff-context-line').length;
-          DomUtils.setTextContent(toggle, '\u22EF \u663E\u793A\u5168\u90E8 ' + totalLines + ' \u884C');
-        } else {
-          block.setAttribute('data-context-expanded', 'true');
+          toggle.setAttribute('data-expanded', 'false');
+          children.forEach(function(child) {
+            if (child.classList.contains('diff-context-line') && child.classList.contains('context-hidden')) {
+              child.classList.remove('context-hidden');
+            }
+          });
           DomUtils.setTextContent(toggle, '\u25B2 \u6536\u8D77');
+        } else {
+          toggle.setAttribute('data-expanded', 'true');
+          var prevIdx = 0;
+          var nextIdx = 0;
+          var foundToggle = false;
+          for (var i = 0; i < children.length; i++) {
+            if (children[i] === toggle) { foundToggle = true; continue; }
+            if (children[i].classList.contains('diff-context-line')) {
+              if (!foundToggle) { prevIdx++; if (prevIdx > 3) children[i].classList.add('context-hidden'); }
+              else { nextIdx++; if (nextIdx > 3) children[i].classList.add('context-hidden'); }
+            }
+          }
+          var total = prevIdx + nextIdx;
+          DomUtils.setTextContent(toggle, '\u22EF \u663E\u793A\u5168\u90E8 ' + total + ' \u884C');
         }
       });
     }
@@ -147,6 +200,19 @@ const ReviewModule = (function() {
       }
     });
 
+    // 按行号排序每个分类的 items
+    function sortByLine(items) {
+      return items.sort((a, b) => {
+        const lineA = a.lineNum || 0;
+        const lineB = b.lineNum || 0;
+        return lineA - lineB;
+      });
+    }
+    categories.all.items = sortByLine(categories.all.items);
+    categories.typo.items = sortByLine(categories.typo.items);
+    categories.semantic.items = sortByLine(categories.semantic.items);
+    categories.cleaning.items = sortByLine(categories.cleaning.items);
+
     // 对 typo 类进一步按原文→建议分组
     categories.typo.subGroups = groupTypoItems(categories.typo.items);
 
@@ -187,6 +253,10 @@ const ReviewModule = (function() {
       groupMap[key].count++;
     });
     const groups = Object.values(groupMap);
+    // 组内按行号排序
+    groups.forEach(g => {
+      g.items.sort((a, b) => (a.lineNum || 0) - (b.lineNum || 0));
+    });
     groups.sort((a, b) => b.count - a.count);
     return groups;
   }
@@ -474,123 +544,123 @@ const ReviewModule = (function() {
     // ---- 主体内容 ----
     const body = DomUtils.createElement('div', { className: 'diff-card-body' });
 
-    // 上文背景（可折叠：最多显示 CONTEXT_MAX 行）
     var CONTEXT_MAX = 3;
-    if (item.prevLines && item.prevLines.length > 0) {
-      var lines = item.prevLines;
-      var isCollapsible = lines.length > CONTEXT_MAX;
-      var contextBlock = DomUtils.createElement('div', { className: 'diff-context-block', 'data-context-expanded': 'false' });
-      lines.forEach(function(line, lineIdx) {
-        var lineEl = DomUtils.createElement('div', { className: 'diff-context-line' + (isCollapsible && lineIdx >= CONTEXT_MAX ? ' context-hidden' : '') });
-        DomUtils.setTextContent(lineEl, line);
-        contextBlock.appendChild(lineEl);
-      });
-      if (isCollapsible) {
-        var toggleBtn = DomUtils.createElement('button', { className: 'diff-expand-toggle', 'data-action': 'toggle-context' });
-        DomUtils.setTextContent(toggleBtn, '\u22EF \u663E\u793A\u5168\u90E8 ' + lines.length + ' \u884C');
-        contextBlock.appendChild(toggleBtn);
-      }
-      body.appendChild(contextBlock);
-    } else if (item.prevLine) {
-      // 向后兼容：单行上下文
-      var contextBlock = DomUtils.createElement('div', { className: 'diff-context-block', 'data-context-expanded': 'false' });
-      var lineEl = DomUtils.createElement('div', { className: 'diff-context-line' });
-      DomUtils.setTextContent(lineEl, item.prevLine);
-      contextBlock.appendChild(lineEl);
-      body.appendChild(contextBlock);
-    }
-
-    // 原文行（浅红背景，带删除线高亮）
-    const orig = item.original || item.originalText || '';
-
-    // fullLine 中 original 之前的部分（补充上下文，填补 prevLines 和原文之间的空白）
-    if (item.fullLine && orig) {
-      var leadText = '';
-      var origPos = item.fullLine.indexOf(orig);
-      if (origPos > 0) {
-        leadText = item.fullLine.substring(0, origPos);
-      }
-      if (leadText) {
-        if (!contextBlock) {
-          contextBlock = DomUtils.createElement('div', { className: 'diff-context-block', 'data-context-expanded': 'false' });
-          body.appendChild(contextBlock);
-        }
-        var leadEl = DomUtils.createElement('div', { className: 'diff-context-line context-continuation' });
-        DomUtils.setTextContent(leadEl, leadText);
-        contextBlock.appendChild(leadEl);
-      }
-    }
-    if (orig) {
-      const origLine = DomUtils.createElement('div', { className: 'diff-original-line' });
-      const origLabel = DomUtils.createElement('span', { className: 'diff-line-label label-original' });
-      DomUtils.setTextContent(origLabel, '原文');
-      origLine.appendChild(origLabel);
-
-      const sugg = item.suggested || item.suggestedText || '';
-      const hasDiffUtils = typeof DiffUtils !== 'undefined';
-      if (hasDiffUtils && sugg && orig !== sugg) {
-        const diffResult = DiffUtils.renderInlineDiff(orig, sugg);
-        const origText = DomUtils.createElement('span');
-        DomUtils.setHTML(origText, diffResult.originalHtml);
-        origLine.appendChild(origText);
-      } else {
-        const origText = DomUtils.createElement('span');
-        DomUtils.setTextContent(origText, orig);
-        origLine.appendChild(origText);
-      }
-
-      body.appendChild(origLine);
-    }
-
-    // 建议行（浅绿背景，加粗高亮）
+    var orig = item.original || item.originalText || '';
     var sugg = item.suggested || item.suggestedText || '';
+
+    // 计算完整行：leadText + original + trailText
+    var fullOriginalLine = orig;
+    var fullSuggestedLine = sugg;
+    var leadText = '';
+    var trailText = '';
+    if (item.fullLine && orig) {
+      var origPos = item.fullLine.indexOf(orig);
+      if (origPos >= 0) {
+        leadText = item.fullLine.substring(0, origPos);
+        trailText = item.fullLine.substring(origPos + orig.length);
+        fullOriginalLine = leadText + orig + trailText;
+        fullSuggestedLine = leadText + sugg + trailText;
+      }
+    }
+
+    // 统一 diff 视图容器
+    var diffView = DomUtils.createElement('div', { className: 'diff-view-container' });
+
+    // ---- 上文上下文行（可折叠） ----
+    var prevLinesList = item.prevLines || (item.prevLine ? [item.prevLine] : []);
+    if (prevLinesList.length > 0) {
+      var isCollapsiblePrev = prevLinesList.length > CONTEXT_MAX;
+      prevLinesList.forEach(function(line, lineIdx) {
+        var lineEl = DomUtils.createElement('div', { className: 'diff-context-line' + (isCollapsiblePrev && lineIdx >= CONTEXT_MAX ? ' context-hidden' : '') });
+        DomUtils.setTextContent(lineEl, line);
+        diffView.appendChild(lineEl);
+      });
+      if (isCollapsiblePrev) {
+        var togglePrev = DomUtils.createElement('button', { className: 'diff-expand-toggle', 'data-action': 'toggle-context' });
+        DomUtils.setTextContent(togglePrev, '\u22EF \u663E\u793A\u5168\u90E8 ' + prevLinesList.length + ' \u884C');
+        diffView.appendChild(togglePrev);
+      }
+    }
+
+    // ---- 修改区域（diff pair） ----
     if (orig) {
-      var suggLine = DomUtils.createElement('div', { className: 'diff-suggested-line' });
-      var suggLabel = DomUtils.createElement('span', { className: 'diff-line-label label-suggested' });
+      var diffPair = DomUtils.createElement('div', { className: 'diff-pair' });
+
+      // 删除行（原文）
+      var delLine = DomUtils.createElement('div', { className: 'diff-line diff-deletion' });
+      var delGutter = DomUtils.createElement('span', { className: 'diff-gutter' });
+      DomUtils.setTextContent(delGutter, '\u2212');
+      delLine.appendChild(delGutter);
+      var delContent = DomUtils.createElement('span', { className: 'diff-line-content' });
+
+      // 新增行（建议）
+      var addLine = DomUtils.createElement('div', { className: 'diff-line diff-addition' });
+      var addGutter = DomUtils.createElement('span', { className: 'diff-gutter' });
+      DomUtils.setTextContent(addGutter, '+');
+      addLine.appendChild(addGutter);
+      var addContent = DomUtils.createElement('span', { className: 'diff-line-content' });
+
+      var hasDiffUtils = typeof DiffUtils !== 'undefined';
+
+      // 处理建议文本
       if (!sugg) {
         var modType = item.type || item.modificationType || '';
         if (modType === 'text_deletion' || modType === 'advertisement' || modType === 'duplicate_paragraph') {
           sugg = '\uFF08\u5220\u9664\uFF09';
+          fullSuggestedLine = leadText + sugg + trailText;
         } else {
           sugg = '\uFF08\u65E0\u4FEE\u6539\u5EFA\u8BAE\uFF09';
+          fullSuggestedLine = leadText + sugg + trailText;
+          addLine.style.opacity = '0.5';
         }
-        suggLine.style.opacity = '0.5';
       }
-      DomUtils.setTextContent(suggLabel, '建议');
-      suggLine.appendChild(suggLabel);
 
-      var hasDiffUtils = typeof DiffUtils !== 'undefined';
-      if (hasDiffUtils && orig && orig !== sugg) {
-        var diffResult = DiffUtils.renderInlineDiff(orig, sugg);
-        var suggTextEl = DomUtils.createElement('span');
-        DomUtils.setHTML(suggTextEl, diffResult.suggestedHtml);
-        suggLine.appendChild(suggTextEl);
+      if (hasDiffUtils && fullOriginalLine !== fullSuggestedLine) {
+        var diffResult = DiffUtils.renderInlineDiff(fullOriginalLine, fullSuggestedLine);
+        DomUtils.setHTML(delContent, diffResult.originalHtml);
+        DomUtils.setHTML(addContent, diffResult.suggestedHtml);
       } else {
-        var suggTextEl = DomUtils.createElement('span');
-        DomUtils.setTextContent(suggTextEl, sugg);
-        suggLine.appendChild(suggTextEl);
+        DomUtils.setTextContent(delContent, fullOriginalLine);
+        DomUtils.setTextContent(addContent, fullSuggestedLine);
       }
 
-      body.appendChild(suggLine);
+      delLine.appendChild(delContent);
+      addLine.appendChild(addContent);
+      diffPair.appendChild(delLine);
+      diffPair.appendChild(addLine);
+
+      // 编辑后文本显示
+      if (item.editedText) {
+        var editedLine = DomUtils.createElement('div', { className: 'diff-line diff-edited' });
+        var editedGutter = DomUtils.createElement('span', { className: 'diff-gutter' });
+        DomUtils.setTextContent(editedGutter, '\u270E');
+        editedLine.appendChild(editedGutter);
+        var editedContent = DomUtils.createElement('span', { className: 'diff-line-content' });
+        DomUtils.setTextContent(editedContent, item.editedText);
+        editedLine.appendChild(editedContent);
+        diffPair.appendChild(editedLine);
+      }
+
+      diffView.appendChild(diffPair);
     }
 
-    // 编辑后文本显示（如果是 edited 状态）
-    if (item.editedText) {
-      const editedLine = DomUtils.createElement('div', {
-        className: 'diff-original-line',
-        style: 'border-left-color: var(--ash-purple); background: rgba(107,92,231,0.06);'
+    // ---- 下文上下文行（可折叠） ----
+    var nextLinesList = item.nextLines || (item.nextLine ? [item.nextLine] : []);
+    if (nextLinesList.length > 0) {
+      var isCollapsibleNext = nextLinesList.length > CONTEXT_MAX;
+      nextLinesList.forEach(function(line, lineIdx) {
+        var lineEl = DomUtils.createElement('div', { className: 'diff-context-line' + (isCollapsibleNext && lineIdx >= CONTEXT_MAX ? ' context-hidden' : '') });
+        DomUtils.setTextContent(lineEl, line);
+        diffView.appendChild(lineEl);
       });
-      const editedLabel = DomUtils.createElement('span', {
-        className: 'diff-line-label',
-        style: 'color: var(--ash-purple);'
-      });
-      DomUtils.setTextContent(editedLabel, '编辑后');
-      editedLine.appendChild(editedLabel);
-      const editedTextEl = DomUtils.createElement('span');
-      DomUtils.setTextContent(editedTextEl, item.editedText);
-      editedLine.appendChild(editedTextEl);
-      body.appendChild(editedLine);
+      if (isCollapsibleNext) {
+        var toggleNext = DomUtils.createElement('button', { className: 'diff-expand-toggle', 'data-action': 'toggle-context' });
+        DomUtils.setTextContent(toggleNext, '\u22EF \u663E\u793A\u5168\u90E8 ' + nextLinesList.length + ' \u884C');
+        diffView.appendChild(toggleNext);
+      }
     }
+
+    body.appendChild(diffView);
 
     // 内联编辑区（隐藏）
     const editContainer = DomUtils.createElement('div', {
@@ -609,48 +679,23 @@ const ReviewModule = (function() {
       className: 'btn-edit',
       onclick: function() { saveInlineEdit(item.id); }
     });
-    DomUtils.setTextContent(saveEditBtn, '保存');
+    DomUtils.setTextContent(saveEditBtn, '\u4FDD\u5B58');
     editActions.appendChild(saveEditBtn);
 
     const cancelEditBtn = DomUtils.createElement('button', {
       className: 'btn-secondary',
       onclick: function() { cancelInlineEdit(item.id); }
     });
-    DomUtils.setTextContent(cancelEditBtn, '取消');
+    DomUtils.setTextContent(cancelEditBtn, '\u53D6\u6D88');
     editActions.appendChild(cancelEditBtn);
 
     editContainer.appendChild(editActions);
     body.appendChild(editContainer);
 
-    // 下文背景（可折叠：最多显示 CONTEXT_MAX 行）
-    if (item.nextLines && item.nextLines.length > 0) {
-      var lines = item.nextLines;
-      var isCollapsible = lines.length > CONTEXT_MAX;
-      var contextBlock = DomUtils.createElement('div', { className: 'diff-context-block diff-context-block-after', 'data-context-expanded': 'false' });
-      lines.forEach(function(line, lineIdx) {
-        var lineEl = DomUtils.createElement('div', { className: 'diff-context-line' + (isCollapsible && lineIdx >= CONTEXT_MAX ? ' context-hidden' : '') });
-        DomUtils.setTextContent(lineEl, line);
-        contextBlock.appendChild(lineEl);
-      });
-      if (isCollapsible) {
-        var toggleBtn = DomUtils.createElement('button', { className: 'diff-expand-toggle', 'data-action': 'toggle-context' });
-        DomUtils.setTextContent(toggleBtn, '\u22EF \u663E\u793A\u5168\u90E8 ' + lines.length + ' \u884C');
-        contextBlock.appendChild(toggleBtn);
-      }
-      body.appendChild(contextBlock);
-    } else if (item.nextLine) {
-      // 向后兼容：单行上下文
-      var contextBlock = DomUtils.createElement('div', { className: 'diff-context-block diff-context-block-after', 'data-context-expanded': 'false' });
-      var lineEl = DomUtils.createElement('div', { className: 'diff-context-line' });
-      DomUtils.setTextContent(lineEl, item.nextLine);
-      contextBlock.appendChild(lineEl);
-      body.appendChild(contextBlock);
-    }
-
-    // 状态显示
+    // 状态/置信度显示
     if (item.status && item.status !== 'pending') {
       const statusLine = DomUtils.createElement('div', {
-        style: 'margin-top: 8px; font-size: 11px; font-family: var(--font-mono);'
+        className: 'diff-card-footer'
       });
       const statusSpan = DomUtils.createElement('span', {
         className: 'review-status review-status-' + item.status
@@ -660,9 +705,9 @@ const ReviewModule = (function() {
       body.appendChild(statusLine);
     } else if (item.confidence !== undefined && item.confidence !== null) {
       const confLine = DomUtils.createElement('div', {
-        style: 'margin-top: 6px; font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);'
+        className: 'diff-card-footer'
       });
-      DomUtils.setTextContent(confLine, '置信度: ' + (item.confidence * 100).toFixed(1) + '%');
+      DomUtils.setTextContent(confLine, '\u7F6E\u4FE1\u5EA6: ' + (item.confidence * 100).toFixed(1) + '%');
       body.appendChild(confLine);
     }
 
@@ -754,6 +799,21 @@ const ReviewModule = (function() {
           if (item.status === 'pending') {
             rejectReviewItem(item.id);
           }
+        }
+        break;
+
+      case '+':
+      case '=':
+        if (event.ctrlKey) {
+          event.preventDefault();
+          adjustFontSize(FONT_SIZE_STEP);
+        }
+        break;
+
+      case '-':
+        if (event.ctrlKey) {
+          event.preventDefault();
+          adjustFontSize(-FONT_SIZE_STEP);
         }
         break;
     }

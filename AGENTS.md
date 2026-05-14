@@ -18,7 +18,6 @@ go run ./cmd/voidtext/
 ## Config
 
 - `.env` file loaded via `godotenv`. Template at `.env.template`.
-- **Must set `ENABLE_AUTH=false`** or provide `AUTH_TOKEN` for API access.
 - Port defaults to `8080` (`PORT` env var).
 - LLM API: `LLM_API_URL`, `LLM_API_KEY`, `COMPLETION_MODEL_NAME`.
 - Local Ollama fallback: `ENABLE_LOCAL_MODEL=true`, `LOCAL_MODEL_URL`, `LOCAL_MODEL_NAME`.
@@ -50,7 +49,7 @@ internal/
   logging/             — structured JSON logger
   review/manager/      — review session management
 web/
-  backend/             — Gin router, handlers, middleware (auth, rate-limit, error, recovery)
+  backend/             — Gin router, handlers, middleware (rate-limit, error, recovery)
   frontend/            — index.html + modular JS in static/js/modules/
 scripts/               — run.sh, evolver.py (Python, for prompt tuning)
 config/prompts/        — (directory exists, empty — intended for prompt templates)
@@ -84,14 +83,14 @@ go test -v -count=1 ./internal/database/
 ./testing/smoke_testing/run_smoke_tests.sh [server-url]
 
 # Combined test runner (root-level)
-./run_tests.sh    # sets ENABLE_AUTH=false, DATA_DIR=./test_data, cleans up before/after
+./run_tests.sh    # sets DATA_DIR=./test_data, cleans up before/after
 ```
 
 **Test quirks:**
-- `run_tests.sh` sets `ENABLE_AUTH=false` and `DATA_DIR=./test_data` — tests must not depend on auth.
+- `run_tests.sh` sets `DATA_DIR=./test_data`.
 - Test data directory cleaned before and after run.
 - Tests at: `internal/*/test/`, `web/backend/*/test/`, and alongside source files (`*_test.go`).
-- Go test files exist for: config, database, file (md5, parser), processor (pipeline, model_repairer, vector_detector, rules, preprocess, postprocess), review manager, middleware (auth, rate_limit), handlers (health).
+- Go test files exist for: config, database, file (md5, parser), processor (pipeline, model_repairer, vector_detector, rules, preprocess, postprocess), review manager, middleware (rate_limit), handlers (health).
 - Smoke tests operate against a live server via curl.
 
 ## Tooling quirks

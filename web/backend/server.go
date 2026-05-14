@@ -23,7 +23,7 @@ func NewServer() *gin.Engine {
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"http://localhost:8080", "http://127.0.0.1:8080"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "X-API-Token"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept"},
 		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
 	}))
@@ -34,7 +34,7 @@ func NewServer() *gin.Engine {
 		c.File("./web/frontend/index.html")
 	})
 
-	// 健康检查端点（无需认证）
+	// 健康检查端点
 	r.GET("/health", handlers.HealthCheck)
 	r.GET("/health/ready", handlers.ReadinessCheck)
 	r.GET("/health/live", handlers.LivenessCheck)
@@ -42,7 +42,6 @@ func NewServer() *gin.Engine {
 	r.GET("/health/metrics", handlers.Metrics)
 
 	api := r.Group("/api")
-	api.Use(middleware.AuthMiddleware())
 	{
 		// 上传文件 - 严格限流
 		api.POST("/files/upload", middleware.UploadRateLimit(), handlers.UploadFile)

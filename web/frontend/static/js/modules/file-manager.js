@@ -69,6 +69,10 @@ const FileManager = (function() {
 
   // 显示指定部分
   function showSection(section) {
+    // 审核模式全宽切换
+    var appEl = document.getElementById('app');
+    if (appEl) appEl.classList.toggle('review-fullwidth', section === 'review');
+
     const sections = [
       "file-list",
       "upload",
@@ -257,14 +261,9 @@ const FileManager = (function() {
 
   // 下载文件
   function downloadFile(md5) {
-    const token = AppConfig.getAuthToken();
     const url = `/api/files/${md5}/download`;
-    const headers = {};
-    if (token) {
-      headers['X-API-Token'] = token;
-    }
 
-    fetch(url, { headers })
+    fetch(url)
       .then(response => {
         if (!response.ok) {
           throw new Error(`\u4E0B\u8F7D\u5931\u8D25: ${response.status}`);
@@ -305,14 +304,9 @@ const FileManager = (function() {
 
   // 查看报告
   function viewReport(md5) {
-    const token = AppConfig.getAuthToken();
     const url = `/api/files/${md5}/report?format=html`;
-    const headers = {};
-    if (token) {
-      headers['X-API-Token'] = token;
-    }
 
-    fetch(url, { headers })
+    fetch(url)
       .then(response => {
         if (!response.ok) {
           throw new Error(`\u83B7\u53D6\u62A5\u544A\u5931\u8D25: ${response.status}`);

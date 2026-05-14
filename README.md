@@ -126,17 +126,15 @@ LIMIT 1;
 
 #### 重置为默认提示词
 ```bash
-# 通过 API 重置（需要认证）
+# 通过 API 重置
 curl -X POST http://localhost:8080/api/prompts/reset \
-  -H "X-API-Token: your_token" \
   -H "Content-Type: application/json" \
   -d '{"prompt_name": "novel_repair"}'
 ```
 
 #### 查看提示词统计
 ```bash
-curl http://localhost:8080/api/prompts/stats \
-  -H "X-API-Token: your_token"
+curl http://localhost:8080/api/prompts/stats
 ```
 
 ## 系统初始化

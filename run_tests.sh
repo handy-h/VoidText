@@ -15,7 +15,6 @@ if ! command -v go test &> /dev/null; then
 fi
 
 # 设置测试环境变量
-export ENABLE_AUTH=false
 export DATA_DIR="./test_data"
 export BASE_DIR="."
 
