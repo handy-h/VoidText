@@ -41,6 +41,7 @@ type RulesConfig struct {
 	EnableVectorDetection bool              `json:"enableVectorDetection"`
 	SimilarityThreshold   float64           `json:"similarityThreshold"`
 	EnableModelRepair     bool              `json:"enableModelRepair"`
+	EnableNewlineFix      bool              `json:"enableNewlineFix"`
 	TypoMap               map[string]string `json:"typoMap"`
 	AdBlacklist           []string          `json:"adBlacklist"`
 }
@@ -53,6 +54,7 @@ func DefaultRulesConfig() RulesConfig {
 		EnableVectorDetection: config.AppConfigInstance.EnableVectorDetection,
 		SimilarityThreshold:   config.AppConfigInstance.VectorSimilarityThreshold,
 		EnableModelRepair:     config.AppConfigInstance.EnableModelRepair,
+		EnableNewlineFix:      true,
 		TypoMap:               make(map[string]string),
 		AdBlacklist:           []string{},
 	}
@@ -179,6 +181,19 @@ func processCleaningStep(fileMd5, content string, rulesConfig RulesConfig, _ *da
 
 	cleaner := NewBasicCleaner(rulesConfig.TraditionalToSimple)
 	cleanResult := cleaner.Clean(content)
+
+	// 换行符修复：检测并修复缺失的段落分隔
+	if rulesConfig.EnableNewlineFix {
+		newlineFixer := NewNewlineFixer()
+		newlineResult := newlineFixer.Fix(cleanResult.Content)
+		if len(newlineResult.Changes) > 0 {
+			cleanResult.Content = newlineResult.Content
+			cleanResult.Changes = append(cleanResult.Changes, newlineResult.Changes...)
+			for k, v := range newlineResult.Stats {
+				cleanResult.Stats[k] = v
+			}
+		}
+	}
 
 	if len(rulesConfig.AdBlacklist) > 0 {
 		for _, pattern := range rulesConfig.AdBlacklist {

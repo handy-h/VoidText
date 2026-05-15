@@ -80,3 +80,11 @@ txtclean
 configs/local.yaml
 configs/development.yaml
 configs/production.yaml
+start-mcp.sh
+code-context-mcp
+.code-context-index-state.json
+test_data/cleaning.db
+test_data/rules.json
+internal/processor/newline_fixer_test.go
+test_data/uploads/9af7c283548338ae416b63b0f27a98a1_sample.txt
+test_data/uploads/9af7c283548338ae416b63b0f27a98a1_cleaning.txt

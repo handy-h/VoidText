@@ -1,4 +1,4 @@
-.PHONY: build dev run clean help
+.PHONY: build dev run clean rebuild help
 
 BINARY_NAME = voidtext
 MAIN_PACKAGE = ./cmd/voidtext/
@@ -66,33 +66,27 @@ endif
 	@echo ""
 	./$(BINARY_NAME)
 
-## clean   : 结束进程并清理无用文件
+## clean   : 结束进程并删除编译产物
 clean:
 	@echo "========================================"
 	@echo "  湮文 VoidText — 清理"
 	@echo "========================================"
 	@echo ""
-	@echo "[1/3] 停止 $(BINARY_NAME) 进程..."
+	@echo "[1/2] 停止 $(BINARY_NAME) 进程..."
 	@-pkill "$(BINARY_NAME)" 2>/dev/null && echo "  ✓ 已停止" || echo "  - 未发现运行中的进程"
 	@echo ""
-	@echo "[2/3] 删除编译产物..."
+	@echo "[2/2] 删除编译产物..."
 	@rm -f $(BINARY_NAME)
 	@echo "  ✓ 已删除: ./$(BINARY_NAME)"
 	@echo ""
-	@echo "[3/3] 清理运行时数据..."
-	@for dir in data logs tmp memory; do \
-		if [ -d "$$dir" ]; then \
-			rm -rf "$$dir" && echo "  ✓ 已清理: $$dir/"; \
-		else \
-			echo "  - 不存在: $$dir/"; \
-		fi \
-	done
-	@echo ""
 	@echo "========================================"
 	@echo "  ✓ 清理完毕"
-	@echo "  已删除: 编译产物 + 运行时数据"
-	@echo "  保留: 源代码、配置文件 (.env)、git 记录"
+	@echo "  已删除: 编译产物"
+	@echo "  保留: 源代码、配置文件 (.env)、数据目录 (data/)、git 记录"
 	@echo "========================================"
+
+## rebuild : 清理后重新编译 (clean + build)
+rebuild: clean build
 
 ## help    : 显示帮助信息
 help:
@@ -111,8 +105,10 @@ help:
 	@echo "  make run      生产环境运行"
 	@echo "               运行已编译的 ./$(BINARY_NAME) 二进制文件"
 	@echo ""
-	@echo "  make clean    结束进程 + 清理"
-	@echo "               停止进程, 删除编译产物和运行时数据"
+	@echo "  make clean    结束进程 + 删除编译产物"
+	@echo "               不影响 data/ 数据目录"
+	@echo ""
+	@echo "  make rebuild  清理后重新编译 (clean + build)"
 	@echo ""
 	@echo "  make help     显示此帮助"
 	@echo ""

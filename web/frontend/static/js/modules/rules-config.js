@@ -14,6 +14,7 @@ const RulesConfigModule = (function() {
         enableVectorDetection: true,
         vectorSimilarityThreshold: 0.95,
         enableModelRepair: true,
+        enableNewlineFix: true,
         typoMap: '',
         adBlacklist: ''
       }
@@ -27,6 +28,7 @@ const RulesConfigModule = (function() {
         enableVectorDetection: true,
         vectorSimilarityThreshold: 0.90,
         enableModelRepair: true,
+        enableNewlineFix: true,
         typoMap: '',
         adBlacklist: ''
       }
@@ -40,6 +42,7 @@ const RulesConfigModule = (function() {
         enableVectorDetection: false,
         vectorSimilarityThreshold: 0.95,
         enableModelRepair: false,
+        enableNewlineFix: true,
         typoMap: '',
         adBlacklist: ''
       }
@@ -87,11 +90,13 @@ const RulesConfigModule = (function() {
     const traditionalSimple = document.getElementById('rule-traditional-simple');
     const vectorDetection = document.getElementById('rule-vector-detection');
     const modelRepair = document.getElementById('rule-model-repair');
+    const newlineFix = document.getElementById('rule-newline-fix');
 
     if (basicCleaning) basicCleaning.checked = rules.enableBasicCleaning;
     if (traditionalSimple) traditionalSimple.checked = rules.traditionalToSimple;
     if (vectorDetection) vectorDetection.checked = rules.enableVectorDetection;
     if (modelRepair) modelRepair.checked = rules.enableModelRepair;
+    if (newlineFix) newlineFix.checked = rules.enableNewlineFix !== false;
 
     // 设置数值
     const similarity = document.getElementById('rule-similarity');
@@ -154,11 +159,13 @@ const RulesConfigModule = (function() {
       const traditionalSimple = document.getElementById('rule-traditional-simple');
       const vectorDetection = document.getElementById('rule-vector-detection');
       const modelRepair = document.getElementById('rule-model-repair');
+      const newlineFix = document.getElementById('rule-newline-fix');
 
       if (basicCleaning) basicCleaning.checked = rulesConfig.enableBasicCleaning !== false;
       if (traditionalSimple) traditionalSimple.checked = rulesConfig.traditionalToSimple === true;
       if (vectorDetection) vectorDetection.checked = rulesConfig.enableVectorDetection !== false;
       if (modelRepair) modelRepair.checked = rulesConfig.enableModelRepair !== false;
+      if (newlineFix) newlineFix.checked = rulesConfig.enableNewlineFix !== false;
 
       // 设置数值输入
       const similarity = document.getElementById('rule-similarity');
@@ -195,6 +202,7 @@ const RulesConfigModule = (function() {
       enableVectorDetection: document.getElementById('rule-vector-detection').checked,
       vectorSimilarityThreshold: parseFloat(document.getElementById('rule-similarity').value) || 0.95,
       enableModelRepair: document.getElementById('rule-model-repair').checked,
+      enableNewlineFix: document.getElementById('rule-newline-fix').checked,
       typoMap: document.getElementById('rule-typo-map').value,
       adBlacklist: document.getElementById('rule-ad-blacklist').value
     };
