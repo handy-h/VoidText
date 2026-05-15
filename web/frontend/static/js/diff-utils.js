@@ -256,13 +256,75 @@ const DiffUtils = (function() {
     return { originalHtml, suggestedHtml };
   }
 
+  // 将不可见字符转为可视化表示（用于 diff 展示）
+  // 先 escape 再替换，避免 HTML 标签被二次转义
+  function visualizeWhitespace(escapedText) {
+    if (!escapedText) return '';
+    return escapedText
+      .replace(/\n/g, '<span class="ws-char">↵</span>')
+      .replace(/\r/g, '<span class="ws-char">⏎</span>')
+      .replace(/\t/g, '<span class="ws-char">→</span>');
+  }
+
+  // 转义并可视化（先转义文本，再替换不可见字符）
+  function escAndVisualize(text) {
+    return visualizeWhitespace(escapeHtml(text));
+  }
+
+  // 渲染逐字符对齐的 diff（用于审核页面展示）
+  // 双向空格填充：哪边短就在哪边填充空格，保证字符位置对齐
+  // 空格只用于展示，实际保存时不会包含这些填充空格
+  // @param {string} lineText - 当前行的完整文本
+  // @param {Object} item - 审核项 { original, suggested, position }
+  // @returns {Object} { originalHtml, suggestedHtml }
+  function renderAlignedDiff(lineText, item) {
+    var origText = item.original || item.originalText || '';   // 被修改的原文片段
+    var suggText = item.suggested || item.suggestedText || ''; // 替换后的建议片段
+
+    // 在当前行中查找原文的实际位置（position 可能是旧版本的偏移量）
+    var pos = lineText.indexOf(origText);
+    if (pos < 0) {
+      // 找不到原文，直接返回原文行
+      return {
+        originalHtml: escAndVisualize(lineText),
+        suggestedHtml: escAndVisualize(lineText)
+      };
+    }
+
+    // 计算前后缀
+    var prefix = lineText.substring(0, pos);
+    var origSuffix = lineText.substring(pos + origText.length);
+
+    // 双向对齐：计算需要填充的空格数
+    var origLen = origText.length;
+    var suggLen = suggText.length;
+    var diff = origLen - suggLen;
+
+    var origDisplay = origText;
+    var suggDisplay = suggText;
+
+    if (diff > 0) {
+      // 建议比原文短，在建议后填充空格
+      suggDisplay = suggText + ' '.repeat(diff);
+    } else if (diff < 0) {
+      // 原文比建议短，在原文后填充空格
+      origDisplay = origText + ' '.repeat(-diff);
+    }
+
+    return {
+      originalHtml: escAndVisualize(prefix) + '<del class="diff-del">' + escAndVisualize(origDisplay) + '</del>' + escAndVisualize(origSuffix),
+      suggestedHtml: escAndVisualize(prefix) + '<ins class="diff-ins">' + escAndVisualize(suggDisplay) + '</ins>' + escAndVisualize(origSuffix)
+    };
+  }
+
   // 公共 API
   return {
     tokenize,
     lcs,
     diff,
     renderInlineDiff,
-    renderDiffPreview
+    renderDiffPreview,
+    renderAlignedDiff
   };
 })();
 

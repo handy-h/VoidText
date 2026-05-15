@@ -300,97 +300,102 @@
           </div>
         </section>
 
-        <!-- ===== 审核界面（双栏布局） ===== -->
+        <!-- ===== 审核界面（全屏沉浸式 Diff 视图） ===== -->
         <section id="review-section" style="display: none">
-          <div class="review-layout">
-            <!-- 左侧：修改项聚合导航面板 -->
-            <aside class="review-sidebar" id="review-sidebar">
-              <div class="sidebar-header">
-                <h3>修改项导航</h3>
-                <div class="sidebar-progress">
-                  <span id="review-progress-text">0/0</span>
-                </div>
+          <div class="review-fullscreen">
+            <!-- 顶部工具栏 -->
+            <div class="review-toolbar">
+              <div class="toolbar-left">
+                <span id="review-progress-info" class="review-progress-info">
+                  审核进度: <span id="review-progress-text">0/0</span>
+                </span>
+                <span id="review-current-category" class="review-current-category">全部待审核</span>
               </div>
-              <div class="sidebar-nav" id="sidebar-nav">
-                <!-- 动态生成：分类列表 -->
-              </div>
-              <div class="sidebar-footer">
-                <button class="btn-secondary btn-sm" id="batch-approve-btn">
-                  全部通过
-                </button>
-                <button class="btn-secondary btn-sm" id="batch-reject-btn">
-                  全部拒绝
-                </button>
-              </div>
-            </aside>
-
-            <!-- 右侧：沉浸式对比编辑区 -->
-            <div class="review-main">
-              <!-- 工具栏 -->
-              <div class="review-toolbar">
-                <div class="toolbar-left">
-                  <span
-                    id="review-current-category"
-                    class="review-current-category"
-                    >全部待审核</span
-                  >
-                </div>
-                <div class="toolbar-right">
-                  <select id="review-status-filter">
-                    <option value="pending">待审核</option>
-                    <option value="all">全部</option>
-                    <option value="approved">已通过</option>
-                    <option value="rejected">已拒绝</option>
-                    <option value="edited">已编辑</option>
-                  </select>
-                  <div class="font-scale-controls">
-                    <button class="btn-font-scale" id="font-scale-down" title="缩小字体">A-</button>
-                    <span class="font-scale-value" id="font-scale-value">13px</span>
-                    <button class="btn-font-scale" id="font-scale-up" title="放大字体">A+</button>
-                  </div>
-                  <span class="keyboard-hint">
-                    <kbd>&uarr;</kbd> <kbd>&darr;</kbd> 切换
-                    <kbd>Enter</kbd> 通过 <kbd>Esc</kbd> 拒绝
-                    <kbd>E</kbd> 编辑 <kbd>Ctrl+Enter</kbd> 确认
+              <div class="toolbar-center">
+                <div class="pagination-controls">
+                  <button class="btn-page" id="page-prev" title="上一页 (PageUp)">◀</button>
+                  <span class="page-info">
+                    第 <span id="current-page">1</span> / <span id="total-pages">1</span> 页
                   </span>
+                  <button class="btn-page" id="page-next" title="下一页 (PageDown)">▶</button>
+                  <span class="page-separator">|</span>
+                  <label class="page-size-label">每页</label>
+                  <select id="page-size-select" class="page-size-select">
+                    <option value="25">25行</option>
+                    <option value="50" selected>50行</option>
+                    <option value="75">75行</option>
+                    <option value="100">100行</option>
+                  </select>
                 </div>
               </div>
-
-              <!-- 审核列表 -->
-              <div class="review-items-scroll" id="review-items-scroll">
-                <div id="review-items-list"></div>
+              <div class="toolbar-right">
+                <select id="review-status-filter">
+                  <option value="pending">待审核</option>
+                  <option value="all">全部</option>
+                  <option value="approved">已通过</option>
+                  <option value="rejected">已拒绝</option>
+                  <option value="edited">已编辑</option>
+                </select>
+                <div class="font-scale-controls">
+                  <button class="btn-font-scale" id="font-scale-down" title="缩小字体 (Ctrl+-)">A-</button>
+                  <span class="font-scale-value" id="font-scale-value">13px</span>
+                  <button class="btn-font-scale" id="font-scale-up" title="放大字体 (Ctrl++)">A+</button>
+                </div>
+                <button class="btn-secondary btn-sm" id="batch-approve-all-btn" title="全部通过">✓ 全部通过</button>
+                <button class="btn-secondary btn-sm" id="batch-reject-all-btn" title="全部拒绝">✗ 全部拒绝</button>
+                <span class="keyboard-hint">
+                  <kbd>↑</kbd><kbd>↓</kbd> 切换
+                  <kbd>Enter</kbd> 保留 <kbd>Esc</kbd> 撤销
+                  <kbd>PgUp</kbd><kbd>PgDn</kbd> 翻页
+                </span>
               </div>
+            </div>
 
-              <!-- 底部操作栏 -->
-              <div class="review-bottom-bar">
-                <div class="bottom-bar-left">
-                  <button
-                    class="btn-primary"
-                    id="finalize-btn"
-                    style="display: none"
-                  >
-                    完成审核并生成文件
-                  </button>
-                </div>
-                <div class="bottom-bar-right">
-                  <button
-                    class="btn-secondary"
-                    onclick="showSection('file-list')"
-                  >
-                    返回列表
-                  </button>
-                </div>
+            <!-- 审核内容区域 -->
+            <div class="review-content-area" id="review-content-area">
+              <div class="review-page-container" id="review-page-container">
+                <!-- 动态生成：审核行 -->
+              </div>
+            </div>
+
+            <!-- 底部操作栏 -->
+            <div class="review-bottom-bar">
+              <div class="bottom-bar-left">
+                <button class="btn-primary" id="finalize-btn" style="display: none">
+                  完成审核并生成文件
+                </button>
+              </div>
+              <div class="bottom-bar-right">
+                <button class="btn-secondary" onclick="showSection('file-list')">返回列表</button>
               </div>
             </div>
           </div>
+
           <!-- 审核加载遮罩 -->
-          <div
-            id="review-loading-overlay"
-            class="loading-overlay"
-            style="display: none"
-          >
+          <div id="review-loading-overlay" class="loading-overlay" style="display: none">
             <div class="loading-spinner"></div>
             <div class="loading-text">操作处理中...</div>
+          </div>
+        </section>
+
+        <!-- ===== 批量审核页面（全屏） ===== -->
+        <section id="batch-review-section" style="display: none">
+          <div class="review-fullscreen">
+            <div class="review-toolbar">
+              <div class="toolbar-left">
+                <button class="btn-secondary" id="batch-review-back">← 返回审核</button>
+                <span class="batch-review-title" id="batch-review-title">批量审核</span>
+              </div>
+              <div class="toolbar-right">
+                <span class="batch-review-count" id="batch-review-count">共 0 项</span>
+                <button class="btn-primary btn-sm" id="batch-approve-all-selected">✓ 全部同意</button>
+              </div>
+            </div>
+            <div class="review-content-area">
+              <div class="batch-review-container" id="batch-review-container">
+                <!-- 动态生成：批量审核项列表 -->
+              </div>
+            </div>
           </div>
         </section>
 

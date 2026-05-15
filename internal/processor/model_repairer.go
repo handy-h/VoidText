@@ -154,7 +154,12 @@ func (mr *ModelRepairer) RepairTextWithFileMd5(fileMd5, content string, resume b
 		for _, p := range chunkResult.Paragraphs {
 			repairedParagraphs = append(repairedParagraphs, p)
 		}
-		result.Changes = append(result.Changes, chunkResult.Changes...)
+		// 调整每个 Change 的 Position，加上 chunk 在文件中的偏移量（ChunkID = chunk.StartIndex）
+		for _, change := range chunkResult.Changes {
+			adjustedChange := change
+			adjustedChange.Position = change.Position + chunkResult.ChunkID
+			result.Changes = append(result.Changes, adjustedChange)
+		}
 	}
 
 	// 重新组合文本（保持原有换行结构）

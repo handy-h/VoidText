@@ -1,40 +1,21 @@
-// 审核模块 — 双栏面板 + 内联对比 + 快捷键
+// 审核模块 — 全屏沉浸式 Diff 视图 + 分页 + 快捷键
 const ReviewModule = (function() {
   // 私有状态
   let reviewItems = [];
   let currentFileMd5 = null;
-  let selectedCardIndex = -1;
-  let currentCategory = 'all';
-  let categorizedItems = {};
-  let sidebarCategories = [];
+  let selectedItemIndex = -1;
+  let currentPage = 1;
+  let pageSize = 50;
+  let filteredItems = [];
 
-  // 分类定义
-  const CATEGORY_DEFS = {
-    all: { label: '全部待审核', icon: 'all' },
-    typo: { label: '高频词汇类', icon: 'typo' },
-    semantic: { label: '语义逻辑类', icon: 'semantic' },
-    cleaning: { label: '清洗类', icon: 'cleaning' }
-  };
+  // 全文内容
+  let fullContent = '';
+  let fullLines = [];
+  let lineGroups = {}; // 按行号分组的审核项
 
-  // 映射：type -> category
-  const TYPE_TO_CATEGORY = {
-    typo: 'typo',
-    typo_correction: 'typo',
-    character_correction: 'typo',
-    punctuation: 'typo',
-    grammar: 'semantic',
-    style: 'semantic',
-    llm_fix: 'semantic',
-    duplicate_paragraph: 'cleaning',
-    advertisement: 'cleaning',
-    text_deletion: 'cleaning',
-    text_insertion: 'cleaning',
-    html_entity: 'cleaning',
-    whitespace: 'cleaning',
-    encoding_fix: 'cleaning',
-    garbled_text_removal: 'cleaning',
-    traditional_to_simple: 'cleaning'
-  };
+  // 批量审核组
+  let batchGroups = {};
+  let currentBatchGroup = null;
 
   // ---------------------------------------------------------------
   // 初始化
@@ -42,6 +23,7 @@ const ReviewModule = (function() {
   function init() {
     bindEvents();
     initFontScale();
+    initPageSize();
   }
 
   // ---------------------------------------------------------------
@@ -80,72 +62,86 @@ const ReviewModule = (function() {
     if (display) display.textContent = size + 'px';
   }
 
+  // ---------------------------------------------------------------
+  // 分页设置
+  // ---------------------------------------------------------------
+  var PAGE_SIZE_STORAGE_KEY = 'voidtext-review-page-size';
+
+  function initPageSize() {
+    var saved = localStorage.getItem(PAGE_SIZE_STORAGE_KEY);
+    if (saved) {
+      pageSize = Math.max(25, Math.min(100, parseInt(saved, 10) || 50));
+    }
+    var select = document.getElementById('page-size-select');
+    if (select) {
+      select.value = String(pageSize);
+      select.addEventListener('change', function() {
+        pageSize = parseInt(this.value, 10) || 50;
+        localStorage.setItem(PAGE_SIZE_STORAGE_KEY, String(pageSize));
+        currentPage = 1;
+        renderCurrentPage();
+      });
+    }
+  }
+
+  // ---------------------------------------------------------------
+  // 事件绑定
+  // ---------------------------------------------------------------
   function bindEvents() {
     // 状态筛选
-    const statusFilter = document.getElementById('review-status-filter');
+    var statusFilter = document.getElementById('review-status-filter');
     if (statusFilter) {
       statusFilter.addEventListener('change', function() {
+        currentPage = 1;
         loadReviewItems();
       });
     }
 
     // 全局批量通过
-    const batchApproveBtn = document.getElementById('batch-approve-btn');
+    var batchApproveBtn = document.getElementById('batch-approve-all-btn');
     if (batchApproveBtn) {
       batchApproveBtn.addEventListener('click', batchApproveAll);
     }
 
     // 全局批量拒绝
-    const batchRejectBtn = document.getElementById('batch-reject-btn');
+    var batchRejectBtn = document.getElementById('batch-reject-all-btn');
     if (batchRejectBtn) {
       batchRejectBtn.addEventListener('click', batchRejectAll);
     }
 
     // 完成审核
-    const finalizeBtn = document.getElementById('finalize-btn');
+    var finalizeBtn = document.getElementById('finalize-btn');
     if (finalizeBtn) {
       finalizeBtn.addEventListener('click', finalizeFile);
     }
 
-    // 全局键盘快捷键
-    document.addEventListener('keydown', handleKeyboardShortcut);
+    // 翻页按钮
+    var prevBtn = document.getElementById('page-prev');
+    var nextBtn = document.getElementById('page-next');
+    if (prevBtn) prevBtn.addEventListener('click', function() { goToPage(currentPage - 1); });
+    if (nextBtn) nextBtn.addEventListener('click', function() { goToPage(currentPage + 1); });
 
-    // 上下文展开/折叠（委托）
-    var itemsList = document.getElementById('review-items-list');
-    if (itemsList) {
-      itemsList.addEventListener('click', function(e) {
-        var toggle = e.target.closest('[data-action="toggle-context"]');
-        if (!toggle) return;
-        e.stopPropagation();
-        var container = toggle.closest('.diff-view-container');
-        if (!container) return;
-        var isExpanded = toggle.getAttribute('data-expanded') === 'true';
-        var children = Array.from(container.children);
-        if (isExpanded) {
-          toggle.setAttribute('data-expanded', 'false');
-          children.forEach(function(child) {
-            if (child.classList.contains('diff-context-line') && child.classList.contains('context-hidden')) {
-              child.classList.remove('context-hidden');
-            }
-          });
-          DomUtils.setTextContent(toggle, '\u25B2 \u6536\u8D77');
-        } else {
-          toggle.setAttribute('data-expanded', 'true');
-          var prevIdx = 0;
-          var nextIdx = 0;
-          var foundToggle = false;
-          for (var i = 0; i < children.length; i++) {
-            if (children[i] === toggle) { foundToggle = true; continue; }
-            if (children[i].classList.contains('diff-context-line')) {
-              if (!foundToggle) { prevIdx++; if (prevIdx > 3) children[i].classList.add('context-hidden'); }
-              else { nextIdx++; if (nextIdx > 3) children[i].classList.add('context-hidden'); }
-            }
-          }
-          var total = prevIdx + nextIdx;
-          DomUtils.setTextContent(toggle, '\u22EF \u663E\u793A\u5168\u90E8 ' + total + ' \u884C');
+    // 批量审核返回按钮
+    var batchBackBtn = document.getElementById('batch-review-back');
+    if (batchBackBtn) {
+      batchBackBtn.addEventListener('click', function() {
+        showMainReview();
+      });
+    }
+
+    // 批量审核全部同意
+    var batchApproveAllBtn = document.getElementById('batch-approve-all-selected');
+    if (batchApproveAllBtn) {
+      batchApproveAllBtn.addEventListener('click', function() {
+        if (currentBatchGroup) {
+          batchApproveGroup(currentBatchGroup.items.map(function(i) { return i.id; }));
+          showMainReview();
         }
       });
     }
+
+    // 全局键盘快捷键
+    document.addEventListener('keydown', handleKeyboardShortcut);
   }
 
   // ---------------------------------------------------------------
@@ -154,600 +150,396 @@ const ReviewModule = (function() {
   function loadReviewItems() {
     if (!currentFileMd5) return;
 
-    AppConfig.apiRequest(`/files/${currentFileMd5}/review-items`)
-      .then((data) => {
-        if (!data.success) return;
-        reviewItems = data.suggestions || data.items || [];
-        categorizeItems();
-        renderSidebar();
-        renderCurrentCategory();
+    // 并行加载审核项和全文
+    Promise.all([
+      AppConfig.apiRequest('/files/' + currentFileMd5 + '/review-items'),
+      AppConfig.apiRequest('/files/' + currentFileMd5 + '/content')
+    ])
+      .then(function(results) {
+        var reviewData = results[0];
+        var contentData = results[1];
+
+        if (reviewData.success) {
+          reviewItems = reviewData.suggestions || reviewData.items || [];
+        }
+
+        if (contentData.success) {
+          fullContent = contentData.content || '';
+          fullLines = fullContent.split('\n');
+        }
+
+        filterAndSortItems();
+        groupItemsByLine();
+        findBatchGroups();
+        renderCurrentPage();
         updateReviewProgress();
       })
-      .catch((err) => {
-        console.error("加载审核项失败:", err);
+      .catch(function(err) {
+        console.error('加载数据失败:', err);
       });
   }
 
   // ---------------------------------------------------------------
-  // 分类逻辑
+  // 过滤和排序
   // ---------------------------------------------------------------
-  function categorizeItems() {
-    const statusFilter = getFilterValue();
+  function filterAndSortItems() {
+    var statusFilter = getFilterValue();
 
-    let filtered = reviewItems;
+    filteredItems = reviewItems;
     if (statusFilter === 'pending') {
-      filtered = reviewItems.filter(item => item.status === 'pending');
+      filteredItems = reviewItems.filter(function(item) { return item.status === 'pending'; });
     } else if (statusFilter !== 'all') {
-      filtered = reviewItems.filter(item => item.status === statusFilter);
+      filteredItems = reviewItems.filter(function(item) { return item.status === statusFilter; });
     }
 
-    // 构建分类
-    const categories = {
-      all: { items: filtered, label: '全部待审核', icon: 'all' },
-      typo: { items: [], label: '高频词汇类', icon: 'typo' },
-      semantic: { items: [], label: '语义逻辑类', icon: 'semantic' },
-      cleaning: { items: [], label: '清洗类', icon: 'cleaning' }
-    };
-
-    // 按 type 归类
-    filtered.forEach(item => {
-      const type = item.type || item.modificationType || '';
-      const cat = TYPE_TO_CATEGORY[type] || 'semantic';
-      if (categories[cat]) {
-        categories[cat].items.push(item);
-      } else {
-        categories.semantic.items.push(item);
-      }
+    // 按行号排序，同一行内按 position 排序
+    filteredItems.sort(function(a, b) {
+      var lineA = a.lineNum || 0;
+      var lineB = b.lineNum || 0;
+      if (lineA !== lineB) return lineA - lineB;
+      return (a.position || 0) - (b.position || 0);
     });
-
-    // 按行号排序每个分类的 items
-    function sortByLine(items) {
-      return items.sort((a, b) => {
-        const lineA = a.lineNum || 0;
-        const lineB = b.lineNum || 0;
-        return lineA - lineB;
-      });
-    }
-    categories.all.items = sortByLine(categories.all.items);
-    categories.typo.items = sortByLine(categories.typo.items);
-    categories.semantic.items = sortByLine(categories.semantic.items);
-    categories.cleaning.items = sortByLine(categories.cleaning.items);
-
-    // 对 typo 类进一步按原文→建议分组
-    categories.typo.subGroups = groupTypoItems(categories.typo.items);
-
-    categorizedItems = categories;
-
-    // 构建侧边栏导航列表
-    sidebarCategories = [];
-    for (const [key, cat] of Object.entries(categories)) {
-      const count = cat.items.length;
-      if (count > 0 || key === 'all') {
-        sidebarCategories.push({
-          key: key,
-          label: cat.label,
-          icon: cat.icon,
-          count: count,
-          subGroups: cat.subGroups || null
-        });
-      }
-    }
-  }
-
-  // 对高频词汇类按相同原文→建议分组（带子导航）
-  function groupTypoItems(items) {
-    const groupMap = {};
-    items.forEach(item => {
-      const orig = item.original || item.originalText || '';
-      const sugg = item.suggested || item.suggestedText || '';
-      const key = orig + '|||' + sugg;
-      if (!groupMap[key]) {
-        groupMap[key] = {
-          original: orig,
-          suggested: sugg,
-          items: [],
-          count: 0
-        };
-      }
-      groupMap[key].items.push(item);
-      groupMap[key].count++;
-    });
-    const groups = Object.values(groupMap);
-    // 组内按行号排序
-    groups.forEach(g => {
-      g.items.sort((a, b) => (a.lineNum || 0) - (b.lineNum || 0));
-    });
-    groups.sort((a, b) => b.count - a.count);
-    return groups;
   }
 
   function getFilterValue() {
-    const el = document.getElementById('review-status-filter');
+    var el = document.getElementById('review-status-filter');
     return el ? el.value : 'pending';
   }
 
   // ---------------------------------------------------------------
-  // 渲染左侧导航
+  // 按行号分组审核项
   // ---------------------------------------------------------------
-  function renderSidebar() {
-    const nav = document.getElementById('sidebar-nav');
-    if (!nav) return;
-
-    nav.innerHTML = '';
-
-    sidebarCategories.forEach(cat => {
-      const item = DomUtils.createElement('div', {
-        className: 'sidebar-nav-item' + (cat.key === currentCategory ? ' active' : ''),
-        onclick: function() { selectCategory(cat.key); }
-      });
-
-      const icon = DomUtils.createElement('div', {
-        className: 'sidebar-nav-icon icon-' + cat.icon
-      });
-      DomUtils.setTextContent(icon, getCategoryEmoji(cat.key));
-      item.appendChild(icon);
-
-      const label = DomUtils.createElement('span', { className: 'sidebar-nav-label' });
-      DomUtils.setTextContent(label, cat.label);
-      item.appendChild(label);
-
-      const countEl = DomUtils.createElement('span', { className: 'sidebar-nav-count' });
-      DomUtils.setTextContent(countEl, String(cat.count));
-      item.appendChild(countEl);
-
-      nav.appendChild(item);
-
-      // 如果有子分组，在 typo 类别下显示子项
-      if (cat.subGroups && cat.key === currentCategory) {
-        cat.subGroups.forEach((group, idx) => {
-          const subItem = DomUtils.createElement('div', {
-            className: 'sidebar-nav-item sub-nav-item',
-            style: 'padding-left: 44px; font-size: 13px;',
-            onclick: function(e) {
-              e.stopPropagation();
-              scrollToGroup(idx);
-            }
-          });
-          const subLabel = DomUtils.createElement('span', {
-            className: 'sidebar-nav-label',
-            style: 'font-size: 13px; color: var(--text-secondary);'
-          });
-          const displayOrig = group.original.length > 20
-            ? group.original.slice(0, 20) + '…'
-            : group.original;
-          const displaySugg = group.suggested.length > 20
-            ? group.suggested.slice(0, 20) + '…'
-            : group.suggested;
-          DomUtils.setTextContent(subLabel, displayOrig + ' → ' + displaySugg);
-          subItem.appendChild(subLabel);
-
-          const subCount = DomUtils.createElement('span', {
-            className: 'sidebar-nav-count',
-            style: 'font-size: 11px;'
-          });
-          DomUtils.setTextContent(subCount, String(group.count) + '处');
-          subItem.appendChild(subCount);
-
-          nav.appendChild(subItem);
-        });
+  function groupItemsByLine() {
+    lineGroups = {};
+    filteredItems.forEach(function(item) {
+      var lineNum = item.lineNum || 0;
+      if (!lineGroups[lineNum]) {
+        lineGroups[lineNum] = [];
       }
+      lineGroups[lineNum].push(item);
     });
   }
 
-  function getCategoryEmoji(key) {
-    const map = {
-      all: '\u2211',
-      typo: 'A',
-      semantic: '\u25B3',
-      cleaning: '\u221E'
-    };
-    return map[key] || '?';
-  }
+  // ---------------------------------------------------------------
+  // 批量审核组检测
+  // ---------------------------------------------------------------
+  function findBatchGroups() {
+    batchGroups = {};
+    var pendingItems = reviewItems.filter(function(item) { return item.status === 'pending'; });
 
-  // 选择分类
-  function selectCategory(key) {
-    currentCategory = key;
-    selectedCardIndex = -1;
-    renderSidebar();
-    renderCurrentCategory();
-  }
+    pendingItems.forEach(function(item) {
+      var orig = item.original || item.originalText || '';
+      var sugg = item.suggested || item.suggestedText || '';
+      var key = orig + '|||' + sugg;
+      if (!batchGroups[key]) {
+        batchGroups[key] = {
+          original: orig,
+          suggested: sugg,
+          items: []
+        };
+      }
+      batchGroups[key].items.push(item);
+    });
 
-  function scrollToGroup(idx) {
-    const container = document.getElementById('review-items-scroll');
-    if (!container) return;
-    const cards = container.querySelectorAll('.diff-card');
-    if (cards[idx]) {
-      cards[idx].scrollIntoView({ behavior: 'smooth', block: 'center' });
-      cards[idx].classList.add('active');
-      setTimeout(() => cards[idx].classList.remove('active'), 2000);
-    }
+    // 只保留有多个项的组
+    var multiItemGroups = {};
+    Object.keys(batchGroups).forEach(function(key) {
+      if (batchGroups[key].items.length > 1) {
+        multiItemGroups[key] = batchGroups[key];
+      }
+    });
+    batchGroups = multiItemGroups;
   }
 
   // ---------------------------------------------------------------
-  // 渲染当前分类的审核项
+  // 分页渲染
   // ---------------------------------------------------------------
-  function renderCurrentCategory() {
-    const container = document.getElementById('review-items-list');
+  function goToPage(page) {
+    var totalPages = Math.ceil(fullLines.length / pageSize) || 1;
+    if (page < 1) page = 1;
+    if (page > totalPages) page = totalPages;
+    currentPage = page;
+    selectedItemIndex = -1;
+    renderCurrentPage();
+  }
+
+  function renderCurrentPage() {
+    var container = document.getElementById('review-page-container');
     if (!container) return;
 
     container.innerHTML = '';
 
-    const catData = categorizedItems[currentCategory];
-    if (!catData || catData.items.length === 0) {
-      const emptyDiv = DomUtils.createElement('div', { className: 'empty-state-sm' });
-      DomUtils.setTextContent(emptyDiv, '没有待审核项');
-      container.appendChild(emptyDiv);
-      updateCategoryLabel('当前无待审核项');
-      return;
-    }
+    var totalPages = Math.ceil(fullLines.length / pageSize) || 1;
+    if (currentPage > totalPages) currentPage = totalPages;
 
-    const categoryLabel = catData.label + ' (' + catData.items.length + '项)';
-    updateCategoryLabel(categoryLabel);
+    // 更新页码显示
+    var currentPageEl = document.getElementById('current-page');
+    var totalPagesEl = document.getElementById('total-pages');
+    if (currentPageEl) currentPageEl.textContent = String(currentPage);
+    if (totalPagesEl) totalPagesEl.textContent = String(totalPages);
 
-    // 如果有子分组（typo类），渲染批量操作横幅 + 组内项
-    if (catData.subGroups && catData.subGroups.length > 0) {
-      catData.subGroups.forEach((group, gIdx) => {
-        // 组标题 + 批量操作
-        const batchBar = DomUtils.createElement('div', {
-          className: 'category-batch-bar'
-        });
+    // 更新翻页按钮状态
+    var prevBtn = document.getElementById('page-prev');
+    var nextBtn = document.getElementById('page-next');
+    if (prevBtn) prevBtn.disabled = currentPage <= 1;
+    if (nextBtn) nextBtn.disabled = currentPage >= totalPages;
 
-        const batchLabel = DomUtils.createElement('span', {
-          className: 'category-batch-label'
-        });
-        const displayOrig = group.original.length > 40
-          ? group.original.slice(0, 40) + '…'
-          : group.original;
-        const displaySugg = group.suggested.length > 40
-          ? group.suggested.slice(0, 40) + '…'
-          : group.suggested;
-        DomUtils.setTextContent(batchLabel, '\u201C' + displayOrig + '\u201D \u2192 \u201C' + displaySugg + '\u201D \u00D7 ' + group.count);
+    // 计算当前页的行范围
+    var startLine = (currentPage - 1) * pageSize;
+    var endLine = Math.min(startLine + pageSize, fullLines.length);
 
-        const batchActions = DomUtils.createElement('div', {
-          className: 'category-batch-actions'
-        });
+    // 渲染每一行
+    for (var i = startLine; i < endLine; i++) {
+      var lineNum = i + 1; // 行号从1开始
+      var lineText = fullLines[i];
+      var items = lineGroups[lineNum] || [];
 
-        const approveAllBtn = DomUtils.createElement('button', {
-          className: 'btn-approve',
-          onclick: function() {
-            batchApproveGroup(group.items.map(i => i.id));
-          }
-        });
-        DomUtils.setTextContent(approveAllBtn, '\u2713 全部采纳');
-        batchActions.appendChild(approveAllBtn);
-
-        const rejectAllBtn = DomUtils.createElement('button', {
-          className: 'btn-reject',
-          onclick: function() {
-            batchRejectGroup(group.items.map(i => i.id));
-          }
-        });
-        DomUtils.setTextContent(rejectAllBtn, '\u2717 全部忽略');
-        batchActions.appendChild(rejectAllBtn);
-
-        batchBar.appendChild(batchLabel);
-        batchBar.appendChild(batchActions);
-        container.appendChild(batchBar);
-
-        // 组内每个项渲染为卡片
-        group.items.forEach((item, idx) => {
-          const card = createDiffCard(item, idx);
-          container.appendChild(card);
-        });
-      });
-    } else {
-      // 无子分组，直接渲染卡片
-      catData.items.forEach((item, idx) => {
-        const card = createDiffCard(item, idx);
-        container.appendChild(card);
+      var lineEls = createReviewLines(lineNum, lineText, items);
+      lineEls.forEach(function(el) {
+        container.appendChild(el);
       });
     }
 
-    // 重新计算选中索引
-    if (selectedCardIndex < 0) {
-      selectedCardIndex = 0;
-    }
-    highlightSelectedCard();
-  }
-
-  function updateCategoryLabel(text) {
-    const el = document.getElementById('review-current-category');
-    if (!el) return;
-    // 计算待审核数
-    var catData = categorizedItems[currentCategory];
-    var pendingCount = catData ? catData.items.filter(function(i) { return i.status === 'pending'; }).length : 0;
-    var iconMap = { all: '\u2211', typo: 'A', semantic: '\u25B3', cleaning: '\u221E' };
-    var iconClassMap = { all: 'icon-all', typo: 'icon-typo', semantic: 'icon-semantic', cleaning: 'icon-cleaning' };
-    var icon = iconMap[currentCategory] || '\u2211';
-    var iconClass = iconClassMap[currentCategory] || 'icon-all';
-    el.innerHTML = '<span class="toolbar-cat-icon ' + iconClass + '">' + icon + '</span> '
-      + text + ' <span class="toolbar-pending-count">\u5F85\u5BA1\u6838 ' + pendingCount + '</span>';
-  }
-
-  // ---------------------------------------------------------------
-  // 创建 Diff 对比卡片
-  // ---------------------------------------------------------------
-  function createDiffCard(item, index) {
-    const card = DomUtils.createElement('div', {
-      className: 'diff-card',
-      'data-index': String(index),
-      'data-item-id': String(item.id),
-      'data-status': item.status || 'pending'
-    });
-
-    // 点击卡片选中
-    card.addEventListener('click', function(e) {
-      // 不处理按钮点击冒泡
-      if (e.target.closest('.diff-card-btn') || e.target.closest('.diff-edit-inline') ||
-          e.target.closest('.diff-expand-toggle') || e.target.closest('.diff-edit-actions')) {
-        return;
+    // 选中第一个有审核项的行
+    if (selectedItemIndex < 0) {
+      for (var i = startLine; i < endLine; i++) {
+        var lineNum = i + 1;
+        if (lineGroups[lineNum] && lineGroups[lineNum].length > 0) {
+          selectedItemIndex = i;
+          break;
+        }
       }
-      selectedCardIndex = index;
-      highlightSelectedCard();
-    });
+    }
+    highlightSelectedItem();
+  }
 
-    // ---- 头部 ----
-    const header = DomUtils.createElement('div', { className: 'diff-card-header' });
+  // ---------------------------------------------------------------
+  // 创建审核行（原文行 + 建议行）
+  // 使用 renderAlignedDiff 实现逐字符对齐
+  // ---------------------------------------------------------------
+  function createReviewLines(lineNum, lineText, items) {
+    var result = [];
+    var hasReviewItems = items.length > 0;
+    var hasPendingItems = items.some(function(item) { return item.status === 'pending'; });
 
-    const typeLabel = DomUtils.createElement('span', {
-      className: 'diff-card-type type-' + getCategoryForItem(item)
-    });
-    DomUtils.setTextContent(typeLabel, getModificationTypeText(item.type || item.modificationType));
-    header.appendChild(typeLabel);
+    if (!hasReviewItems) {
+      // 普通行
+      var line = DomUtils.createElement('div', {
+        className: 'review-line line-normal',
+        'data-line-num': String(lineNum)
+      });
 
-    if (item.lineNum !== undefined && item.lineNum !== null) {
-      const lineSpan = DomUtils.createElement('span', { className: 'diff-card-line' });
-      DomUtils.setTextContent(lineSpan, '行 ' + item.lineNum);
-      header.appendChild(lineSpan);
+      var gutter = DomUtils.createElement('div', { className: 'review-line-gutter' });
+      DomUtils.setTextContent(gutter, String(lineNum));
+      line.appendChild(gutter);
+
+      var content = DomUtils.createElement('div', { className: 'review-line-content' });
+      DomUtils.setTextContent(content, lineText);
+      line.appendChild(content);
+
+      result.push(line);
+    } else {
+      // 有审核项的行 - 使用 renderAlignedDiff 实现逐字符对齐
+      // 按 position 排序
+      var sortedItems = items.slice().sort(function(a, b) {
+        return (a.position || 0) - (b.position || 0);
+      });
+
+      // 为每个审核项生成对齐的 HTML
+      var origHtmlParts = [];
+      var suggHtmlMap = {}; // itemId -> suggestedHtml
+
+      sortedItems.forEach(function(item) {
+        var sugg = item.suggested || item.suggestedText || '';
+        var orig = item.original || item.originalText || '';
+
+        if (sugg && sugg !== orig) {
+          // 使用 renderAlignedDiff 生成对齐的 HTML
+          var aligned = DiffUtils.renderAlignedDiff(lineText, item);
+          origHtmlParts.push(aligned.originalHtml);
+          suggHtmlMap[item.id] = aligned.suggestedHtml;
+        } else {
+          // 没有修改的项，直接使用原文
+          origHtmlParts.push(DiffUtils.renderAlignedDiff(lineText, {
+            original: orig,
+            suggested: orig,
+            position: item.position || 0
+          }).originalHtml);
+        }
+      });
+
+      // 渲染原文行
+      var origLine = DomUtils.createElement('div', {
+        className: 'review-line line-original' + (selectedItemIndex === lineNum - 1 ? ' active' : ''),
+        'data-line-num': String(lineNum),
+        'data-type': 'original'
+      });
+
+      var gutter = DomUtils.createElement('div', { className: 'review-line-gutter' });
+      DomUtils.setTextContent(gutter, String(lineNum));
+      origLine.appendChild(gutter);
+
+      var content = DomUtils.createElement('div', { className: 'review-line-content' });
+      // 使用第一个审核项的对齐结果（所有审核项共用同一行）
+      content.innerHTML = origHtmlParts.length > 0 ? origHtmlParts[0] : lineText;
+      origLine.appendChild(content);
+
+      // 浮动操作框
+      if (hasPendingItems) {
+        var actions = createFloatingActions(lineNum, items);
+        origLine.appendChild(actions);
+      }
+
+      // 批量审核按钮
+      var batchGroup = getBatchGroupForLine(items);
+      if (batchGroup) {
+        var batchBtn = DomUtils.createElement('button', {
+          className: 'batch-review-btn',
+          onclick: function(e) {
+            e.stopPropagation();
+            showBatchReview(batchGroup);
+          }
+        });
+        DomUtils.setTextContent(batchBtn, '批量 (' + batchGroup.items.length + ')');
+        origLine.appendChild(batchBtn);
+      }
+
+      // 点击选中
+      origLine.addEventListener('click', function(e) {
+        if (e.target.closest('.floating-actions') || e.target.closest('.batch-review-btn')) {
+          return;
+        }
+        selectedItemIndex = lineNum - 1;
+        highlightSelectedItem();
+      });
+
+      result.push(origLine);
+
+      // 渲染建议行（每个审核项一行，使用对齐的 HTML）
+      sortedItems.forEach(function(item) {
+        var suggHtml = suggHtmlMap[item.id];
+        if (suggHtml) {
+          var suggLine = DomUtils.createElement('div', {
+            className: 'review-line line-suggested',
+            'data-line-num': String(lineNum),
+            'data-type': 'suggested',
+            'data-item-id': String(item.id)
+          });
+
+          var suggGutter = DomUtils.createElement('div', { className: 'review-line-gutter' });
+          DomUtils.setTextContent(suggGutter, '→');
+          suggLine.appendChild(suggGutter);
+
+          var suggContent = DomUtils.createElement('div', { className: 'review-line-content' });
+          suggContent.innerHTML = suggHtml;
+          suggLine.appendChild(suggContent);
+
+          result.push(suggLine);
+        }
+      });
     }
 
-    card.appendChild(header);
+    return result;
+  }
 
-    // ---- 浮动操作按钮 ----
-    const actions = DomUtils.createElement('div', { className: 'diff-card-actions' });
-    if (item.status === 'pending') {
-      const approveBtn = DomUtils.createElement('button', {
-        className: 'diff-card-btn btn-approve-sm',
-        title: '采纳 (Enter)',
+  // ---------------------------------------------------------------
+  // 创建浮动操作框
+  // ---------------------------------------------------------------
+  function createFloatingActions(lineNum, items) {
+    var actions = DomUtils.createElement('div', { className: 'floating-actions' });
+
+    var pendingItems = items.filter(function(item) { return item.status === 'pending'; });
+    if (pendingItems.length === 0) return actions;
+
+    // 单个审核项时显示保留/撤销
+    if (pendingItems.length === 1) {
+      var item = pendingItems[0];
+
+      var approveBtn = DomUtils.createElement('button', {
+        className: 'floating-btn btn-approve',
+        title: '保留 (Enter)',
         onclick: function(e) {
           e.stopPropagation();
           approveReviewItem(item.id);
         }
       });
-      DomUtils.setTextContent(approveBtn, '\u2713');
+      DomUtils.setTextContent(approveBtn, '保留');
       actions.appendChild(approveBtn);
 
-      const rejectBtn = DomUtils.createElement('button', {
-        className: 'diff-card-btn btn-reject-sm',
-        title: '拒绝 (Esc)',
+      var rejectBtn = DomUtils.createElement('button', {
+        className: 'floating-btn btn-reject',
+        title: '撤销 (Esc)',
         onclick: function(e) {
           e.stopPropagation();
           rejectReviewItem(item.id);
         }
       });
-      DomUtils.setTextContent(rejectBtn, '\u2717');
+      DomUtils.setTextContent(rejectBtn, '撤销');
       actions.appendChild(rejectBtn);
-
-      const editBtn = DomUtils.createElement('button', {
-        className: 'diff-card-btn btn-edit-sm',
-        title: '手动微调',
+    } else {
+      // 多个审核项时显示全部保留/全部撤销
+      var approveAllBtn = DomUtils.createElement('button', {
+        className: 'floating-btn btn-approve',
+        title: '全部保留 (Enter)',
         onclick: function(e) {
           e.stopPropagation();
-          toggleEditInline(item.id);
+          var ids = pendingItems.map(function(i) { return i.id; });
+          batchApproveGroup(ids);
         }
       });
-      DomUtils.setTextContent(editBtn, '\u270E');
-      actions.appendChild(editBtn);
-    }
-    card.appendChild(actions);
+      DomUtils.setTextContent(approveAllBtn, '全部保留');
+      actions.appendChild(approveAllBtn);
 
-    // ---- 主体内容 ----
-    const body = DomUtils.createElement('div', { className: 'diff-card-body' });
-
-    var CONTEXT_MAX = 3;
-    var orig = item.original || item.originalText || '';
-    var sugg = item.suggested || item.suggestedText || '';
-
-    // 计算完整行：leadText + original + trailText
-    var fullOriginalLine = orig;
-    var fullSuggestedLine = sugg;
-    var leadText = '';
-    var trailText = '';
-    if (item.fullLine && orig) {
-      var origPos = item.fullLine.indexOf(orig);
-      if (origPos >= 0) {
-        leadText = item.fullLine.substring(0, origPos);
-        trailText = item.fullLine.substring(origPos + orig.length);
-        fullOriginalLine = leadText + orig + trailText;
-        fullSuggestedLine = leadText + sugg + trailText;
-      }
-    }
-
-    // 统一 diff 视图容器
-    var diffView = DomUtils.createElement('div', { className: 'diff-view-container' });
-
-    // ---- 上文上下文行（可折叠） ----
-    var prevLinesList = item.prevLines || (item.prevLine ? [item.prevLine] : []);
-    if (prevLinesList.length > 0) {
-      var isCollapsiblePrev = prevLinesList.length > CONTEXT_MAX;
-      prevLinesList.forEach(function(line, lineIdx) {
-        var lineEl = DomUtils.createElement('div', { className: 'diff-context-line' + (isCollapsiblePrev && lineIdx >= CONTEXT_MAX ? ' context-hidden' : '') });
-        DomUtils.setTextContent(lineEl, line);
-        diffView.appendChild(lineEl);
-      });
-      if (isCollapsiblePrev) {
-        var togglePrev = DomUtils.createElement('button', { className: 'diff-expand-toggle', 'data-action': 'toggle-context' });
-        DomUtils.setTextContent(togglePrev, '\u22EF \u663E\u793A\u5168\u90E8 ' + prevLinesList.length + ' \u884C');
-        diffView.appendChild(togglePrev);
-      }
-    }
-
-    // ---- 修改区域（diff pair） ----
-    if (orig) {
-      var diffPair = DomUtils.createElement('div', { className: 'diff-pair' });
-
-      // 删除行（原文）
-      var delLine = DomUtils.createElement('div', { className: 'diff-line diff-deletion' });
-      var delGutter = DomUtils.createElement('span', { className: 'diff-gutter' });
-      DomUtils.setTextContent(delGutter, '\u2212');
-      delLine.appendChild(delGutter);
-      var delContent = DomUtils.createElement('span', { className: 'diff-line-content' });
-
-      // 新增行（建议）
-      var addLine = DomUtils.createElement('div', { className: 'diff-line diff-addition' });
-      var addGutter = DomUtils.createElement('span', { className: 'diff-gutter' });
-      DomUtils.setTextContent(addGutter, '+');
-      addLine.appendChild(addGutter);
-      var addContent = DomUtils.createElement('span', { className: 'diff-line-content' });
-
-      var hasDiffUtils = typeof DiffUtils !== 'undefined';
-
-      // 处理建议文本
-      if (!sugg) {
-        var modType = item.type || item.modificationType || '';
-        if (modType === 'text_deletion' || modType === 'advertisement' || modType === 'duplicate_paragraph') {
-          sugg = '\uFF08\u5220\u9664\uFF09';
-          fullSuggestedLine = leadText + sugg + trailText;
-        } else {
-          sugg = '\uFF08\u65E0\u4FEE\u6539\u5EFA\u8BAE\uFF09';
-          fullSuggestedLine = leadText + sugg + trailText;
-          addLine.style.opacity = '0.5';
+      var rejectAllBtn = DomUtils.createElement('button', {
+        className: 'floating-btn btn-reject',
+        title: '全部撤销 (Esc)',
+        onclick: function(e) {
+          e.stopPropagation();
+          var ids = pendingItems.map(function(i) { return i.id; });
+          batchRejectGroup(ids);
         }
-      }
-
-      if (hasDiffUtils && fullOriginalLine !== fullSuggestedLine) {
-        var diffResult = DiffUtils.renderInlineDiff(fullOriginalLine, fullSuggestedLine);
-        DomUtils.setHTML(delContent, diffResult.originalHtml);
-        DomUtils.setHTML(addContent, diffResult.suggestedHtml);
-      } else {
-        DomUtils.setTextContent(delContent, fullOriginalLine);
-        DomUtils.setTextContent(addContent, fullSuggestedLine);
-      }
-
-      delLine.appendChild(delContent);
-      addLine.appendChild(addContent);
-      diffPair.appendChild(delLine);
-      diffPair.appendChild(addLine);
-
-      // 编辑后文本显示
-      if (item.editedText) {
-        var editedLine = DomUtils.createElement('div', { className: 'diff-line diff-edited' });
-        var editedGutter = DomUtils.createElement('span', { className: 'diff-gutter' });
-        DomUtils.setTextContent(editedGutter, '\u270E');
-        editedLine.appendChild(editedGutter);
-        var editedContent = DomUtils.createElement('span', { className: 'diff-line-content' });
-        DomUtils.setTextContent(editedContent, item.editedText);
-        editedLine.appendChild(editedContent);
-        diffPair.appendChild(editedLine);
-      }
-
-      diffView.appendChild(diffPair);
+      });
+      DomUtils.setTextContent(rejectAllBtn, '全部撤销');
+      actions.appendChild(rejectAllBtn);
     }
 
-    // ---- 下文上下文行（可折叠） ----
-    var nextLinesList = item.nextLines || (item.nextLine ? [item.nextLine] : []);
-    if (nextLinesList.length > 0) {
-      var isCollapsibleNext = nextLinesList.length > CONTEXT_MAX;
-      nextLinesList.forEach(function(line, lineIdx) {
-        var lineEl = DomUtils.createElement('div', { className: 'diff-context-line' + (isCollapsibleNext && lineIdx >= CONTEXT_MAX ? ' context-hidden' : '') });
-        DomUtils.setTextContent(lineEl, line);
-        diffView.appendChild(lineEl);
-      });
-      if (isCollapsibleNext) {
-        var toggleNext = DomUtils.createElement('button', { className: 'diff-expand-toggle', 'data-action': 'toggle-context' });
-        DomUtils.setTextContent(toggleNext, '\u22EF \u663E\u793A\u5168\u90E8 ' + nextLinesList.length + ' \u884C');
-        diffView.appendChild(toggleNext);
-      }
-    }
-
-    body.appendChild(diffView);
-
-    // 内联编辑区（隐藏）
-    const editContainer = DomUtils.createElement('div', {
-      className: 'diff-edit-inline',
-      id: 'edit-inline-' + item.id,
-      style: 'display: none;'
-    });
-    const editTextarea = DomUtils.createElement('textarea', {
-      id: 'edit-textarea-' + item.id
-    });
-    DomUtils.setTextContent(editTextarea, item.editedText || sugg || orig || '');
-    editContainer.appendChild(editTextarea);
-
-    const editActions = DomUtils.createElement('div', { className: 'diff-edit-actions' });
-    const saveEditBtn = DomUtils.createElement('button', {
-      className: 'btn-edit',
-      onclick: function() { saveInlineEdit(item.id); }
-    });
-    DomUtils.setTextContent(saveEditBtn, '\u4FDD\u5B58');
-    editActions.appendChild(saveEditBtn);
-
-    const cancelEditBtn = DomUtils.createElement('button', {
-      className: 'btn-secondary',
-      onclick: function() { cancelInlineEdit(item.id); }
-    });
-    DomUtils.setTextContent(cancelEditBtn, '\u53D6\u6D88');
-    editActions.appendChild(cancelEditBtn);
-
-    editContainer.appendChild(editActions);
-    body.appendChild(editContainer);
-
-    // 状态/置信度显示
-    if (item.status && item.status !== 'pending') {
-      const statusLine = DomUtils.createElement('div', {
-        className: 'diff-card-footer'
-      });
-      const statusSpan = DomUtils.createElement('span', {
-        className: 'review-status review-status-' + item.status
-      });
-      DomUtils.setTextContent(statusSpan, getReviewStatusText(item.status));
-      statusLine.appendChild(statusSpan);
-      body.appendChild(statusLine);
-    } else if (item.confidence !== undefined && item.confidence !== null) {
-      const confLine = DomUtils.createElement('div', {
-        className: 'diff-card-footer'
-      });
-      DomUtils.setTextContent(confLine, '\u7F6E\u4FE1\u5EA6: ' + (item.confidence * 100).toFixed(1) + '%');
-      body.appendChild(confLine);
-    }
-
-    card.appendChild(body);
-    return card;
+    return actions;
   }
 
-  // 创建上下文行
-  function createContextLine(text, isCollapsed) {
-    if (isCollapsed) {
-      const line = DomUtils.createElement('div', {
-        className: 'diff-context-line context-collapsed'
-      });
-      DomUtils.setTextContent(line, '\u2026 \u70B9\u51FB\u5C55\u5F00 \u2026');
-      return line;
+  function getBatchGroupForLine(items) {
+    for (var i = 0; i < items.length; i++) {
+      var item = items[i];
+      if (item.status !== 'pending') continue;
+      var orig = item.original || item.originalText || '';
+      var sugg = item.suggested || item.suggestedText || '';
+      var key = orig + '|||' + sugg;
+      if (batchGroups[key]) {
+        return batchGroups[key];
+      }
     }
-    const line = DomUtils.createElement('div', { className: 'diff-context-line' });
-    DomUtils.setTextContent(line, text);
-    return line;
-  }
-
-  // 获取项的分类 key
-  function getCategoryForItem(item) {
-    const type = item.type || item.modificationType || '';
-    return TYPE_TO_CATEGORY[type] || 'semantic';
+    return null;
   }
 
   // ---------------------------------------------------------------
   // 选中高亮
   // ---------------------------------------------------------------
-  function highlightSelectedCard() {
-    const container = document.getElementById('review-items-list');
+  function highlightSelectedItem() {
+    var container = document.getElementById('review-page-container');
     if (!container) return;
-    const cards = container.querySelectorAll('.diff-card');
-    cards.forEach((card, idx) => {
-      card.classList.toggle('active', idx === selectedCardIndex);
+
+    // 移除所有 active
+    var allLines = container.querySelectorAll('.review-line');
+    allLines.forEach(function(line) {
+      line.classList.remove('active');
     });
-    // 确保选中卡片可见
-    if (selectedCardIndex >= 0 && selectedCardIndex < cards.length) {
-      cards[selectedCardIndex].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+    // 添加 active 到选中行
+    if (selectedItemIndex >= 0) {
+      var selectedLine = container.querySelector('[data-line-num="' + (selectedItemIndex + 1) + '"][data-type="original"]');
+      if (selectedLine) {
+        selectedLine.classList.add('active');
+        selectedLine.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
     }
   }
 
@@ -755,51 +547,66 @@ const ReviewModule = (function() {
   // 键盘快捷键
   // ---------------------------------------------------------------
   function handleKeyboardShortcut(event) {
-    const reviewSection = document.getElementById('review-section');
-    if (!reviewSection || reviewSection.style.display === 'none') return;
+    var reviewSection = document.getElementById('review-section');
+    var batchSection = document.getElementById('batch-review-section');
+    var isReviewVisible = reviewSection && reviewSection.style.display !== 'none';
+    var isBatchVisible = batchSection && batchSection.style.display !== 'none';
+
+    if (!isReviewVisible && !isBatchVisible) return;
 
     // 忽略输入框中的快捷键
     if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA' ||
         event.target.tagName === 'SELECT') return;
 
-    const catData = categorizedItems[currentCategory];
-    if (!catData || catData.items.length === 0) return;
+    var totalPages = Math.ceil(fullLines.length / pageSize) || 1;
 
     switch (event.key) {
       case 'ArrowUp':
+      case 'p':
+      case 'P':
         event.preventDefault();
-        if (selectedCardIndex > 0) {
-          selectedCardIndex--;
-          highlightSelectedCard();
-        }
+        navigateToPrevItem();
         break;
 
       case 'ArrowDown':
+      case 'n':
+      case 'N':
         event.preventDefault();
-        if (selectedCardIndex < catData.items.length - 1) {
-          selectedCardIndex++;
-          highlightSelectedCard();
-        }
+        navigateToNextItem();
         break;
 
       case 'Enter':
         event.preventDefault();
-        if (selectedCardIndex >= 0 && selectedCardIndex < catData.items.length) {
-          const item = catData.items[selectedCardIndex];
-          if (item.status === 'pending') {
-            approveReviewItem(item.id);
-          }
-        }
+        approveCurrentItem();
         break;
 
       case 'Escape':
         event.preventDefault();
-        if (selectedCardIndex >= 0 && selectedCardIndex < catData.items.length) {
-          const item = catData.items[selectedCardIndex];
-          if (item.status === 'pending') {
-            rejectReviewItem(item.id);
-          }
+        if (isBatchVisible) {
+          showMainReview();
+        } else {
+          rejectCurrentItem();
         }
+        break;
+
+      case 'PageUp':
+        event.preventDefault();
+        goToPage(currentPage - 1);
+        break;
+
+      case 'PageDown':
+        event.preventDefault();
+        goToPage(currentPage + 1);
+        break;
+
+      case 'Home':
+        event.preventDefault();
+        goToPage(1);
+        break;
+
+      case 'End':
+        event.preventDefault();
+        goToPage(totalPages);
         break;
 
       case '+':
@@ -819,51 +626,73 @@ const ReviewModule = (function() {
     }
   }
 
-  // ---------------------------------------------------------------
-  // 内联编辑
-  // ---------------------------------------------------------------
-  function toggleEditInline(itemId) {
-    const container = document.getElementById('edit-inline-' + itemId);
-    if (!container) return;
-    const isHidden = container.style.display === 'none';
-    // 隐藏所有编辑区
-    document.querySelectorAll('.diff-edit-inline').forEach(el => {
-      el.style.display = 'none';
-    });
-    container.style.display = isHidden ? 'block' : 'none';
-  }
-
-  function saveInlineEdit(itemId) {
-    const textarea = document.getElementById('edit-textarea-' + itemId);
-    if (!textarea) return;
-    const editedText = textarea.value.trim();
-    if (!editedText) {
-      showFeedback('请输入编辑后的文本', 'error');
-      return;
-    }
-
-    AppConfig.apiRequest(`/files/${currentFileMd5}/edit`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ itemId: itemId, editedText: editedText })
-    })
-      .then((data) => {
-        if (data.success) {
-          showFeedback('已保存编辑', 'success');
-          loadReviewItems();
+  function navigateToPrevItem() {
+    for (var i = selectedItemIndex - 1; i >= 0; i--) {
+      var lineNum = i + 1;
+      if (lineGroups[lineNum] && lineGroups[lineNum].length > 0) {
+        var startLine = (currentPage - 1) * pageSize;
+        if (i < startLine) {
+          currentPage--;
+          selectedItemIndex = i;
+          renderCurrentPage();
         } else {
-          showFeedback(data.message || '编辑失败', 'error');
+          selectedItemIndex = i;
+          highlightSelectedItem();
         }
-      })
-      .catch((err) => {
-        showFeedback('编辑失败: ' + err.message, 'error');
-      });
+        return;
+      }
+    }
   }
 
-  function cancelInlineEdit(itemId) {
-    const container = document.getElementById('edit-inline-' + itemId);
-    if (container) {
-      container.style.display = 'none';
+  function navigateToNextItem() {
+    for (var i = selectedItemIndex + 1; i < fullLines.length; i++) {
+      var lineNum = i + 1;
+      if (lineGroups[lineNum] && lineGroups[lineNum].length > 0) {
+        var endLine = currentPage * pageSize;
+        if (i >= endLine) {
+          currentPage++;
+          selectedItemIndex = i;
+          renderCurrentPage();
+        } else {
+          selectedItemIndex = i;
+          highlightSelectedItem();
+        }
+        return;
+      }
+    }
+  }
+
+  function approveCurrentItem() {
+    if (selectedItemIndex < 0) return;
+    var lineNum = selectedItemIndex + 1;
+    var items = lineGroups[lineNum];
+    if (!items) return;
+
+    var pendingItems = items.filter(function(item) { return item.status === 'pending'; });
+    if (pendingItems.length === 0) return;
+
+    if (pendingItems.length === 1) {
+      approveReviewItem(pendingItems[0].id);
+    } else {
+      var ids = pendingItems.map(function(i) { return i.id; });
+      batchApproveGroup(ids);
+    }
+  }
+
+  function rejectCurrentItem() {
+    if (selectedItemIndex < 0) return;
+    var lineNum = selectedItemIndex + 1;
+    var items = lineGroups[lineNum];
+    if (!items) return;
+
+    var pendingItems = items.filter(function(item) { return item.status === 'pending'; });
+    if (pendingItems.length === 0) return;
+
+    if (pendingItems.length === 1) {
+      rejectReviewItem(pendingItems[0].id);
+    } else {
+      var ids = pendingItems.map(function(i) { return i.id; });
+      batchRejectGroup(ids);
     }
   }
 
@@ -872,51 +701,51 @@ const ReviewModule = (function() {
   // ---------------------------------------------------------------
   function approveReviewItem(itemId) {
     if (!currentFileMd5) return;
-    AppConfig.apiRequest(`/files/${currentFileMd5}/approve`, {
+    AppConfig.apiRequest('/files/' + currentFileMd5 + '/approve', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ itemId: itemId })
     })
-      .then((data) => {
+      .then(function(data) {
         if (data.success) {
-          showFeedback('\u2713 已采纳修改建议', 'success');
+          showFeedback('✓ 已采纳修改建议', 'success');
           loadReviewItems();
         } else {
           showFeedback(data.message || '操作失败', 'error');
         }
       })
-      .catch((err) => {
+      .catch(function(err) {
         showFeedback('操作失败: ' + err.message, 'error');
       });
   }
 
   function rejectReviewItem(itemId) {
     if (!currentFileMd5) return;
-    AppConfig.apiRequest(`/files/${currentFileMd5}/reject`, {
+    AppConfig.apiRequest('/files/' + currentFileMd5 + '/reject', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ itemId: itemId })
     })
-      .then((data) => {
+      .then(function(data) {
         if (data.success) {
-          showFeedback('\u2717 已拒绝修改建议', 'success');
+          showFeedback('✗ 已拒绝修改建议', 'success');
           loadReviewItems();
         } else {
           showFeedback(data.message || '操作失败', 'error');
         }
       })
-      .catch((err) => {
+      .catch(function(err) {
         showFeedback('操作失败: ' + err.message, 'error');
       });
   }
 
   function restoreReviewItem(itemId) {
-    AppConfig.apiRequest(`/files/${currentFileMd5}/restore`, {
+    AppConfig.apiRequest('/files/' + currentFileMd5 + '/restore', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ itemId: itemId })
     })
-      .then((data) => {
+      .then(function(data) {
         if (data.success) {
           showFeedback('已恢复原文', 'success');
           loadReviewItems();
@@ -924,50 +753,50 @@ const ReviewModule = (function() {
           showFeedback(data.message || '恢复失败', 'error');
         }
       })
-      .catch((err) => {
+      .catch(function(err) {
         showFeedback('恢复失败: ' + err.message, 'error');
       });
   }
 
   // ---------------------------------------------------------------
-  // 组批量操作
+  // 批量操作
   // ---------------------------------------------------------------
   function batchApproveGroup(itemIds) {
     if (!currentFileMd5 || !itemIds.length) return;
-    AppConfig.apiRequest(`/files/${currentFileMd5}/batch-approve`, {
+    AppConfig.apiRequest('/files/' + currentFileMd5 + '/batch-approve', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ itemIds: itemIds })
     })
-      .then((data) => {
+      .then(function(data) {
         if (data.success) {
-          showFeedback('\u2713 已采纳 ' + itemIds.length + ' 项修改', 'success');
+          showFeedback('✓ 已采纳 ' + itemIds.length + ' 项修改', 'success');
           loadReviewItems();
         } else {
           showFeedback(data.message || '批量操作失败', 'error');
         }
       })
-      .catch((err) => {
+      .catch(function(err) {
         showFeedback('批量操作失败: ' + err.message, 'error');
       });
   }
 
   function batchRejectGroup(itemIds) {
     if (!currentFileMd5 || !itemIds.length) return;
-    AppConfig.apiRequest(`/files/${currentFileMd5}/batch-reject`, {
+    AppConfig.apiRequest('/files/' + currentFileMd5 + '/batch-reject', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ itemIds: itemIds })
     })
-      .then((data) => {
+      .then(function(data) {
         if (data.success) {
-          showFeedback('\u2717 已拒绝 ' + itemIds.length + ' 项修改', 'success');
+          showFeedback('✗ 已拒绝 ' + itemIds.length + ' 项修改', 'success');
           loadReviewItems();
         } else {
           showFeedback(data.message || '批量操作失败', 'error');
         }
       })
-      .catch((err) => {
+      .catch(function(err) {
         showFeedback('批量操作失败: ' + err.message, 'error');
       });
   }
@@ -977,50 +806,50 @@ const ReviewModule = (function() {
   // ---------------------------------------------------------------
   function batchApproveAll() {
     if (!currentFileMd5) return;
-    const pendingIds = reviewItems.filter(item => item.status === 'pending').map(item => item.id);
+    var pendingIds = reviewItems.filter(function(item) { return item.status === 'pending'; }).map(function(item) { return item.id; });
     if (pendingIds.length === 0) {
       showFeedback('没有待审核项', 'info');
       return;
     }
-    AppConfig.apiRequest(`/files/${currentFileMd5}/batch-approve`, {
+    AppConfig.apiRequest('/files/' + currentFileMd5 + '/batch-approve', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ itemIds: pendingIds })
     })
-      .then((data) => {
+      .then(function(data) {
         if (data.success) {
-          showFeedback('\u2713 已通过所有待审核项 (' + pendingIds.length + ')', 'success');
+          showFeedback('✓ 已通过所有待审核项 (' + pendingIds.length + ')', 'success');
           loadReviewItems();
         } else {
           showFeedback(data.message || '操作失败', 'error');
         }
       })
-      .catch((err) => {
+      .catch(function(err) {
         showFeedback('批量操作失败: ' + err.message, 'error');
       });
   }
 
   function batchRejectAll() {
     if (!currentFileMd5) return;
-    const pendingIds = reviewItems.filter(item => item.status === 'pending').map(item => item.id);
+    var pendingIds = reviewItems.filter(function(item) { return item.status === 'pending'; }).map(function(item) { return item.id; });
     if (pendingIds.length === 0) {
       showFeedback('没有待审核项', 'info');
       return;
     }
-    AppConfig.apiRequest(`/files/${currentFileMd5}/batch-reject`, {
+    AppConfig.apiRequest('/files/' + currentFileMd5 + '/batch-reject', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ itemIds: pendingIds })
     })
-      .then((data) => {
+      .then(function(data) {
         if (data.success) {
-          showFeedback('\u2717 已拒绝所有待审核项 (' + pendingIds.length + ')', 'success');
+          showFeedback('✗ 已拒绝所有待审核项 (' + pendingIds.length + ')', 'success');
           loadReviewItems();
         } else {
           showFeedback(data.message || '操作失败', 'error');
         }
       })
-      .catch((err) => {
+      .catch(function(err) {
         showFeedback('批量操作失败: ' + err.message, 'error');
       });
   }
@@ -1030,10 +859,10 @@ const ReviewModule = (function() {
   // ---------------------------------------------------------------
   function finalizeFile() {
     if (!currentFileMd5) return;
-    AppConfig.apiRequest(`/files/${currentFileMd5}/finalize`, {
+    AppConfig.apiRequest('/files/' + currentFileMd5 + '/finalize', {
       method: 'POST'
     })
-      .then((data) => {
+      .then(function(data) {
         if (data.success) {
           showFeedback('文件处理完成', 'success');
           FileManager.showSection('completed');
@@ -1041,7 +870,7 @@ const ReviewModule = (function() {
           showFeedback(data.message || '完成处理失败', 'error');
         }
       })
-      .catch((err) => {
+      .catch(function(err) {
         showFeedback('完成处理失败: ' + err.message, 'error');
       });
   }
@@ -1050,11 +879,11 @@ const ReviewModule = (function() {
   // 进度更新
   // ---------------------------------------------------------------
   function updateReviewProgress() {
-    const total = reviewItems.length;
-    const pending = reviewItems.filter(item => item.status === 'pending').length;
-    const processed = total - pending;
-    const progressText = document.getElementById('review-progress-text');
-    const finalizeBtn = document.getElementById('finalize-btn');
+    var total = reviewItems.length;
+    var pending = reviewItems.filter(function(item) { return item.status === 'pending'; }).length;
+    var processed = total - pending;
+    var progressText = document.getElementById('review-progress-text');
+    var finalizeBtn = document.getElementById('finalize-btn');
 
     if (progressText) {
       DomUtils.setTextContent(progressText, processed + '/' + total);
@@ -1063,13 +892,122 @@ const ReviewModule = (function() {
     if (finalizeBtn) {
       finalizeBtn.style.display = pending === 0 && total > 0 ? 'inline-block' : 'none';
     }
+
+    // 更新分类标签
+    var categoryEl = document.getElementById('review-current-category');
+    if (categoryEl) {
+      var statusText = getFilterValue() === 'pending' ? '待审核' : '全部';
+      var reviewLineCount = Object.keys(lineGroups).length;
+      DomUtils.setTextContent(categoryEl, statusText + ' (' + reviewLineCount + '行 / ' + filteredItems.length + '项)');
+    }
+  }
+
+  // ---------------------------------------------------------------
+  // 批量审核页面
+  // ---------------------------------------------------------------
+  function showBatchReview(group) {
+    currentBatchGroup = group;
+    var reviewSection = document.getElementById('review-section');
+    var batchSection = document.getElementById('batch-review-section');
+    if (reviewSection) reviewSection.style.display = 'none';
+    if (batchSection) batchSection.style.display = 'block';
+
+    renderBatchReviewPage(group);
+  }
+
+  function showMainReview() {
+    currentBatchGroup = null;
+    var reviewSection = document.getElementById('review-section');
+    var batchSection = document.getElementById('batch-review-section');
+    if (batchSection) batchSection.style.display = 'none';
+    if (reviewSection) reviewSection.style.display = 'block';
+  }
+
+  function renderBatchReviewPage(group) {
+    var container = document.getElementById('batch-review-container');
+    if (!container) return;
+    container.innerHTML = '';
+
+    // 标题
+    var titleEl = document.getElementById('batch-review-title');
+    if (titleEl) {
+      var displayOrig = group.original.length > 40 ? group.original.slice(0, 40) + '…' : group.original;
+      var displaySugg = group.suggested.length > 40 ? group.suggested.slice(0, 40) + '…' : group.suggested;
+      DomUtils.setTextContent(titleEl, '"' + displayOrig + '" → "' + displaySugg + '"');
+    }
+
+    // 计数
+    var countEl = document.getElementById('batch-review-count');
+    if (countEl) {
+      var pendingCount = group.items.filter(function(i) { return i.status === 'pending'; }).length;
+      DomUtils.setTextContent(countEl, '共 ' + group.items.length + ' 项 (待审核 ' + pendingCount + '项)');
+    }
+
+    // 渲染每个项
+    group.items.forEach(function(item) {
+      var itemEl = DomUtils.createElement('div', { className: 'batch-group-item' });
+
+      // 上下文
+      var contextEl = DomUtils.createElement('div', { className: 'batch-item-context' });
+      var lineNum = item.lineNum ? '行 ' + item.lineNum + ': ' : '';
+      var context = (item.prevLines && item.prevLines[0]) || '';
+      DomUtils.setTextContent(contextEl, lineNum + context);
+      itemEl.appendChild(contextEl);
+
+      // 操作按钮
+      var actionsEl = DomUtils.createElement('div', { className: 'batch-item-actions' });
+
+      if (item.status === 'pending') {
+        var approveBtn = DomUtils.createElement('button', {
+          className: 'btn-sm btn-primary',
+          onclick: function() {
+            approveReviewItem(item.id);
+            var updatedItems = group.items.filter(function(i) { return i.id !== item.id; });
+            if (updatedItems.length === 0) {
+              showMainReview();
+            } else {
+              group.items = updatedItems;
+              renderBatchReviewPage(group);
+            }
+          }
+        });
+        DomUtils.setTextContent(approveBtn, '✓ 同意');
+        actionsEl.appendChild(approveBtn);
+
+        var rejectBtn = DomUtils.createElement('button', {
+          className: 'btn-sm',
+          onclick: function() {
+            rejectReviewItem(item.id);
+            var updatedItems = group.items.filter(function(i) { return i.id !== item.id; });
+            if (updatedItems.length === 0) {
+              showMainReview();
+            } else {
+              group.items = updatedItems;
+              renderBatchReviewPage(group);
+            }
+          }
+        });
+        DomUtils.setTextContent(rejectBtn, '✗ 拒绝');
+        actionsEl.appendChild(rejectBtn);
+      } else {
+        var statusSpan = DomUtils.createElement('span', {
+          className: 'btn-sm',
+          style: 'opacity: 0.5;'
+        });
+        DomUtils.setTextContent(statusSpan, getReviewStatusText(item.status));
+        actionsEl.appendChild(statusSpan);
+      }
+
+      itemEl.appendChild(actionsEl);
+      container.appendChild(itemEl);
+    });
   }
 
   // ---------------------------------------------------------------
   // 类型/状态文本
   // ---------------------------------------------------------------
   function getModificationTypeText(type) {
-    const map = {
+    var map = {
       typo: '错别字',
       typo_correction: '错别字修正',
       duplicate_paragraph: '重复段落',
@@ -1091,7 +1029,7 @@ const ReviewModule = (function() {
   }
 
   function getReviewStatusText(status) {
-    const map = {
+    var map = {
       pending: '待审核',
       approved: '已通过',
       rejected: '已拒绝',
@@ -1101,15 +1039,15 @@ const ReviewModule = (function() {
   }
 
   // ---------------------------------------------------------------
-  // Toast
+  // 工具函数
   // ---------------------------------------------------------------
   function showFeedback(message, type) {
-    const fb = document.getElementById('feedback');
+    var fb = document.getElementById('feedback');
     if (!fb) return;
     fb.textContent = message;
     fb.className = 'feedback ' + (type || 'success');
     fb.style.display = 'block';
-    setTimeout(() => {
+    setTimeout(function() {
       fb.style.display = 'none';
     }, 3000);
   }
@@ -1123,19 +1061,18 @@ const ReviewModule = (function() {
     approveReviewItem: approveReviewItem,
     rejectReviewItem: rejectReviewItem,
     editReviewItem: function(itemId) {
-      // Fallback prompt-based edit
-      const item = reviewItems.find(i => i.id === itemId);
+      var item = reviewItems.find(function(i) { return i.id === itemId; });
       if (!item) return;
-      const editDefault = item.suggested || item.suggestedText ||
+      var editDefault = item.suggested || item.suggestedText ||
         item.original || item.originalText || '';
-      const editedText = prompt('请输入编辑后的文本:', editDefault);
+      var editedText = prompt('请输入编辑后的文本:', editDefault);
       if (editedText === null) return;
-      AppConfig.apiRequest(`/files/${currentFileMd5}/edit`, {
+      AppConfig.apiRequest('/files/' + currentFileMd5 + '/edit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ itemId: itemId, editedText: editedText })
       })
-        .then((data) => {
+        .then(function(data) {
           if (data.success) {
             showFeedback('已保存编辑', 'success');
             loadReviewItems();
@@ -1143,7 +1080,7 @@ const ReviewModule = (function() {
             showFeedback(data.message || '编辑失败', 'error');
           }
         })
-        .catch((err) => {
+        .catch(function(err) {
           showFeedback('编辑失败: ' + err.message, 'error');
         });
     },
