@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   湮文 VoidText — PowerShell 管理脚本
 .DESCRIPTION

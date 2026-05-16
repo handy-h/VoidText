@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>湮文 VoidText</title>
     <link rel="stylesheet" href="/static/css/style.css?v=8" />
+    <link rel="stylesheet" href="/static/css/theme.css?v=1" />
+    <link rel="stylesheet" href="/static/css/reader-controls.css?v=1" />
   </head>
   <body>
     <!-- 主应用界面 -->
@@ -347,6 +349,7 @@
                   <span class="font-scale-value" id="font-scale-value">13px</span>
                   <button class="btn-font-scale" id="font-scale-up" title="放大字体 (Ctrl++)">A+</button>
                 </div>
+                <button class="btn-reader-settings" id="btn-reader-settings" title="阅读设置">⚙ 阅读设置</button>
                 <button class="btn-secondary btn-sm" id="batch-approve-all-btn" title="全部通过">✓ 全部通过</button>
                 <button class="btn-secondary btn-sm" id="batch-reject-all-btn" title="全部拒绝">✗ 全部拒绝</button>
                 <span class="keyboard-hint">
@@ -354,13 +357,59 @@
                   <kbd>Enter</kbd> 保留 <kbd>Esc</kbd> 撤销
                   <kbd>PgUp</kbd><kbd>PgDn</kbd> 翻页
                 </span>
-              </div>
-            </div>
 
-            <!-- 审核内容区域 -->
-            <div class="review-content-area" id="review-content-area">
-              <div class="review-page-container" id="review-page-container">
-                <!-- 动态生成：审核行 -->
+                <!-- 阅读设置面板（浮动下拉） -->
+                <div id="reader-settings-panel" class="reader-settings-panel hidden">
+                  <div class="reader-settings-title">阅读设置</div>
+
+                  <!-- 主题 -->
+                  <div class="reader-settings-section">
+                    <div class="reader-settings-section-label">主题</div>
+                    <div class="theme-grid" id="theme-grid">
+                      <!-- 由 ThemeModule.renderThemeButtons() 动态生成 -->
+                    </div>
+                  </div>
+
+                  <!-- 字体 -->
+                  <div class="reader-settings-section">
+                    <div class="reader-settings-section-label">字体</div>
+                    <div class="font-select-row">
+                      <select id="font-family-select" class="font-select">
+                        <!-- 由 ReaderSettingsModule.renderFontOptions() 动态生成 -->
+                      </select>
+                      <button class="btn-add-font" id="btn-add-font" title="添加自定义字体">+ 字体</button>
+                    </div>
+                    <div class="custom-font-list" id="custom-font-list">
+                      <!-- 由 ReaderSettingsModule.renderCustomFontList() 动态生成 -->
+                    </div>
+                  </div>
+
+                  <!-- 间距 -->
+                  <div class="reader-settings-section">
+                    <div class="reader-settings-section-label">间距</div>
+                    <div class="spacing-row">
+                      <span class="spacing-label">字间距</span>
+                      <input type="range" class="spacing-slider" id="letter-spacing-slider"
+                        min="0" max="0.3" step="0.02" value="0" />
+                      <span class="spacing-value" id="letter-spacing-value">0em</span>
+                    </div>
+                    <div class="spacing-row">
+                      <span class="spacing-label">行间距</span>
+                      <input type="range" class="spacing-slider" id="line-height-slider"
+                        min="1.4" max="2.8" step="0.1" value="1.8" />
+                      <span class="spacing-value" id="line-height-value">1.8</span>
+                    </div>
+                    <div class="spacing-row">
+                      <span class="spacing-label">段间距</span>
+                      <input type="range" class="spacing-slider" id="paragraph-gap-slider"
+                        min="0.2" max="3.0" step="0.2" value="1.0" />
+                      <span class="spacing-value" id="paragraph-gap-value">1.0em</span>
+                    </div>
+                  </div>
+
+                  <div class="reader-settings-divider"></div>
+                  <button class="btn-reset-settings" id="btn-reset-settings">恢复默认设置</button>
+                </div>
               </div>
             </div>
 
@@ -426,10 +475,81 @@
       <!-- Toast 反馈 -->
       <div id="feedback" class="feedback" style="display: none"></div>
     </div>
+
+    <!-- 自定义主题编辑器（模态框） -->
+    <div id="theme-editor-overlay" class="theme-editor-overlay hidden">
+      <div class="theme-editor">
+        <div class="theme-editor-header">
+          <span class="theme-editor-title">自定义主题</span>
+          <button class="theme-editor-close" id="theme-editor-close">✕</button>
+        </div>
+        <div class="theme-editor-body">
+          <!-- 主题名称 -->
+          <div class="theme-name-input-group">
+            <label for="theme-editor-name">主题名称</label>
+            <input type="text" class="theme-name-input" id="theme-editor-name"
+              placeholder="请输入主题名..." maxlength="20" />
+          </div>
+          <!-- 左右分栏 -->
+          <div class="theme-editor-columns">
+            <div class="theme-editor-left">
+              <div class="reader-settings-section-label">颜色配置</div>
+              <div class="color-config-list" id="color-config-list">
+                <!-- 由 ThemeModule.renderColorConfigList() 动态生成 -->
+              </div>
+            </div>
+            <div class="theme-editor-right">
+              <div class="reader-settings-section-label">预览</div>
+              <div class="theme-preview-box" id="theme-preview-box">
+                <div class="theme-preview-title">这是一段主体文字</div>
+                <div class="theme-preview-body">效果展示在这里，预览区域实时反映当前配色。</div>
+                <div class="theme-preview-separator"></div>
+                <div class="theme-preview-muted">弱化文字效果展示</div>
+                <div class="theme-preview-accent">高亮效果</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="theme-editor-footer">
+          <button class="btn-secondary" id="theme-editor-cancel">取消</button>
+          <button class="btn-primary" id="theme-editor-save">保存并应用</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 添加自定义字体对话框 -->
+    <div id="add-font-overlay" class="theme-editor-overlay hidden">
+      <div class="theme-editor" style="width:420px;">
+        <div class="theme-editor-header">
+          <span class="theme-editor-title">添加自定义字体</span>
+          <button class="theme-editor-close" id="add-font-close-btn">✕</button>
+        </div>
+        <div class="theme-editor-body">
+          <div class="font-url-input-group">
+            <label for="add-font-name">字体名称</label>
+            <input type="text" class="font-url-input" id="add-font-name"
+              placeholder="例如: MyFont" maxlength="30" />
+          </div>
+          <div class="font-url-input-group">
+            <label for="add-font-url">字体文件 URL</label>
+            <input type="text" class="font-url-input" id="add-font-url"
+              placeholder="https://example.com/font.woff2" />
+            <div class="font-url-hint">仅支持 woff2/woff/ttf 格式</div>
+            <div class="font-url-error" id="add-font-error"></div>
+          </div>
+        </div>
+        <div class="theme-editor-footer">
+          <button class="btn-secondary" id="add-font-cancel">取消</button>
+          <button class="btn-primary" id="add-font-save">添加字体</button>
+        </div>
+      </div>
+    </div>
     <script src="/static/js/config.js?v=5"></script>
     <script src="/static/js/dom-utils.js?v=5"></script>
     <script src="/static/js/diff-utils.js?v=5"></script>
     <!-- 模块化JS文件 -->
+    <script src="/static/js/modules/theme.js?v=1"></script>
+    <script src="/static/js/modules/reader-settings.js?v=1"></script>
     <script src="/static/js/modules/review.js?v=5"></script>
     <script src="/static/js/modules/file-manager.js?v=5"></script>
     <script src="/static/js/modules/processing.js?v=5"></script>

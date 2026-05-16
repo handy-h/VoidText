@@ -50,6 +50,11 @@ Thumbs.db
 # Data directories
 data/
 
+# Custom fonts (user-uploaded)
+web/frontend/static/fonts/custom/*.woff2
+web/frontend/static/fonts/custom/*.woff
+web/frontend/static/fonts/custom/*.ttf
+
 # Build artifacts
 build/
 

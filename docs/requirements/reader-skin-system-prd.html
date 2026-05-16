@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>阅读器皮肤系统 PRD - VoidText</title>
+    <style>
+        body { font-family: -apple-system, "Noto Sans SC", sans-serif; max-width: 960px; margin: 40px auto; padding: 0 24px; line-height: 1.8; color: #333; }
+        h1 { color: #1a1a2e; border-bottom: 2px solid #00d4aa; padding-bottom: 10px; font-size: 28px; }
+        h2 { color: #2a2a3a; margin-top: 48px; border-left: 4px solid #00d4aa; padding-left: 12px; }
+        h3 { color: #4a4a5a; margin-top: 28px; }
+        h4 { color: #5a5a6a; }
+        .meta { color: #666; font-size: 14px; margin-bottom: 32px; padding: 12px 16px; background: #f8f9fa; border-radius: 8px; }
+        .meta strong { color: #333; }
+        .spec { background: #f8f9fa; border-left: 4px solid #00d4aa; padding: 16px 20px; margin: 16px 0; border-radius: 0 8px 8px 0; }
+        .spec-title { font-weight: 600; color: #00a884; margin-bottom: 8px; font-size: 15px; }
+        code { background: #e8e8f0; padding: 2px 6px; border-radius: 4px; font-family: "JetBrains Mono", "Fira Code", monospace; font-size: 0.9em; }
+        .tag { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+        .tag-p0 { background: #ff4757; color: #fff; }
+        .tag-p1 { background: #ffa502; color: #fff; }
+        .color-demo { display: inline-block; width: 20px; height: 20px; vertical-align: middle; margin-right: 6px; border-radius: 3px; border: 1px solid #ccc; }
+        table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14px; }
+        th, td { border: 1px solid #ddd; padding: 10px 14px; text-align: left; }
+        th { background: #f0f0f5; font-weight: 600; white-space: nowrap; }
+        tr:nth-child(even) { background: #fafafa; }
+        tr:hover { background: #f0f8f5; }
+        ul, ol { padding-left: 24px; }
+        li { margin: 6px 0; }
+        .mock { font-family: "JetBrains Mono", monospace; background: #1a1a2e; color: #e8e8f0; padding: 20px; border-radius: 8px; white-space: pre; overflow-x: auto; font-size: 13px; line-height: 1.6; }
+        .mock .accent { color: #00d4aa; }
+        .mock .dim { color: #606070; }
+        .mock .line { color: #a0a0b0; }
+        .mock .border-dash { color: #3a3a5a; }
+        .ui-panel { font-family: "JetBrains Mono", monospace; background: #0a0a0f; color: #e8e8f0; padding: 20px; border-radius: 8px; white-space: pre; overflow-x: auto; font-size: 13px; line-height: 1.5; }
+        .ui-panel .border { color: #3a3a5a; }
+        .ui-panel .highlight { color: #00d4aa; font-weight: 600; }
+        .ui-panel .muted { color: #606070; }
+        .ui-panel .selected { color: #00d4aa; }
+        .flow { background: #0a0a0f; padding: 20px; border-radius: 8px; color: #e8e8f0; font-family: "JetBrains Mono", monospace; font-size: 13px; line-height: 1.6; white-space: pre; overflow-x: auto; }
+        .flow .arrow { color: #00d4aa; }
+        .flow .active { color: #00d4aa; font-weight: 600; }
+        .flow .dim { color: #606070; }
+    </style>
+</head>
+<body>
+
+<h1>阅读器皮肤系统 PRD</h1>
+<div class="meta">
+    <strong>项目</strong>: VoidText（湮文） — 中文小说 TXT 清洗工具<br>
+    <strong>版本</strong>: v1.0 | <strong>状态</strong>: 待实施 | <strong>优先级</strong>: P0（一次性全部实施）<br>
+    <strong>更新日期</strong>: 2026-05-16 | <strong>涉及模块</strong>: 审核界面（review-section）
+</div>
+
+<h2>1. 背景与目标</h2>
+
+<h3>1.1 背景</h3>
+<p>VoidText 作为中文小说 TXT 清洗工具，用户在处理完成后需要在审核界面逐行审查修改建议。当前审核界面仅有单一的深色主题（寂灭风），长时间使用容易造成视觉疲劳，且缺乏个性化调节能力。</p>
+
+<h3>1.2 目标</h3>
+<p>为审核界面（文件查看/审查）增加类似小说网页阅读器的皮肤系统，内置多套护眼主题，同时提供用户自定义主题、字体选择、阅读间距调节等能力，提升长时间审核的视觉舒适度。</p>
+
+<h3>1.3 用户故事</h3>
+<table>
+    <thead>
+        <tr><th>ID</th><th>用户故事</th><th>优先级</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>US-01</td><td>作为审核员，我希望切换不同的护眼主题，以缓解长时间审核的视觉疲劳</td><td><span class="tag tag-p0">P0</span></td></tr>
+        <tr><td>US-02</td><td>作为审核员，我希望自定义主题颜色并实时预览效果，打造个人偏好的阅读环境</td><td><span class="tag tag-p0">P0</span></td></tr>
+        <tr><td>US-03</td><td>作为审核员，我希望调整字体和间距，找到最舒适的排版</td><td><span class="tag tag-p0">P0</span></td></tr>
+        <tr><td>US-04</td><td>作为审核员，我希望设置后自动保存，下次打开无需重新配置</td><td><span class="tag tag-p0">P0</span></td></tr>
+    </tbody>
+</table>
+
+<h2>2. 功能清单</h2>
+<table>
+    <thead>
+        <tr><th>ID</th><th>功能模块</th><th>优先级</th><th>说明</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>F-01</td><td>内置主题切换</td><td><span class="tag tag-p0">P0</span></td><td>5 套护眼主题一键切换</td></tr>
+        <tr><td>F-02</td><td>自定义主题编辑器</td><td><span class="tag tag-p0">P0</span></td><td>用户填入 hex 代码，实时预览效果</td></tr>
+        <tr><td>F-03</td><td>自定义主题管理</td><td><span class="tag tag-p0">P0</span></td><td>创建、保存、应用、删除自定义主题</td></tr>
+        <tr><td>F-04</td><td>字体选择</td><td><span class="tag tag-p0">P0</span></td><td>系统字体 + 项目内嵌开源字体</td></tr>
+        <tr><td>F-05</td><td>自定义字体</td><td><span class="tag tag-p1">P1</span></td><td>通过 URL 添加自定义字体</td></tr>
+        <tr><td>F-06</td><td>字间距调节</td><td><span class="tag tag-p0">P0</span></td><td>滑块调节，实时生效</td></tr>
+        <tr><td>F-07</td><td>行间距调节</td><td><span class="tag tag-p0">P0</span></td><td>滑块调节，实时生效</td></tr>
+        <tr><td>F-08</td><td>段间距调节</td><td><span class="tag tag-p0">P0</span></td><td>滑块调节，实时生效</td></tr>
+        <tr><td>F-09</td><td>设置持久化</td><td><span class="tag tag-p0">P0</span></td><td>全部设置自动存储到 localStorage</td></tr>
+        <tr><td>F-10</td><td>设置重置</td><td><span class="tag tag-p1">P1</span></td><td>一键恢复默认设置</td></tr>
+    </tbody>
+</table>
+
+<h2>3. 内置主题设计</h2>
+
+<h3>3.1 CSS 变量体系</h3>
+<p>每个主题定义以下 8 个 CSS 变量，覆盖审核界面的全部色彩层：</p>
+
+<div class="spec">
+    <div class="spec-title">变量命名规范（kebab-case）</div>
+    <ul>
+        <li><code>--bg-primary</code> — 主背景色（页面最底层）</li>
+        <li><code>--bg-secondary</code> — 次要背景色（工具栏/面板区域）</li>
+        <li><code>--bg-card</code> — 卡片底色（浮动面板/模态框内部）</li>
+        <li><code>--border-color</code> — 边框/分割线色</li>
+        <li><code>--text-primary</code> — 主文字色（正文核心文字）</li>
+        <li><code>--text-secondary</code> — 次要文字色（行号、辅助信息）</li>
+        <li><code>--text-muted</code> — 弱化文字色（占位符、禁用状态）</li>
+        <li><code>--accent</code> — 强调/高亮色（按钮、链接、活跃状态）</li>
+    </ul>
+</div>
+
+<h3>3.2 五套内置主题色板</h3>
+<table>
+    <thead>
+        <tr>
+            <th>CSS 变量</th>
+            <th>含义</th>
+            <th>dark<br>（寂灭黑）</th>
+            <th>paper<br>（羊皮纸）</th>
+            <th>green<br>（绿豆沙）</th>
+            <th>night-blue<br>（深夜蓝）</th>
+            <th>warm<br>（暖黄灯）</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>--bg-primary</code></td>
+            <td>主背景色</td>
+            <td><span class="color-demo" style="background:#0a0a0f"></span>#0a0a0f</td>
+            <td><span class="color-demo" style="background:#f5f0e8"></span>#f5f0e8</td>
+            <td><span class="color-demo" style="background:#c7edcc"></span>#c7edcc</td>
+            <td><span class="color-demo" style="background:#0d1b2a"></span>#0d1b2a</td>
+            <td><span class="color-demo" style="background:#faf0e0"></span>#faf0e0</td>
+        </tr>
+        <tr>
+            <td><code>--bg-secondary</code></td>
+            <td>次要背景色</td>
+            <td><span class="color-demo" style="background:#12121a"></span>#12121a</td>
+            <td><span class="color-demo" style="background:#e8e0d0"></span>#e8e0d0</td>
+            <td><span class="color-demo" style="background:#b8e6be"></span>#b8e6be</td>
+            <td><span class="color-demo" style="background:#1b2a3a"></span>#1b2a3a</td>
+            <td><span class="color-demo" style="background:#f0e6d0"></span>#f0e6d0</td>
+        </tr>
+        <tr>
+            <td><code>--bg-card</code></td>
+            <td>卡片底色</td>
+            <td><span class="color-demo" style="background:#1a1a24"></span>#1a1a24</td>
+            <td><span class="color-demo" style="background:#ffffff"></span>#ffffff</td>
+            <td><span class="color-demo" style="background:#d4f0d8"></span>#d4f0d8</td>
+            <td><span class="color-demo" style="background:#243447"></span>#243447</td>
+            <td><span class="color-demo" style="background:#ffffff"></span>#ffffff</td>
+        </tr>
+        <tr>
+            <td><code>--border-color</code></td>
+            <td>边框色</td>
+            <td><span class="color-demo" style="background:#2a2a3a"></span>#2a2a3a</td>
+            <td><span class="color-demo" style="background:#d0c8b8"></span>#d0c8b8</td>
+            <td><span class="color-demo" style="background:#a8d8ad"></span>#a8d8ad</td>
+            <td><span class="color-demo" style="background:#3a4a5a"></span>#3a4a5a</td>
+            <td><span class="color-demo" style="background:#e0d0b0"></span>#e0d0b0</td>
+        </tr>
+        <tr>
+            <td><code>--text-primary</code></td>
+            <td>主文字色</td>
+            <td><span class="color-demo" style="background:#e8e8f0"></span>#e8e8f0</td>
+            <td><span class="color-demo" style="background:#3a3028"></span>#3a3028</td>
+            <td><span class="color-demo" style="background:#1a3a1e"></span>#1a3a1e</td>
+            <td><span class="color-demo" style="background:#c8d8e8"></span>#c8d8e8</td>
+            <td><span class="color-demo" style="background:#3a2a1a"></span>#3a2a1a</td>
+        </tr>
+        <tr>
+            <td><code>--text-secondary</code></td>
+            <td>次要文字色</td>
+            <td><span class="color-demo" style="background:#a0a0b0"></span>#a0a0b0</td>
+            <td><span class="color-demo" style="background:#6a6050"></span>#6a6050</td>
+            <td><span class="color-demo" style="background:#2d5a32"></span>#2d5a32</td>
+            <td><span class="color-demo" style="background:#a0b0c0"></span>#a0b0c0</td>
+            <td><span class="color-demo" style="background:#6a5a4a"></span>#6a5a4a</td>
+        </tr>
+        <tr>
+            <td><code>--text-muted</code></td>
+            <td>弱化文字色</td>
+            <td><span class="color-demo" style="background:#606070"></span>#606070</td>
+            <td><span class="color-demo" style="background:#9a9080"></span>#9a9080</td>
+            <td><span class="color-demo" style="background:#5a8a5e"></span>#5a8a5e</td>
+            <td><span class="color-demo" style="background:#708090"></span>#708090</td>
+            <td><span class="color-demo" style="background:#9a8a7a"></span>#9a8a7a</td>
+        </tr>
+        <tr>
+            <td><code>--accent</code></td>
+            <td>强调/高亮色</td>
+            <td><span class="color-demo" style="background:#00d4aa"></span>#00d4aa</td>
+            <td><span class="color-demo" style="background:#8b6914"></span>#8b6914</td>
+            <td><span class="color-demo" style="background:#2d8a42"></span>#2d8a42</td>
+            <td><span class="color-demo" style="background:#4a9eff"></span>#4a9eff</td>
+            <td><span class="color-demo" style="background:#c07830"></span>#c07830</td>
+        </tr>
+    </tbody>
+</table>
+
+<h3>3.3 主题切换机制</h3>
+<div class="spec">
+    <div class="spec-title">CSS 属性选择器切换</div>
+    <p>在 <code>&lt;html&gt;</code> 元素上设置 <code>data-theme="主题名"</code>，CSS 通过属性选择器自动匹配对应的变量集合。</p>
+</div>
+<p>示例：</p>
+<pre><code>/* theme.css */
+:root, [data-theme="dark"] { --bg-primary: #0a0a0f; /* ... */ }
+[data-theme="paper"] { --bg-primary: #f5f0e8; /* ... */ }
+[data-theme="green"] { --bg-primary: #c7edcc; /* ... */ }
+[data-theme="night-blue"] { --bg-primary: #0d1b2a; /* ... */ }
+[data-theme="warm"] { --bg-primary: #faf0e0; /* ... */ }
+
+/* 自定义主题通过 data-theme="custom-{name}" + 行内 CSS 变量 */
+[data-theme^="custom-"] { /* 由 JS 设置具体值 */ }
+</code></pre>
+
+<h2>4. 自定义主题系统</h2>
+
+<h3>4.1 数据结构</h3>
+<div class="spec">
+    <div class="spec-title">localStorage 存储格式</div>
+    <pre><code>// 自定义主题名称列表
+// key: voidtext-custom-theme-list
+['我的护眼主题', '阅读舒适']
+
+// 单个自定义主题
+// key: voidtext-custom-theme-{主题名}
+{
+  name: '我的护眼主题',
+  createdAt: 1715875200000,
+  vars: {
+    'bg-primary': '#f5f0e8',
+    'bg-secondary': '#e8e0d0',
+    'bg-card': '#ffffff',
+    'border-color': '#d0c8b8',
+    'text-primary': '#3a3028',
+    'text-secondary': '#6a6050',
+    'text-muted': '#9a9080',
+    'accent': '#8b6914'
+  }
+}</code></pre>
+</div>
+
+<h3>4.2 自定义主题编辑器 UI</h3>
+<p>参考 Rime-See-Me 风格设计，采用 <strong>左右分栏布局</strong>：</p>
+<ul>
+    <li><strong>左栏</strong>：颜色配置区，每项包含色块指示器 + 中文标签 + hex 输入框</li>
+    <li><strong>右栏</strong>：实时预览区，展示不同层级的文字效果</li>
+</ul>
+
+<div class="ui-panel">┌─ 自定义主题 ──────────────────────────────────────┐
+│                                                       │
+│  主题名称  [ 我的护眼主题              ]              │
+│                                                       │
+│  ┌─ 颜色配置 ──────────┐  ┌─ 预览 ─────────────────┐ │
+│  │ ■ 主背景色           │  │                         │ │
+│  │   #f5f0e8           │  │  这是一段主体文字       │ │
+│  │ ■ 次要背景色         │  │  效果展示在这里         │ │
+│  │   #e8e0d0           │  │  ——— 分割线 ———         │ │
+│  │ ■ 卡片底色           │  │  次要文字效果展示        │ │
+│  │   #ffffff           │  │  弱化文字效果展示        │ │
+│  │ ■ 边框色             │  │  █ 高亮效果展示 █      │ │
+│  │   #d0c8b8           │  └──────────────────────────┘ │
+│  │ ■ 主文字色           │                              │
+│  │   #3a3028           │                              │
+│  │ ■ 次要文字色         │                              │
+│  │   #6a6050           │                              │
+│  │ ■ 弱化文字色         │                              │
+│  │   #9a9080           │                              │
+│  │ ■ 强调/高亮色        │                              │
+│  │   #8b6914           │                              │
+│  └──────────────────────┘                              │
+│                                                       │
+│  [ × 取消 ]                [ ✓ 保存并应用 ]          │
+└───────────────────────────────────────────────────────┘</div>
+
+<h3>4.3 交互细节</h3>
+<ol>
+    <li><strong>色块指示器</strong>：每个颜色项左侧的色块背景色随用户输入即时变化</li>
+    <li><strong>自动补全</strong>：输入 <code>fff</code> 自动补全为 <code>#fff</code>，或自动补全为完整 6 位 hex</li>
+    <li><strong>格式校验</strong>：仅允许 <code>0-9a-fA-F</code> 字符，无效值时输入框边框变红并显示提示</li>
+    <li><strong>实时预览</strong>：右侧预览区即时反映当前输入的配色，展示主体/次要/弱化/高亮四个层级</li>
+    <li><strong>保存与关闭</strong>：点击"保存并应用"后将主题写入 localStorage 并关闭编辑器</li>
+</ol>
+
+<h3>4.4 自定义主题管理</h3>
+<ul>
+    <li>用户可创建 <strong>多个</strong> 自定义主题</li>
+    <li>自定义主题在主题选择区以独立按钮展示，与内置主题并列</li>
+    <li>每个自定义主题按钮旁有 <code>✕</code> 删除按钮（删除前二次确认）</li>
+    <li>删除后若当前正在使用该主题，自动回退到默认主题（寂灭黑）</li>
+    <li>自定义主题支持重命名（点击名称后进入编辑状态）</li>
+</ul>
+
+<h2>5. 字体系统</h2>
+
+<h3>5.1 字体来源分层</h3>
+<table>
+    <thead>
+        <tr><th>层级</th><th>来源</th><th>选项</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>第一层</td><td>系统字体</td><td>默认无衬体、宋体、黑体、楷体、等线</td></tr>
+        <tr><td>第二层</td><td>项目内嵌字体（fonts/）</td><td>霞鹜文楷（LXGW WenKai）</td></tr>
+        <tr><td>第三层</td><td>用户自定义字体 URL</td><td>通过 FontFace API 动态加载 woff2 字体</td></tr>
+    </tbody>
+</table>
+
+<h3>5.2 字体选项列表</h3>
+<table>
+    <thead>
+        <tr><th>显示名称</th><th>font-family 值</th><th>来源</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>默认无衬线</td><td><code>"Inter", "Noto Sans SC", sans-serif</code></td><td>系统</td></tr>
+        <tr><td>宋体</td><td><code>"Noto Serif SC", "Source Han Serif SC", serif</code></td><td>系统</td></tr>
+        <tr><td>黑体</td><td><code>"Noto Sans SC", "Microsoft YaHei", "SimHei", sans-serif</code></td><td>系统</td></tr>
+        <tr><td>楷体</td><td><code>"KaiTi", "STKaiti", "AR PL UKai CN", serif</code></td><td>系统</td></tr>
+        <tr><td>等线</td><td><code>"DengXian", "Microsoft YaHei Mono", sans-serif</code></td><td>系统</td></tr>
+        <tr><td>霞鹜文楷</td><td><code>"LXGW WenKai", "KaiTi", serif</code></td><td>内嵌 woff2</td></tr>
+    </tbody>
+</table>
+
+<h3>5.3 fonts/ 目录结构</h3>
+<pre><code>web/frontend/fonts/
+├── README.md                   # 字体目录说明
+├── lxgwwenkai/
+│   └── lxgw-wenkai-regular.woff2   # 约 2MB，SIL OFL 1.1 许可证
+└── custom/                     # 用户放置自定义字体（gitignored）
+    └── (空)</code></pre>
+
+<h3>5.4 字体加载方式</h3>
+<div class="spec">
+    <div class="spec-title">CSS @font-face 声明（theme.css）</div>
+    <pre><code>@font-face {
+  font-family: 'LXGW WenKai';
+  src: url('/static/fonts/lxgwwenkai/lxgw-wenkai-regular.woff2') format('woff2');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}</code></pre>
+</div>
+
+<h3>5.5 自定义字体（F-05）</h3>
+<ul>
+    <li>用户输入字体 URL（必须为 woff2 格式）</li>
+    <li>使用 <code>new FontFace()</code> API 动态加载并注册到 <code>document.fonts</code></li>
+    <li>加载成功后自动加入字体选择下拉列表</li>
+    <li>加载失败时显示错误提示，不影响现有字体选择</li>
+    <li>支持删除已添加的自定义字体条目</li>
+    <li>自定义字体 URL 列表存储于 localStorage（key: <code>voidtext-custom-font-urls</code>）</li>
+</ul>
+
+<h2>6. 阅读间距调节</h2>
+
+<h3>6.1 调节参数</h3>
+<table>
+    <thead>
+        <tr><th>参数</th><th>CSS 属性</th><th>滑块范围</th><th>步长</th><th>默认值</th><th>显示单位</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>字间距</td><td><code>letter-spacing</code></td><td>0 ~ 0.3em</td><td>0.02em</td><td>0</td><td>em</td></tr>
+        <tr><td>行间距</td><td><code>line-height</code></td><td>1.4 ~ 2.8</td><td>0.1</td><td>1.8</td><td>—</td></tr>
+        <tr><td>段间距</td><td><code>p + p { margin-top }</code></td><td>0.2em ~ 3.0em</td><td>0.2em</td><td>1.0em</td><td>em</td></tr>
+    </tbody>
+</table>
+
+<h3>6.2 实现方式</h3>
+<p>通过 CSS 变量 + JavaScript 实时控制：</p>
+<pre><code>/* 在 style.css 中 */
+.review-line-content {
+  letter-spacing: var(--reader-letter-spacing, 0);
+  line-height: var(--reader-line-height, 1.8);
+}
+.reader-paragraph + .reader-paragraph {
+  margin-top: var(--reader-paragraph-gap, 1em);
+}</code></pre>
+
+<h3>6.3 交互细节</h3>
+<ul>
+    <li>使用 <code>&lt;input type="range"&gt;</code> 滑块控件</li>
+    <li>滑块右侧同步显示当前数值（带单位）</li>
+    <li>拖动滑块时通过 <code>style.setProperty()</code> 即时更新 CSS 变量，实时生效</li>
+    <li>松开滑块后自动保存到 localStorage</li>
+</ul>
+
+<h2>7. UI/UX 设计</h2>
+
+<h3>7.1 入口位置</h3>
+<p>在审核界面的 <strong>顶部工具栏右侧</strong>，与字体缩放控件并列：</p>
+<div class="mock">
+<span class="dim">┌─ 工具栏 ──────────────────────────────────────────────────┐</span>
+ 审核进度: 12/50                                     第 3/20 页  [−] [100%] [+]  <span class="accent">[⚙ 阅读设置]</span>
+<span class="dim">└────────────────────────────────────────────────────────────┘</span></div>
+
+<h3>7.2 阅读设置面板</h3>
+<p>点击 <code>⚙</code> 按钮 → 弹出下拉面板（<code>position: absolute</code>，<code>z-index</code> 高于审核内容）：</p>
+
+<div class="ui-panel">┌─ ⚙ 阅读设置 ─────────────────────────────────┐
+<span class="border">│                                                │</span>
+  主题                                           
+<span class="border">│</span>  ┌────────────────────────────────────────┐   <span class="border">│</span>
+<span class="border">│</span>  <span class="selected">[●]</span> 寂灭黑  [○] 羊皮纸  [○] 绿豆沙        <span class="border">│</span>
+<span class="border">│</span>  [○] 深夜蓝  [○] 暖黄灯  [○] 我的主题     <span class="border">│</span>
+<span class="border">│</span>                          <span class="highlight">[+ 自定义]</span>  <span class="border">│</span>
+<span class="border">│</span>  └────────────────────────────────────────┘   <span class="border">│</span>
+<span class="border">│                                                │</span>
+  字体                                           
+<span class="border">│</span>  [ 默认无衬线            ▼ ]  [➕ 添加自定义字体] <span class="border">│</span>
+<span class="border">│                                                │</span>
+  间距                                           
+<span class="border">│</span>  字间距  [────<span class="highlight">●</span>────] 0.04em                     <span class="border">│</span>
+<span class="border">│</span>  行间距  [───<span class="highlight">●</span>─────] 1.8                        <span class="border">│</span>
+<span class="border">│</span>  段间距  [────<span class="highlight">●</span>────] 1.0em                      <span class="border">│</span>
+<span class="border">│                                                │</span>
+  <span class="muted">─────────────────────────────────────────</span>     
+<span class="border">│</span>  [ 🔄 恢复默认设置 ]                           <span class="border">│</span>
+└─────────────────────────────────────────────────┘</div>
+
+<h3>7.3 面板交互行为</h3>
+<ul>
+    <li><strong>宽度</strong>：320px</li>
+    <li><strong>背景色</strong>：跟随当前主题的 <code>--bg-card</code> 变量</li>
+    <li><strong>关闭方式</strong>：点击面板外部区域 或 按 <code>Esc</code> 键</li>
+    <li><strong>实时生效</strong>：面板内所有操作（主题切换、字体选择、间距拖动）即时反映到审核内容</li>
+    <li><strong>自动保存</strong>：任何变更自动写入 localStorage，刷新后保持</li>
+</ul>
+
+<h2>8. 设置持久化</h2>
+
+<h3>8.1 localStorage 键名规范</h3>
+<table>
+    <thead>
+        <tr><th>localStorage Key</th><th>类型</th><th>存储内容</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><code>voidtext-theme</code></td><td>string</td><td>当前主题名（如 <code>dark</code>、<code>paper</code>、<code>custom-我的主题</code>）</td></tr>
+        <tr><td><code>voidtext-custom-theme-list</code></td><td>JSON array</td><td>自定义主题名称列表（如 <code>["我的主题","阅读舒适"]</code>）</td></tr>
+        <tr><td><code>voidtext-custom-theme-{name}</code></td><td>JSON object</td><td>单个自定义主题的变量集合 + 元数据</td></tr>
+        <tr><td><code>voidtext-font-family</code></td><td>string</td><td>当前字体名（如 <code>默认无衬线</code>、<code>霞鹜文楷</code>）</td></tr>
+        <tr><td><code>voidtext-custom-font-urls</code></td><td>JSON array</td><td>用户自定义字体 URL 列表</td></tr>
+        <tr><td><code>voidtext-reader-letter-spacing</code></td><td>string</td><td>字间距值（如 <code>"0.04"</code>）</td></tr>
+        <tr><td><code>voidtext-reader-line-height</code></td><td>string</td><td>行间距值（如 <code>"1.8"</code>）</td></tr>
+        <tr><td><code>voidtext-reader-paragraph-gap</code></td><td>string</td><td>段间距值（如 <code>"1.0"</code>）</td></tr>
+    </tbody>
+</table>
+
+<h3>8.2 生效时机</h3>
+<ul>
+    <li><strong>页面加载时</strong>：从 localStorage 读取全部设置并应用</li>
+    <li><strong>变更时</strong>：每次设置变更即时写入 localStorage</li>
+    <li><strong>重置时</strong>：清除所有 <code>voidtext-*</code> 键，回退到初始状态</li>
+</ul>
+
+<h2>9. 恢复默认设置</h2>
+<div class="spec">
+    <div class="spec-title">功能说明</div>
+    <ul>
+        <li>阅读设置面板底部提供 <strong>"恢复默认设置"</strong> 按钮</li>
+        <li>点击后弹出二次确认对话框</li>
+        <li>确认后清除所有 <code>voidtext-*</code> 相关的 localStorage 记录（不含其他应用数据）</li>
+        <li>自动回退到：默认主题（寂灭黑）+ 默认字体（默认无衬线）+ 默认间距（字间距 0、行间距 1.8、段间距 1.0em）</li>
+    </ul>
+</div>
+
+<h2>10. 架构设计</h2>
+
+<h3>10.1 模块架构</h3>
+<table>
+    <thead>
+        <tr><th>层</th><th>模块/文件</th><th>职责</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>视图层</td><td><code>index.html</code></td><td>工具栏按钮 + 阅读设置面板 HTML + 自定义主题编辑器模态框 HTML</td></tr>
+        <tr><td>逻辑层</td><td><code>theme.js</code></td><td>ThemeModule：内置/自定义主题切换、创建/应用/删除</td></tr>
+        <tr><td>逻辑层</td><td><code>reader-settings.js</code></td><td>ReaderSettingsModule：字体选择、自定义字体、间距调节、重置</td></tr>
+        <tr><td>样式层</td><td><code>theme.css</code></td><td>5 套内置主题 CSS 变量 + @font-face + 自定义主题样式</td></tr>
+        <tr><td>样式层</td><td><code>reader-controls.css</code></td><td>阅读设置面板 + 自定义主题编辑器样式</td></tr>
+        <tr><td>样式层</td><td><code>style.css</code></td><td>审核内容区域改为 CSS 变量引用（少量修改）</td></tr>
+        <tr><td>存储层</td><td><code>localStorage</code></td><td>主题、字体、间距等设置持久化</td></tr>
+        <tr><td>资源层</td><td><code>fonts/</code></td><td>霞鹜文楷 woff2 字体文件</td></tr>
+    </tbody>
+</table>
+
+<h3>10.2 架构流程图</h3>
+<div class="flow">
+<span class="dim">┌───────────┐    ┌──────────────┐    ┌──────────────┐</span>
+<span class="dim">│</span> 工具栏按钮  │───▶│ 阅读设置面板  │───▶│  ThemeModule  │
+<span class="dim">│</span> (⚙ 点击)   │    │ (浮动下拉)    │    │  (theme.js)   │
+<span class="dim">└───────────┘    └──────────────┘    └──────┬───────┘</span>
+<span class="dim">                                            │</span>
+                    ┌─────────────────────────┤
+                    │                         │
+                    ▼                         ▼
+            ┌──────────────┐         ┌──────────────┐
+            │  ReaderSet-   │         │  localStorage │
+            │  tingsModule  │         │  (持久化)     │
+            │(reader-set-   │         └──────────────┘
+            │  tings.js)    │
+            └──────┬───────┘
+                   │
+         ┌─────────┼──────────────┐
+         │         │              │
+         ▼         ▼              ▼
+   ┌─────────┐ ┌──────┐    ┌──────────┐
+   │ theme.css │style.css│   │ fonts/    │
+   │ (CSS变量) │(文字样式)│  │ (字体文件) │
+   └───────────┘ └──────┘    └──────────┘</div>
+
+<h2>11. 文件变更清单</h2>
+
+<h3>11.1 新增文件</h3>
+<table>
+    <thead>
+        <tr><th>#</th><th>文件路径</th><th>类型</th><th>说明</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>1</td><td><code>web/frontend/static/fonts/README.md</code></td><td>文档</td><td>字体目录说明，指导用户如何添加自定义字体</td></tr>
+        <tr><td>2</td><td><code>web/frontend/static/fonts/lxgwwenkai/lxgw-wenkai-regular.woff2</code></td><td>字体</td><td>霞鹜文楷字体（woff2 格式）</td></tr>
+        <tr><td>3</td><td><code>web/frontend/static/css/theme.css</code></td><td>CSS</td><td>5 套内置主题变量 + @font-face 声明 + 自定义主题样式</td></tr>
+        <tr><td>4</td><td><code>web/frontend/static/css/reader-controls.css</code></td><td>CSS</td><td>阅读设置面板和自定义主题编辑器样式</td></tr>
+        <tr><td>5</td><td><code>web/frontend/static/js/modules/theme.js</code></td><td>JS</td><td>ThemeModule：主题管理模块</td></tr>
+        <tr><td>6</td><td><code>web/frontend/static/js/modules/reader-settings.js</code></td><td>JS</td><td>ReaderSettingsModule：阅读设置模块（字体、间距）</td></tr>
+    </tbody>
+</table>
+
+<h3>11.2 修改文件</h3>
+<table>
+    <thead>
+        <tr><th>#</th><th>文件路径</th><th>变更内容</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>1</td><td><code>web/frontend/index.html</code></td><td>① 工具栏添加 ⚙ 阅读设置按钮；② 添加阅读设置面板 HTML；③ 添加自定义主题编辑器模态框 HTML；④ 引入 theme.css、reader-controls.css、theme.js、reader-settings.js</td></tr>
+        <tr><td>2</td><td><code>web/frontend/static/css/style.css</code></td><td>审核内容区域的硬编码颜色改为 <code>var(--text-primary)</code> 等 CSS 变量引用</td></tr>
+        <tr><td>3</td><td><code>web/frontend/static/js/modules/app.js</code></td><td>初始化 ThemeModule 和 ReaderSettingsModule</td></tr>
+        <tr><td>4</td><td><code>web/frontend/static/js/main.js</code></td><td>添加主题/阅读设置相关的全局桥接方法（如供 html onclick 调用）</td></tr>
+    </tbody>
+</table>
+
+<h2>12. 验收标准</h2>
+<table>
+    <thead>
+        <tr><th>ID</th><th>验收条件</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>AC-01</td><td>5 套内置主题可正常切换，切换后审核界面所有颜色同步更新</td></tr>
+        <tr><td>AC-02</td><td>点击自定义主题后弹出编辑器，左右分栏布局正常</td></tr>
+        <tr><td>AC-03</td><td>输入非 hex 值时显示错误提示，合法 hex 值输入后左侧色块即时更新</td></tr>
+        <tr><td>AC-04</td><td>右侧预览区域随用户输入实时刷新配色</td></tr>
+        <tr><td>AC-05</td><td>自定义主题可保存并在主题列表中显示</td></tr>
+        <tr><td>AC-06</td><td>自定义主题可删除，删除后从列表消失，若正在使用回退到默认主题</td></tr>
+        <tr><td>AC-07</td><td>6 种字体选项均可正常切换生效</td></tr>
+        <tr><td>AC-08</td><td>三轴间距滑块拖动时文本样式即时变化</td></tr>
+        <tr><td>AC-09</td><td>刷新页面后所有设置保持上一次的选择</td></tr>
+        <tr><td>AC-10</td><td>点击"恢复默认"后清除所有自定义设置，回退到初始状态</td></tr>
+        <tr><td>AC-11</td><td>页面 &lt; 768px 时阅读设置面板自适应布局</td></tr>
+        <tr><td>AC-12</td><td>自定义字体 URL 加载成功后可正常使用，加载失败有错误提示</td></tr>
+    </tbody>
+</table>
+
+<h2>13. 注意事项</h2>
+<ol>
+    <li><strong>字体许可证</strong>：霞鹜文楷为 SIL Open Font License 1.1，可在项目中免费分发和使用</li>
+    <li><strong>CSS 变量兼容性</strong>：目标浏览器均支持 CSS 自定义属性，无需 polyfill</li>
+    <li><strong>性能</strong>：阅读设置面板采用 CSS 变量更新，不会触发重排，性能开销可忽略</li>
+    <li><strong>无障碍</strong>：颜色输入框应提供 label 关联，颜色变更时不影响语义结构</li>
+    <li><strong>字体文件大小</strong>：霞鹜文楷 woff2 约 2MB，首次加载后浏览器会缓存，建议在加载时显示加载状态</li>
+    <li><strong>冲突处理</strong>：<code>voidtext-*</code> 的 localStorage key 应避免与项目中其他模块冲突</li>
+    <li><strong>自定义主题名称</strong>：不允许与内置主题同名，不允许为空，长度限制 20 字符</li>
+</ol>
+
+</body>
+</html>

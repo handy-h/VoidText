@@ -1829,6 +1829,7 @@ section h2::after {
   display: flex;
   align-items: center;
   gap: 12px;
+  position: relative;
 }
 
 .toolbar-right select {
@@ -2296,7 +2297,6 @@ section h2::after {
   border-radius: 3px;
   padding: 1px 3px;
 }
-}
 
 .diff-view-container .diff-context-line.context-hidden {
   display: none;
@@ -2435,7 +2435,7 @@ section h2::after {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: rgba(10, 10, 15, 0.85);
+  background: var(--loading-overlay-bg, rgba(10, 10, 15, 0.85));
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   z-index: 100;

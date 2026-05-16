@@ -4,6 +4,10 @@ const AppModule = (function() {
   async function init() {
     console.log('初始化应用模块...');
 
+    // 初始化阅读器皮肤系统
+    ThemeModule.init();
+    ReaderSettingsModule.init();
+
     // 初始化所有模块
     FileManager.init();
     ProcessingModule.init();
