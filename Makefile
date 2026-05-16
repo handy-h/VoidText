@@ -1,4 +1,6 @@
-.PHONY: build dev run clean rebuild help
+.PHONY: build dev run stop clean rebuild run-background help
+
+.NOTPARALLEL:
 
 BINARY_NAME = voidtext
 MAIN_PACKAGE = ./cmd/voidtext/
@@ -14,7 +16,7 @@ build:
 	@go mod verify
 	@echo ""
 	@echo "[2/2] 编译二进制文件..."
-	go build -ldflags="-s -w" -o $(BINARY_NAME) $(MAIN_PACKAGE)
+	go build -ldflags "-s -w" -o $(BINARY_NAME) $(MAIN_PACKAGE)
 	@echo ""
 	@echo "========================================"
 	@echo "  ✓ 编译成功"
@@ -61,32 +63,68 @@ endif
 	@echo "  • 数据目录: DATA_DIR（默认 ./data）"
 	@echo "  • 后台运行示例: nohup ./$(BINARY_NAME) > /dev/null 2>&1 &"
 	@echo ""
-	@echo "  访问地址: http://localhost:$${PORT:-8080}"
+	@echo "  访问地址: http://localhost:$(or $(PORT),8080)"
 	@echo "========================================"
 	@echo ""
 	./$(BINARY_NAME)
 
-## clean   : 结束进程并删除编译产物
-clean:
+## stop    : 停止运行中的进程
+stop:
 	@echo "========================================"
-	@echo "  湮文 VoidText — 清理"
+	@echo "  湮文 VoidText — 停止进程"
 	@echo "========================================"
 	@echo ""
-	@echo "[1/2] 停止 $(BINARY_NAME) 进程..."
-	@-pkill "$(BINARY_NAME)" 2>/dev/null && echo "  ✓ 已停止" || echo "  - 未发现运行中的进程"
+	@-pkill "$(BINARY_NAME)" 2>/dev/null && echo "  ✓ 已停止进程" || echo "  - 未发现运行中的进程"
 	@echo ""
-	@echo "[2/2] 删除编译产物..."
+
+## clean   : 删除编译产物（保留数据库、上传文件、备份等数据）
+clean: stop
+	@echo "========================================"
+	@echo "  湮文 VoidText — 清理编译产物"
+	@echo "========================================"
+	@echo ""
 	@rm -f $(BINARY_NAME)
 	@echo "  ✓ 已删除: ./$(BINARY_NAME)"
 	@echo ""
 	@echo "========================================"
 	@echo "  ✓ 清理完毕"
 	@echo "  已删除: 编译产物"
-	@echo "  保留: 源代码、配置文件 (.env)、数据目录 (data/)、git 记录"
+	@echo "  保留: 源代码、配置文件 (.env)、数据目录 (data/):"
+	@echo "    • 数据库 (cleaning.db)"
+	@echo "    • 上传文件 (uploads/)"
+	@echo "    • 备份文件 (backups/)"
+	@echo "    • 临时文件 (temp/)"
 	@echo "========================================"
 
-## rebuild : 清理后重新编译 (clean + build)
-rebuild: clean build
+## rebuild : 停止进程 → 删除编译产物 → 重新编译 (stop + clean + build)
+.PHONY: rebuild
+rebuild:
+	@$(MAKE) stop
+	@$(MAKE) clean
+	@$(MAKE) build
+
+## run-background : 后台运行（不阻塞终端，日志写入文件）
+run-background:
+	@echo "========================================"
+	@echo "  湮文 VoidText — 后台模式启动"
+	@echo "========================================"
+	@echo ""
+ifneq ($(wildcard $(BINARY_NAME)),)
+	@echo "  ✓ 检测到编译产物: ./$(BINARY_NAME)"
+else
+	@echo "  ✗ 未检测到编译产物，请先执行 make build"
+	@echo ""
+	@false
+endif
+	@echo "  启动说明:"
+	@echo "  • 配置文件: .env（从工作目录加载）"
+	@echo "  • 数据目录: DATA_DIR（默认 ./data）"
+	@echo "  • 日志: 重定向到 /dev/null"
+	@echo ""
+	@nohup ./$(BINARY_NAME) > /dev/null 2>&1 & echo "  ✓ 已后台启动" && echo "  进程 PID: $$!" && echo "  访问地址: http://localhost:$(or $(PORT),8080)"
+	@echo "  停止方式: make stop"
+	@echo "========================================"
+	@echo ""
 
 ## help    : 显示帮助信息
 help:
@@ -105,10 +143,14 @@ help:
 	@echo "  make run      生产环境运行"
 	@echo "               运行已编译的 ./$(BINARY_NAME) 二进制文件"
 	@echo ""
-	@echo "  make clean    结束进程 + 删除编译产物"
-	@echo "               不影响 data/ 数据目录"
+	@echo "  make stop     停止运行中的进程 (pkill)"
 	@echo ""
-	@echo "  make rebuild  清理后重新编译 (clean + build)"
+	@echo "  make clean    删除编译产物"
+	@echo "               保留 数据库、上传文件、备份等数据"
+	@echo ""
+	@echo "  make rebuild  停止 + 清理 + 重新编译"
+	@echo ""
+	@echo "  make run-background  后台运行（不阻塞终端）"
 	@echo ""
 	@echo "  make help     显示此帮助"
 	@echo ""
