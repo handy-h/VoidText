@@ -4,6 +4,7 @@ import (
 	"strings"
 	"unicode"
 
+	"voidtext/internal/logging"
 	"voidtext/internal/processor/preprocess"
 )
 
@@ -48,7 +49,14 @@ func (nf *NewlineFixer) Fix(content string) NewlineFixResult {
 	}
 
 	// 检测是否需要修复换行符
-	if !nf.needsNewlineFix(content) {
+	needFix := nf.needsNewlineFix(content)
+	logging.Info("newline_fix_detect", map[string]interface{}{
+		"content_len":     len(content),
+		"rune_count":      len([]rune(content)),
+		"newline_count":   strings.Count(content, "\n"),
+		"needs_fix":       needFix,
+	})
+	if !needFix {
 		result.Stats["skipped"] = 1
 		return result
 	}
@@ -111,6 +119,13 @@ func (nf *NewlineFixer) fixMissingNewlines(result NewlineFixResult) NewlineFixRe
 
 	// 合并段落
 	newContent := strings.Join(paragraphs, "\n\n")
+
+	logging.Info("newline_fix_split", map[string]interface{}{
+		"paragraph_count":   len(paragraphs),
+		"newline_count_new": strings.Count(newContent, "\n"),
+		"newline_count_old": strings.Count(content, "\n"),
+		"content_changed":   newContent != content,
+	})
 
 	// 记录变更
 	if newContent != content {
@@ -238,6 +253,16 @@ func (nf *NewlineFixer) findChapterTitleEnd(runes []rune, start int) int {
 	return end
 }
 
+// skipSpaces 跳过空格，返回下一个非空格字符的位置
+func skipSpaces(runes []rune, pos int) int {
+	for i := pos; i < len(runes); i++ {
+		if runes[i] != ' ' && runes[i] != '\t' {
+			return i
+		}
+	}
+	return len(runes)
+}
+
 // isParagraphBreak 检查指定位置是否是段落分割点
 func (nf *NewlineFixer) isParagraphBreak(runes []rune, pos int) bool {
 	if pos >= len(runes) {
@@ -248,18 +273,22 @@ func (nf *NewlineFixer) isParagraphBreak(runes []rune, pos int) bool {
 
 	// 规则1：句子结束标点（句号、感叹号、问号）
 	if char == '。' || char == '！' || char == '？' {
-		// 检查后面是否是引号闭合
-		if pos+1 < len(runes) {
-			nextChar := runes[pos+1]
+		// 跳过空格，检查后面是否是引号闭合
+		nextPos := skipSpaces(runes, pos+1)
+		if nextPos < len(runes) {
+			nextChar := runes[nextPos]
 			if nextChar == '」' || nextChar == '』' || nextChar == '"' || nextChar == '\'' {
 				// 引号闭合后，检查是否是段落结束
-				if pos+2 < len(runes) {
-					nextNextChar := runes[pos+2]
-					// 如果后面是另一个引号开始或章节标记，或者是文本结尾
-					if nextNextChar == '「' || nextNextChar == '『' || nextNextChar == '"' || nextNextChar == '\'' ||
-						nf.isChapterTitle(runes, pos+2) || pos+2 >= len(runes)-1 {
+				afterQuote := skipSpaces(runes, nextPos+1)
+				if afterQuote < len(runes) {
+					afterChar := runes[afterQuote]
+					// 如果后面是另一个引号开始或章节标记
+					if afterChar == '「' || afterChar == '『' || afterChar == '"' || afterChar == '\'' ||
+						nf.isChapterTitle(runes, afterQuote) {
 						return true
 					}
+				} else {
+					return true // 引号闭合后文本结束
 				}
 			}
 		}
@@ -271,18 +300,15 @@ func (nf *NewlineFixer) isParagraphBreak(runes []rune, pos int) bool {
 		if pos > 0 {
 			prevChar := runes[pos-1]
 			if prevChar == '。' || prevChar == '！' || prevChar == '？' || prevChar == '…' {
-				// 检查后面是否是新段落的开始
-				if pos+1 < len(runes) {
-					nextChar := runes[pos+1]
-					// 如果后面是空格、换行、或新句子的开始
-					if nextChar == ' ' || nextChar == '\n' || unicode.Is(unicode.Han, nextChar) {
-						// 进一步判断是否是段落结束
-						// 如果后面是对话开始（引号），则可能是同一段对话
-						if nextChar == '「' || nextChar == '『' || nextChar == '"' || nextChar == '\'' {
-							return false // 对话继续，不分段
-						}
-						return true
+				// 跳过空格，检查后面是否是新段落的开始
+				nextPos := skipSpaces(runes, pos+1)
+				if nextPos < len(runes) {
+					nextChar := runes[nextPos]
+					// 如果后面是引号开始，则可能是同一段对话，不分段
+					if nextChar == '「' || nextChar == '『' || nextChar == '"' || nextChar == '\'' {
+						return false
 					}
+					return true
 				}
 			}
 		}
@@ -290,7 +316,6 @@ func (nf *NewlineFixer) isParagraphBreak(runes []rune, pos int) bool {
 
 	// 规则3：连续的省略号后
 	if char == '…' && pos+1 < len(runes) && runes[pos+1] == '…' {
-		// 连续省略号后可能是段落结束
 		if pos+2 < len(runes) && runes[pos+2] == '…' {
 			return true
 		}
@@ -298,33 +323,35 @@ func (nf *NewlineFixer) isParagraphBreak(runes []rune, pos int) bool {
 
 	// 规则4：单独的句号（没有引号闭合的情况）
 	if char == '。' {
-		// 如果后面是文本结尾
-		if pos+1 >= len(runes) {
-			return true
+		// 跳过空格，检查下一个非空格字符
+		nextPos := skipSpaces(runes, pos+1)
+		if nextPos >= len(runes) {
+			return true // 文本结尾
 		}
+		nextChar := runes[nextPos]
 		// 如果后面是中文字符，且不是引号，可能是段落结束
-		if pos+1 < len(runes) {
-			nextChar := runes[pos+1]
-			if unicode.Is(unicode.Han, nextChar) && nextChar != '「' && nextChar != '『' && nextChar != '"' && nextChar != '\'' {
-				// 进一步检查：如果后面是对话开始，可能是同一段
-				if pos+2 < len(runes) {
-					nextNextChar := runes[pos+2]
-					if nextNextChar == '「' || nextNextChar == '『' || nextNextChar == '"' || nextNextChar == '\'' {
-						return false // 对话继续，不分段
-					}
+		if unicode.Is(unicode.Han, nextChar) && nextChar != '「' && nextChar != '『' && nextChar != '"' && nextChar != '\'' {
+			// 进一步检查：如果后面是对话开始，可能是同一段
+			afterNext := skipSpaces(runes, nextPos+1)
+			if afterNext < len(runes) {
+				afterChar := runes[afterNext]
+				if afterChar == '「' || afterChar == '『' || afterChar == '"' || afterChar == '\'' {
+					return false
 				}
-				return true
 			}
+			return true
 		}
 	}
 
-	// 规则5：句号 + 引号闭合 + 文本结尾
-	if char == '。' && pos+1 < len(runes) {
-		nextChar := runes[pos+1]
-		if nextChar == '」' || nextChar == '』' || nextChar == '"' || nextChar == '\'' {
-			// 引号闭合后，检查是否是文本结尾
-			if pos+2 >= len(runes) {
-				return true
+	// 规则5：句号 + 跳过空格 + 引号闭合 + 文本结尾
+	if char == '。' {
+		nextPos := skipSpaces(runes, pos+1)
+		if nextPos < len(runes) {
+			nextChar := runes[nextPos]
+			if nextChar == '」' || nextChar == '』' || nextChar == '"' || nextChar == '\'' {
+				if skipSpaces(runes, nextPos+1) >= len(runes) {
+					return true
+				}
 			}
 		}
 	}

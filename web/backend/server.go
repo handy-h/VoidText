@@ -20,6 +20,9 @@ func NewServer() *gin.Engine {
 	// 添加全局限流中间件
 	r.Use(middleware.RateLimitMiddleware())
 
+	// 开发模式：禁用静态文件缓存
+	r.Use(middleware.NoCache())
+
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"http://localhost:8080", "http://127.0.0.1:8080"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
