@@ -22,7 +22,7 @@ import (
 func UploadFile(c *gin.Context) {
 	f, err := c.FormFile("file")
 	if err != nil {
-		logging.APIError("获取上传文件失败", err, map[string]interface{}{
+		logging.Error("获取上传文件失败", err, map[string]interface{}{
 			"client_ip": c.ClientIP(),
 		})
 		c.JSON(http.StatusBadRequest, errors.NewErrorResponse(
@@ -32,14 +32,14 @@ func UploadFile(c *gin.Context) {
 	}
 
 	// 记录上传文件信息
-	logging.APIInfo("收到文件上传请求", map[string]interface{}{
+	logging.Info("收到文件上传请求", map[string]interface{}{
 		"filename": f.Filename,
 		"size":     f.Size,
 		"client_ip": c.ClientIP(),
 	})
 
 	if f.Size > config.AppConfigInstance.MaxFileSize {
-		logging.APIWarn("文件大小超过限制", map[string]interface{}{
+		logging.Warn("文件大小超过限制", map[string]interface{}{
 			"filename": f.Filename,
 			"size":     f.Size,
 			"max_size": config.AppConfigInstance.MaxFileSize,
@@ -52,7 +52,7 @@ func UploadFile(c *gin.Context) {
 	}
 
 	if strings.ToLower(filepath.Ext(f.Filename)) != ".txt" {
-		logging.APIWarn("不支持的文件类型", map[string]interface{}{
+		logging.Warn("不支持的文件类型", map[string]interface{}{
 			"filename": f.Filename,
 			"extension": filepath.Ext(f.Filename),
 		})
@@ -66,7 +66,7 @@ func UploadFile(c *gin.Context) {
 	tempPath := filepath.Join(config.AppConfigInstance.DataDir, "temp", fmt.Sprintf("%d_%s", time.Now().UnixNano(), f.Filename))
 	err = c.SaveUploadedFile(f, tempPath)
 	if err != nil {
-		logging.APIError("保存上传文件失败", err, map[string]interface{}{
+		logging.Error("保存上传文件失败", err, map[string]interface{}{
 			"filename": f.Filename,
 			"temp_path": tempPath,
 		})
@@ -79,7 +79,7 @@ func UploadFile(c *gin.Context) {
 	fileMd5, err := file.ComputeFileMd5(tempPath)
 	if err != nil {
 		os.Remove(tempPath)
-		logging.APIError("计算文件MD5失败", err, map[string]interface{}{
+		logging.Error("计算文件MD5失败", err, map[string]interface{}{
 			"filename": f.Filename,
 			"temp_path": tempPath,
 		})
@@ -92,7 +92,7 @@ func UploadFile(c *gin.Context) {
 	existingFile, err := database.GetFileByMd5(fileMd5)
 	if err != nil {
 		os.Remove(tempPath)
-		logging.DatabaseError("查询文件记录失败", err, map[string]interface{}{
+		logging.Error("查询文件记录失败", err, map[string]interface{}{
 			"file_md5": fileMd5,
 		})
 		c.JSON(http.StatusInternalServerError, errors.NewErrorResponse(
@@ -205,7 +205,7 @@ func createNewFileRecord(c *gin.Context, tempPath, fileMd5, fileName string, fil
 	finalPath := filepath.Join(config.AppConfigInstance.DataDir, "uploads", fileMd5+"_"+fileName)
 	if err := os.Rename(tempPath, finalPath); err != nil {
 		os.Remove(tempPath)
-		logging.FileError("移动文件失败", err, map[string]interface{}{
+		logging.Error("移动文件失败", err, map[string]interface{}{
 			"temp_path": tempPath,
 			"final_path": finalPath,
 		})
@@ -239,7 +239,7 @@ func createNewFileRecord(c *gin.Context, tempPath, fileMd5, fileName string, fil
 	if err := database.CreateFileWithVersion(record, versionRecord); err != nil {
 		// 如果数据库操作失败，删除已移动的文件
 		os.Remove(finalPath)
-		logging.DatabaseError("创建文件记录失败", err, map[string]interface{}{
+		logging.Error("创建文件记录失败", err, map[string]interface{}{
 			"file_md5": fileMd5,
 			"filename": fileName,
 		})
@@ -249,7 +249,7 @@ func createNewFileRecord(c *gin.Context, tempPath, fileMd5, fileName string, fil
 		return
 	}
 
-	logging.FileInfo("文件上传成功", map[string]interface{}{
+	logging.Info("文件上传成功", map[string]interface{}{
 		"file_md5": fileMd5,
 		"filename": fileName,
 		"file_size": fileSize,

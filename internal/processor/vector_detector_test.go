@@ -174,8 +174,8 @@ func TestGenerateVectors_ShouldReturnCorrectLength(t *testing.T) {
 		t.Errorf("generateVectors() length = %d, want 3", len(vectors))
 	}
 	for _, vec := range vectors {
-		if len(vec) != 3 {
-			t.Errorf("generateVectors() vector length = %d, want 3", len(vec))
+		if len(vec) != 7 {
+			t.Errorf("generateVectors() vector length = %d, want 7", len(vec))
 		}
 	}
 }

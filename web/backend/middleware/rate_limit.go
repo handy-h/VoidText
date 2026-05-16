@@ -166,7 +166,7 @@ func RateLimitMiddleware() gin.HandlerFunc {
 			remaining := limiter.GetRemaining(ip)
 			resetTime := limiter.GetResetTime(ip)
 
-			logging.APIWarn("请求频率超限", map[string]interface{}{
+			logging.Warn("请求频率超限", map[string]interface{}{
 				"client_ip": ip,
 				"path":      c.Request.URL.Path,
 				"method":    c.Request.Method,
@@ -214,7 +214,7 @@ func IPBasedRateLimit(maxRequests int, window time.Duration) gin.HandlerFunc {
 			remaining := limiter.GetRemaining(ip)
 			resetTime := limiter.GetResetTime(ip)
 
-			logging.APIWarn("IP请求频率超限", map[string]interface{}{
+			logging.Warn("IP请求频率超限", map[string]interface{}{
 				"client_ip":    ip,
 				"path":         c.Request.URL.Path,
 				"method":       c.Request.Method,
@@ -265,7 +265,7 @@ func EndpointBasedRateLimit(maxRequests int, window time.Duration) gin.HandlerFu
 			remaining := limiter.GetRemaining(ip)
 			resetTime := limiter.GetResetTime(ip)
 
-			logging.APIWarn("端点请求频率超限", map[string]interface{}{
+			logging.Warn("端点请求频率超限", map[string]interface{}{
 				"client_ip":    ip,
 				"endpoint":     key,
 				"max_requests": maxRequests,

@@ -1,22 +1,10 @@
 package processor
 
 import (
-	"encoding/json"
 	"fmt"
 	"sync"
 	"voidtext/internal/database"
 )
-
-func marshalDetails(details map[string]interface{}) string {
-	if details == nil {
-		return "{}"
-	}
-	data, err := json.Marshal(details)
-	if err != nil {
-		return "{}"
-	}
-	return string(data)
-}
 
 // ProcessingState 处理状态
 type ProcessingState struct {
@@ -161,68 +149,18 @@ func (sm *StateManager) SyncWithDatabase(fileMd5 string) error {
 	return database.UpdateFileStatus(fileMd5, state.Status, state.Step, int(state.Progress), "")
 }
 
-// UpdateFileStatusWithLog 更新文件状态并记录日志（原子操作）
-func UpdateFileStatusWithLog(fileMd5, status, currentStep string, progress int, errorMsg string, logDetails map[string]interface{}) error {
-	return database.UpdateFileStatusWithLog(fileMd5, status, currentStep, progress, errorMsg, logDetails)
-}
-
-// UpdateFileStatusSimple 简化版状态更新（仅更新状态）
-func UpdateFileStatusSimple(fileMd5, status, currentStep string, progress int, errorMsg string) error {
-	return database.UpdateFileStatus(fileMd5, status, currentStep, progress, errorMsg)
-}
-
 // UpdateFileStatusWithStepProgress 更新文件状态和步骤进度
 func UpdateFileStatusWithStepProgress(fileMd5, status, currentStep string, progress int) error {
 	return database.UpdateFileStatus(fileMd5, status, currentStep, progress, "")
 }
 
-// LogProcessingStep 记录处理步骤日志
-func LogProcessingStep(fileMd5, step, action, status string, details map[string]interface{}) error {
-	return database.CreateProcessingLog(&database.ProcessingLogRecord{
-		FileMd5: fileMd5,
-		Step:    step,
-		Action:  action,
-		Details: marshalDetails(details),
-		Status:  status,
-	})
-}
-
-// LogProcessingError 记录处理错误
-func LogProcessingError(fileMd5, step string, err error) error {
-	return database.CreateProcessingLog(&database.ProcessingLogRecord{
-		FileMd5: fileMd5,
-		Step:    step,
-		Action:  "error",
-		Details: marshalDetails(map[string]interface{}{
-			"error": err.Error(),
-		}),
-		Status: "failed",
-	})
-}
-
-// LogProcessingSuccess 记录处理成功
-func LogProcessingSuccess(fileMd5, step string, details map[string]interface{}) error {
-	return database.CreateProcessingLog(&database.ProcessingLogRecord{
-		FileMd5: fileMd5,
-		Step:    step,
-		Action:  "success",
-		Details: marshalDetails(details),
-		Status:  "completed",
-	})
-}
-
-// UpdateStatusAndLog 更新状态并记录日志（原子操作）
-func UpdateStatusAndLog(fileMd5, status, currentStep string, progress int, errorMsg string, logAction string, logDetails map[string]interface{}) error {
-	return database.UpdateFileStatusWithLog(fileMd5, status, currentStep, progress, errorMsg, map[string]interface{}{
-		"action":  logAction,
-		"details": logDetails,
-	})
-}
-
 // StartProcessingStep 开始处理步骤
 func StartProcessingStep(fileMd5, step string) error {
-	return UpdateStatusAndLog(fileMd5, "processing", step, CalculateProgress(step, 0), "", "step_started", map[string]interface{}{
-		"step": step,
+	return database.UpdateFileStatusWithLog(fileMd5, "processing", step, CalculateProgress(step, 0), "", map[string]interface{}{
+		"action": "step_started",
+		"details": map[string]interface{}{
+			"step": step,
+		},
 	})
 }
 
@@ -231,17 +169,23 @@ func CompleteProcessingStep(fileMd5, step string, result map[string]interface{})
 	nextStep := GetNextStep(step)
 	progress := CalculateProgress(nextStep, 0)
 
-	return UpdateStatusAndLog(fileMd5, "processing", nextStep, progress, "", "step_completed", map[string]interface{}{
-		"step":   step,
-		"result": result,
+	return database.UpdateFileStatusWithLog(fileMd5, "processing", nextStep, progress, "", map[string]interface{}{
+		"action": "step_completed",
+		"details": map[string]interface{}{
+			"step":   step,
+			"result": result,
+		},
 	})
 }
 
 // FailProcessingStep 处理步骤失败
 func FailProcessingStep(fileMd5, step string, err error) error {
-	return UpdateStatusAndLog(fileMd5, "failed", step, 0, err.Error(), "step_failed", map[string]interface{}{
-		"step":  step,
-		"error": err.Error(),
+	return database.UpdateFileStatusWithLog(fileMd5, "failed", step, 0, err.Error(), map[string]interface{}{
+		"action": "step_failed",
+		"details": map[string]interface{}{
+			"step":  step,
+			"error": err.Error(),
+		},
 	})
 }
 
@@ -250,8 +194,11 @@ func SkipProcessingStep(fileMd5, step, reason string) error {
 	nextStep := GetNextStep(step)
 	progress := CalculateProgress(nextStep, 0)
 
-	return UpdateStatusAndLog(fileMd5, "processing", nextStep, progress, "", "step_skipped", map[string]interface{}{
-		"step":   step,
-		"reason": reason,
+	return database.UpdateFileStatusWithLog(fileMd5, "processing", nextStep, progress, "", map[string]interface{}{
+		"action": "step_skipped",
+		"details": map[string]interface{}{
+			"step":   step,
+			"reason": reason,
+		},
 	})
 }

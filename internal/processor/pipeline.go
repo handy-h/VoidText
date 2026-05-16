@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -123,23 +124,25 @@ func ProcessStep(fileMd5 string, step string) (*PipelineResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("预处理文件内容失败: %w", err)
 	}
-	
+
 	content := preprocessResult.Content
 	logging.Info("file_content_preprocessed", map[string]interface{}{
-		"file_md5":       fileMd5,
-		"original_bytes": len(contentBytes),
-		"processed_chars": len(content),
+		"file_md5":         fileMd5,
+		"original_bytes":   len(contentBytes),
+		"processed_chars":  len(content),
 		"encoding_changes": len(preprocessResult.Changes),
 	})
 
 	rulesConfig := ParseRulesConfig(record.RulesConfig)
 
-	database.CreateProcessingLog(&database.ProcessingLogRecord{
+	if err := database.CreateProcessingLog(&database.ProcessingLogRecord{
 		FileMd5: fileMd5,
 		Step:    step,
 		Action:  "start",
 		Status:  "running",
-	})
+	}); err != nil {
+		logging.Error("创建处理日志失败", err, map[string]interface{}{"file_md5": fileMd5, "step": step})
+	}
 
 	var result *PipelineResult
 
@@ -216,7 +219,7 @@ func processCleaningStep(fileMd5, content string, rulesConfig RulesConfig, _ *da
 
 	nextStep := GetNextStep(StepCleaning)
 	progress := CalculateProgress(nextStep, 0)
-	
+
 	// 使用事务更新状态和记录日志
 	CompleteProcessingStep(fileMd5, StepCleaning, map[string]interface{}{
 		"changes_count": len(cleanResult.Changes),
@@ -265,12 +268,14 @@ func processIndexingStep(fileMd5, content string, rulesConfig RulesConfig, _ *da
 			PositionEnd:      change.Position + len(change.Original),
 			Status:           "pending",
 		}
-		database.CreateReviewItems([]database.ReviewItemRecord{item})
+		if err := database.CreateReviewItems([]database.ReviewItemRecord{item}); err != nil {
+			logging.Error("创建审核项失败", err, map[string]interface{}{"file_md5": fileMd5})
+		}
 	}
 
 	nextStep := GetNextStep(StepIndexing)
 	progress := CalculateProgress(nextStep, 0)
-	
+
 	// 使用事务更新状态和记录日志
 	CompleteProcessingStep(fileMd5, StepIndexing, map[string]interface{}{
 		"duplicates_detected": len(detectResult.Changes),
@@ -337,9 +342,9 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, _ *data
 				"status": "recovered",
 			})
 			logging.Info("llm_fix_forced_complete_after_panic", map[string]interface{}{
-				"file_md5":    fileMd5,
-				"next_step":   nextStep,
-				"progress":    progress,
+				"file_md5":  fileMd5,
+				"next_step": nextStep,
+				"progress":  progress,
 			})
 		}
 	}()
@@ -351,13 +356,13 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, _ *data
 	if state, exists := stateManager.GetProcessingState(fileMd5); exists && state.Status == "processing" {
 		resume = true
 		logging.Info("llm_fix_resume_detected", map[string]interface{}{
-			"file_md5":       fileMd5,
-			"processed":      state.ProcessedChunks,
-			"total":          state.TotalChunks,
-			"progress":       state.Progress,
+			"file_md5":  fileMd5,
+			"processed": state.ProcessedChunks,
+			"total":     state.TotalChunks,
+			"progress":  state.Progress,
 		})
 	}
-	
+
 	repairResult = repairer.RepairTextWithFileMd5(fileMd5, content, resume)
 
 	// 使用getStatsMap安全地获取Stats（避免nil map panic）
@@ -404,7 +409,9 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, _ *data
 			PositionEnd:      change.Position + len(change.Original),
 			Status:           "pending",
 		}
-		database.CreateReviewItems([]database.ReviewItemRecord{item})
+		if err := database.CreateReviewItems([]database.ReviewItemRecord{item}); err != nil {
+			logging.Error("创建审核项失败", err, map[string]interface{}{"file_md5": fileMd5})
+		}
 	}
 
 	// 记录完成统计
@@ -424,7 +431,7 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, _ *data
 
 	nextStep := GetNextStep(StepLlmFix)
 	progress := CalculateProgress(nextStep, 0)
-	
+
 	// 使用事务更新状态和记录日志
 	CompleteProcessingStep(fileMd5, StepLlmFix, map[string]interface{}{
 		"total_chunks":  stats["total_chunks"],
@@ -630,8 +637,10 @@ func processFinalizingStep(fileMd5, content string, record *database.FileRecord)
 
 	// 更新 files 表：file_path 指向最终文件，file_name 含"清洗版"后缀，状态设为完成
 	db := database.GetDB()
-	db.Exec(`UPDATE files SET file_path = ?, file_name = ?, status = 'completed', current_step = '' WHERE md5 = ?`,
-		finalPath, finalFileName, fileMd5)
+	if _, err := db.Exec(`UPDATE files SET file_path = ?, file_name = ?, status = 'completed', current_step = '' WHERE md5 = ?`,
+		finalPath, finalFileName, fileMd5); err != nil {
+		logging.Error("更新文件最终状态失败", err, map[string]interface{}{"file_md5": fileMd5})
+	}
 
 	return &PipelineResult{
 		CurrentStep: StepFinalizing,
@@ -705,19 +714,29 @@ func saveIntermediateFile(fileMd5, step, content string) error {
 		Step:        step,
 	})
 
-	record, _ := database.GetFileByMd5(fileMd5)
+	record, err := database.GetFileByMd5(fileMd5)
+	if err != nil {
+		logging.Error("获取文件记录失败", err, map[string]interface{}{"file_md5": fileMd5})
+		return nil
+	}
 	if record != nil {
 		record.FilePath = filePath
 		db := database.GetDB()
-		db.Exec(`UPDATE files SET file_path = ? WHERE md5 = ?`, filePath, fileMd5)
+		if _, err := db.Exec(`UPDATE files SET file_path = ? WHERE md5 = ?`, filePath, fileMd5); err != nil {
+			logging.Error("更新文件路径失败", err, map[string]interface{}{"file_md5": fileMd5})
+		}
 	}
 
 	return nil
 }
 
 // removeAdContent 根据正则模式移除广告内容
-func removeAdContent(content, _ string) string {
-	return content
+func removeAdContent(content, pattern string) string {
+	if pattern == "" {
+		return content
+	}
+	re := regexp.MustCompile(pattern)
+	return re.ReplaceAllString(content, "")
 }
 
 // isDeletionType 判断修改类型是否为"删除类"

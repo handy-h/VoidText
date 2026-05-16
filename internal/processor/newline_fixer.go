@@ -22,8 +22,6 @@ type NewlineFixer struct {
 	EnableAutoFix bool
 	// MinParagraphLength 最小段落长度（字符数）
 	MinParagraphLength int
-	// MaxParagraphLength 最大段落长度（字符数）
-	MaxParagraphLength int
 }
 
 // NewNewlineFixer 创建换行符修复器
@@ -31,7 +29,6 @@ func NewNewlineFixer() *NewlineFixer {
 	return &NewlineFixer{
 		EnableAutoFix:      true,
 		MinParagraphLength: 20,
-		MaxParagraphLength: 500,
 	}
 }
 
@@ -417,62 +414,4 @@ func (nf *NewlineFixer) isChapterTitleText(text string) bool {
 	}
 
 	return false
-}
-
-// FixWithPosition 使用位置信息进行精确修复
-func (nf *NewlineFixer) FixWithPosition(content string, positions []int) NewlineFixResult {
-	result := NewlineFixResult{
-		Content:  content,
-		Original: content,
-		Changes:  []preprocess.Change{},
-		Stats:    make(map[string]int),
-	}
-
-	if !nf.EnableAutoFix || len(content) == 0 || len(positions) == 0 {
-		return result
-	}
-
-	// 在指定位置插入换行符
-	runes := []rune(content)
-	var newContent strings.Builder
-
-	lastPos := 0
-	for _, pos := range positions {
-		if pos > lastPos && pos < len(runes) {
-			newContent.WriteString(string(runes[lastPos:pos]))
-			newContent.WriteString("\n\n")
-			lastPos = pos
-
-			result.Stats["newlines_added"]++
-		}
-	}
-	newContent.WriteString(string(runes[lastPos:]))
-
-	result.Content = newContent.String()
-
-	if result.Content != content {
-		result.Changes = append(result.Changes, preprocess.Change{
-			Type:        "newline_fix_position",
-			Original:    content,
-			Replacement: result.Content,
-			Position:    0,
-			Confidence:  0.9,
-		})
-	}
-
-	return result
-}
-
-// DetectParagraphBoundaries 检测段落边界（不修改内容，只返回位置）
-func (nf *NewlineFixer) DetectParagraphBoundaries(content string) []int {
-	runes := []rune(content)
-	var positions []int
-
-	for i := 0; i < len(runes); i++ {
-		if nf.isParagraphBreak(runes, i) {
-			positions = append(positions, i+1)
-		}
-	}
-
-	return positions
 }

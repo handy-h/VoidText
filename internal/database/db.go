@@ -11,9 +11,6 @@ import (
 )
 
 // Table names (exported for use in migrations and tests)
-const (
-	TableChunkRepairCache = "chunk_repair_cache"
-)
 
 var db *sql.DB
 
@@ -205,8 +202,8 @@ func createTables() error {
 		`CREATE INDEX IF NOT EXISTS idx_review_items_status ON review_items(file_md5, status)`,
 		`CREATE INDEX IF NOT EXISTS idx_processing_logs_file_md5 ON processing_logs(file_md5)`,
 		// 新增索引
-		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_chunk_repair_cache_file_md5 ON %s(file_md5)`, TableChunkRepairCache),
-		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_chunk_repair_cache_chunk_hash ON %s(chunk_hash)`, TableChunkRepairCache),
+fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_chunk_repair_cache_file_md5 ON %s(file_md5)`, ChunkRepairCacheTable),
+fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_chunk_repair_cache_chunk_hash ON %s(chunk_hash)`, ChunkRepairCacheTable),
 		`CREATE INDEX IF NOT EXISTS idx_retry_queue_status ON retry_queue(status)`,
 		`CREATE INDEX IF NOT EXISTS idx_retry_queue_next_retry ON retry_queue(next_retry_at) WHERE status = 'pending'`,
 		`CREATE INDEX IF NOT EXISTS idx_prompt_versions_name_version ON prompt_versions(prompt_name, prompt_version)`,

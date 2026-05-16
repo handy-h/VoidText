@@ -630,13 +630,7 @@ func (mr *ModelRepairer) simplifyText(text string) string {
 	return text
 }
 
-// min 返回两个整数中的较小值
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
+
 
 // repairLocally 本地修复（带缓存支持）
 func (mr *ModelRepairer) repairLocally(paragraph, chunkHash string) (string, []preprocess.Change) {
@@ -1506,13 +1500,7 @@ func (wp *ChunkWorkerPool) GetCacheMisses() int {
 	return wp.cacheMisses
 }
 
-// max 返回两个整数中的较大值
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
+
 
 // GetLocalStats 获取本地模型统计
 func (wp *ChunkWorkerPool) GetLocalStats() (int, int, int) {
@@ -1559,6 +1547,9 @@ func (wp *ChunkWorkerPool) GetHealthStatus() map[string]interface{} {
 
 // Close 关闭工作池
 func (wp *ChunkWorkerPool) Close() {
+	if wp.healthManager != nil {
+		wp.healthManager.Stop()
+	}
 	close(wp.taskQueue)
 	wp.wg.Wait()
 	close(wp.results)

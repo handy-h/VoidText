@@ -13,12 +13,12 @@ const (
 
 // Time windows for statistics
 const (
-	StatsTimeWindow = "24 hours" // 24小时统计窗口
+	statsTimeWindow = "24 hours" // 24小时统计窗口
 )
 
 // Default retention days
 const (
-	DefaultCacheRetentionDays = 30 // 默认缓存保留30天
+	defaultCacheRetentionDays = 30 // 默认缓存保留30天
 )
 
 // ChunkRepairCacheRecord 块修复缓存记录（混合架构版）
@@ -438,7 +438,7 @@ func (r *ChunkCacheRepo) GetCacheHitRate() (float64, error) {
 	// 查询最近24小时内的缓存命中次数
 	var hitCount int
 	row := r.db.QueryRow(fmt.Sprintf(`SELECT COUNT(*) FROM %s 
-		WHERE created_at >= datetime('now', '-%s')`, ChunkRepairCacheTable, StatsTimeWindow))
+		WHERE created_at >= datetime('now', '-%s')`, ChunkRepairCacheTable, statsTimeWindow))
 	if err := row.Scan(&hitCount); err != nil {
 		return 0.0, fmt.Errorf("查询缓存命中次数失败: %w", err)
 	}
@@ -447,7 +447,7 @@ func (r *ChunkCacheRepo) GetCacheHitRate() (float64, error) {
 	// 这里我们使用缓存记录数 + 重试记录数作为总查询次数的近似值
 	var retryCount int
 	row = r.db.QueryRow(fmt.Sprintf(`SELECT COUNT(*) FROM retry_queue 
-		WHERE created_at >= datetime('now', '-%s')`, StatsTimeWindow))
+		WHERE created_at >= datetime('now', '-%s')`, statsTimeWindow))
 	if err := row.Scan(&retryCount); err != nil {
 		return 0.0, fmt.Errorf("查询重试次数失败: %w", err)
 	}
@@ -467,7 +467,7 @@ func (r *ChunkCacheRepo) GetErrorRate() (float64, error) {
 	// 查询最近24小时内的错误次数（重试队列中的记录）
 	var errorCount int
 	row := r.db.QueryRow(fmt.Sprintf(`SELECT COUNT(*) FROM retry_queue 
-		WHERE created_at >= datetime('now', '-%s')`, StatsTimeWindow))
+		WHERE created_at >= datetime('now', '-%s')`, statsTimeWindow))
 	if err := row.Scan(&errorCount); err != nil {
 		return 0.0, fmt.Errorf("查询错误次数失败: %w", err)
 	}

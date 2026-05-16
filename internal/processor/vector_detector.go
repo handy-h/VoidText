@@ -1,11 +1,9 @@
 package processor
 
 import (
-	"log"
 	"math"
 	"strings"
 	"voidtext/internal/config"
-	"voidtext/internal/external"
 	"voidtext/internal/processor/preprocess"
 )
 
@@ -85,24 +83,31 @@ func (vd *VectorDetector) splitIntoParagraphs(content string) []string {
 	return filtered
 }
 
-// generateVectors 生成段落向量（简化实现）
+// generateVectors 生成段落向量
+// 使用 7 维混合特征：语义维度（长度、标点密度）+ 判别维度（FNV-1a 文本哈希）
 func (vd *VectorDetector) generateVectors(paragraphs []string) [][]float64 {
 	vectors := make([][]float64, len(paragraphs))
 
-	// 简化实现：使用段落长度作为向量特征
-	// 实际项目中应该使用真正的向量模型
 	for i, paragraph := range paragraphs {
-		// 使用段落长度和字符分布作为简化特征
-		vector := make([]float64, 3)
-		vector[0] = float64(len(paragraph))
-		vector[1] = float64(strings.Count(paragraph, "。"))
-		vector[2] = float64(strings.Count(paragraph, "，"))
+		runes := []rune(paragraph)
+		runeLen := float64(len(runes))
 
-		// 归一化
-		if vector[0] > 0 {
-			vector[1] = vector[1] / vector[0]
-			vector[2] = vector[2] / vector[0]
+		vector := make([]float64, 7)
+
+		// 语义特征（均归一化到 [0,1]）
+		vector[0] = math.Min(runeLen/500.0, 1.0) // 段落长度（截断到 500 runes）
+		if runeLen > 0 {
+			vector[1] = float64(strings.Count(paragraph, "。")) / runeLen
+			vector[2] = float64(strings.Count(paragraph, "，")) / runeLen
 		}
+
+		// 判别特征：FNV-1a 哈希分片为 4 个 uint16 → [0,1]
+		normalized := vd.normalizeParagraph(paragraph)
+		h := fnv1a64(normalized)
+		vector[3] = float64(h&0xFFFF) / 65536.0
+		vector[4] = float64((h>>16)&0xFFFF) / 65536.0
+		vector[5] = float64((h>>32)&0xFFFF) / 65536.0
+		vector[6] = float64((h>>48)&0xFFFF) / 65536.0
 
 		vectors[i] = vector
 	}
@@ -110,19 +115,46 @@ func (vd *VectorDetector) generateVectors(paragraphs []string) [][]float64 {
 	return vectors
 }
 
+// fnv1a64 计算字符串的 FNV-1a 64 位哈希值
+func fnv1a64(s string) uint64 {
+	var h uint64 = 14695981039346656037 // FNV offset basis
+	for i := 0; i < len(s); i++ {
+		h ^= uint64(s[i])
+		h *= 1099511628211 // FNV prime
+	}
+	return h
+}
+
 // findDuplicateIndices 查找重复段落的索引
-func (vd *VectorDetector) findDuplicateIndices(_ [][]float64, paragraphs []string) []int {
+// 两阶段检测：(1) 精确匹配（快速路径），(2) 向量余弦相似度（近义重复）
+func (vd *VectorDetector) findDuplicateIndices(vectors [][]float64, paragraphs []string) []int {
 	duplicateIndices := []int{}
-	seen := make(map[string]bool)
+	duplicateSet := make(map[int]bool)
+	seen := make(map[string]bool) // normalized -> seen
 
 	for i, paragraph := range paragraphs {
-		// 使用精确匹配作为简化实现
 		normalized := vd.normalizeParagraph(paragraph)
 
-		if seen[normalized] {
+		// 阶段 1：精确匹配（去标点后完全相同）
+		if _, exists := seen[normalized]; exists {
+			// 仅标记当前为重复，保留 firstIdx 以允许后续余弦比较
 			duplicateIndices = append(duplicateIndices, i)
-		} else {
-			seen[normalized] = true
+			duplicateSet[i] = true
+			continue
+		}
+		seen[normalized] = true
+
+		// 阶段 2：向量余弦相似度（检测近义重复）
+		for j := 0; j < i; j++ {
+			if duplicateSet[j] {
+				continue // j 已经是重复段落，跳过
+			}
+			similarity := vd.calculateCosineSimilarity(vectors[i], vectors[j])
+			if similarity >= vd.SimilarityThreshold {
+				duplicateIndices = append(duplicateIndices, i)
+				duplicateSet[i] = true
+				break
+			}
 		}
 	}
 
@@ -195,29 +227,4 @@ func (vd *VectorDetector) calculateCosineSimilarity(vec1, vec2 []float64) float6
 	}
 
 	return dotProduct / (math.Sqrt(magnitude1) * math.Sqrt(magnitude2))
-}
-
-// generateEmbeddings 使用外部API生成嵌入向量
-func (vd *VectorDetector) generateEmbeddings(texts []string) ([][]float64, error) {
-	if vd.VectorModelType == "api" {
-		api := external.NewAPI()
-		resp, err := api.GenerateEmbedding(texts)
-		if err != nil {
-			log.Printf("[向量检测] API调用失败，降级为本地向量: 错误=%v", err)
-			return vd.generateVectors(texts), nil
-		}
-
-		if resp != nil && len(resp.Data) > 0 {
-			embeddings := make([][]float64, len(resp.Data))
-			for i, data := range resp.Data {
-				embeddings[i] = data.Embedding
-			}
-			return embeddings, nil
-		}
-
-		log.Printf("[向量检测] API返回空数据，降级为本地向量")
-	}
-
-	// 如果API调用失败或使用本地模型，返回简化向量
-	return vd.generateVectors(texts), nil
 }

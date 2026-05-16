@@ -306,76 +306,6 @@ var (
 	fileLogger = WithFields(map[string]interface{}{"component": "file"})
 )
 
-// 包级快捷方法
-func Debugf(format string, args ...interface{}) {
-	Debug(fmt.Sprintf(format, args...))
-}
-
-func Infof(format string, args ...interface{}) {
-	Info(fmt.Sprintf(format, args...))
-}
-
-func Warnf(format string, args ...interface{}) {
-	Warn(fmt.Sprintf(format, args...))
-}
-
-func Errorf(format string, err error, args ...interface{}) {
-	Error(fmt.Sprintf(format, args...), err)
-}
-
-func Fatalf(format string, err error, args ...interface{}) {
-	Fatal(fmt.Sprintf(format, args...), err)
-}
-
-// 组件级快捷方法
-func ProcessingDebug(msg string, fields ...map[string]interface{}) {
-	processingLogger.Debug(msg, fields...)
-}
-
-func ProcessingInfo(msg string, fields ...map[string]interface{}) {
-	processingLogger.Info(msg, fields...)
-}
-
-func ProcessingWarn(msg string, fields ...map[string]interface{}) {
-	processingLogger.Warn(msg, fields...)
-}
-
-func ProcessingError(msg string, err error, fields ...map[string]interface{}) {
-	processingLogger.Error(msg, err, fields...)
-}
-
-func DatabaseDebug(msg string, fields ...map[string]interface{}) {
-	databaseLogger.Debug(msg, fields...)
-}
-
-func DatabaseInfo(msg string, fields ...map[string]interface{}) {
-	databaseLogger.Info(msg, fields...)
-}
-
-func DatabaseWarn(msg string, fields ...map[string]interface{}) {
-	databaseLogger.Warn(msg, fields...)
-}
-
-func DatabaseError(msg string, err error, fields ...map[string]interface{}) {
-	databaseLogger.Error(msg, err, fields...)
-}
-
-func APIDebug(msg string, fields ...map[string]interface{}) {
-	apiLogger.Debug(msg, fields...)
-}
-
-func APIInfo(msg string, fields ...map[string]interface{}) {
-	apiLogger.Info(msg, fields...)
-}
-
-func APIWarn(msg string, fields ...map[string]interface{}) {
-	apiLogger.Warn(msg, fields...)
-}
-
-func APIError(msg string, err error, fields ...map[string]interface{}) {
-	apiLogger.Error(msg, err, fields...)
-}
-
 func APIRefusal(chunkID int, promptVersion, inputPreview, rawError string) {
 	apiLogger.Warn("api_refusal", map[string]interface{}{
 		"chunk_id":       chunkID,
@@ -452,18 +382,4 @@ func PromptUpdated(oldVersion, newVersion string, diffLen int) {
 	})
 }
 
-func FileDebug(msg string, fields ...map[string]interface{}) {
-	fileLogger.Debug(msg, fields...)
-}
 
-func FileInfo(msg string, fields ...map[string]interface{}) {
-	fileLogger.Info(msg, fields...)
-}
-
-func FileWarn(msg string, fields ...map[string]interface{}) {
-	fileLogger.Warn(msg, fields...)
-}
-
-func FileError(msg string, err error, fields ...map[string]interface{}) {
-	fileLogger.Error(msg, err, fields...)
-}
