@@ -1,45 +1,45 @@
 /* ============================================
-   湮文 VoidText - 寂灭风设计系统
-   归于寂灭，方见真章
+   湮文 VoidText - 柔和亮色设计系统
+   清晰舒适，便于阅读
    ============================================ */
 
 /* CSS 变量定义 */
 :root {
-  /* 虚空黑系 */
-  --void-black: #0a0a0f;
-  --void-deep: #12121a;
-  --void-void: #050508;
-  --void-card: #1a1a24;
-  --void-border: #2a2a3a;
+  /* 柔和亮色背景系 */
+  --void-black: #f5f6f8;
+  --void-deep: #ffffff;
+  --void-void: #2d3436;
+  --void-card: #ffffff;
+  --void-border: #e0e4e8;
 
-  /* 寂灭青系 */
-  --annihilation-cyan: #00d4aa;
-  --annihilation-dim: #00a884;
-  --annihilation-glow: #00f5c4;
-  --annihilation-dark: #008f6b;
+  /* 柔和青绿系 */
+  --annihilation-cyan: #2db89e;
+  --annihilation-dim: #259a84;
+  --annihilation-glow: #3dd4b8;
+  --annihilation-dark: #1f8570;
 
-  /* 灰烬紫系 */
-  --ash-purple: #6b5ce7;
-  --ash-dim: #4a3fb5;
-  --ash-glow: #8b7cf7;
+  /* 柔和紫系 */
+  --ash-purple: #7c6ff7;
+  --ash-dim: #6a5ce7;
+  --ash-glow: #9589f7;
 
-  /* 状态色 */
-  --status-pending: #4a5568;
-  --status-processing: #00d4aa;
-  --status-reviewing: #6b5ce7;
-  --status-completed: #00a884;
-  --status-failed: #ff4757;
+  /* 状态色 - 柔和化 */
+  --status-pending: #b2bec3;
+  --status-processing: #2db89e;
+  --status-reviewing: #7c6ff7;
+  --status-completed: #259a84;
+  --status-failed: #e17055;
 
-  /* 文字色 */
-  --text-primary: #e8e8f0;
-  --text-secondary: #a0a0b0;
-  --text-muted: #606070;
+  /* 文字色 - 深色适配亮色背景 */
+  --text-primary: #2d3436;
+  --text-secondary: #636e72;
+  --text-muted: #95a5a6;
 
   /* 字体 */
   --font-display: "Noto Serif SC", "Source Han Serif SC", serif;
   --font-body: "Inter", "Noto Sans SC", -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", "Fira Code", monospace;
-  --review-font-size: 13px;
+  --review-font-size: 15px;
 
   /* 动效 */
   --ease-annihilation: cubic-bezier(0.16, 1, 0.3, 1);
@@ -47,9 +47,9 @@
   --duration-normal: 300ms;
   --duration-slow: 600ms;
 
-  /* 光效 */
-  --glow-cyan: 0 0 20px rgba(0, 212, 170, 0.3);
-  --glow-purple: 0 0 30px rgba(107, 92, 231, 0.2);
+  /* 光效 - 柔和化 */
+  --glow-cyan: 0 0 12px rgba(45, 184, 158, 0.2);
+  --glow-purple: 0 0 16px rgba(124, 111, 247, 0.15);
 }
 
 * {
@@ -67,12 +67,12 @@ body {
   background-image:
     radial-gradient(
       ellipse at 20% 20%,
-      rgba(0, 212, 170, 0.03) 0%,
+      rgba(45, 184, 158, 0.04) 0%,
       transparent 50%
     ),
     radial-gradient(
       ellipse at 80% 80%,
-      rgba(107, 92, 231, 0.03) 0%,
+      rgba(124, 111, 247, 0.04) 0%,
       transparent 50%
     );
 }
@@ -140,7 +140,7 @@ header::before {
 
 header h1 {
   font-family: var(--font-display);
-  font-size: 26px;
+  font-size: 28px;
   font-weight: 700;
   background: linear-gradient(
     135deg,
@@ -157,7 +157,7 @@ header h1::after {
   content: "VOIDTEXT";
   display: block;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 6px;
   color: var(--text-muted);
   -webkit-text-fill-color: var(--text-muted);
@@ -176,7 +176,7 @@ nav {
   border: 1px solid var(--void-border);
   border-radius: 8px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 500;
   transition: all var(--duration-normal) var(--ease-annihilation);
   margin: 0;
@@ -228,7 +228,7 @@ main {
   border: 1px solid var(--void-border);
   padding: 28px;
   border-radius: 12px;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
 }
 
 section {
@@ -239,7 +239,7 @@ section h2 {
   margin-bottom: 20px;
   color: var(--text-primary);
   font-family: var(--font-display);
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 600;
   padding-bottom: 12px;
   position: relative;
@@ -274,7 +274,7 @@ section h2::after {
   text-align: center;
   padding: 60px 20px;
   color: var(--text-muted);
-  font-size: 16px;
+  font-size: 17px;
   background: var(--void-card);
   border: 1px solid var(--void-border);
   border-radius: 8px;
@@ -293,7 +293,7 @@ section h2::after {
   border: none;
   border-radius: 8px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   transition: all var(--duration-normal) var(--ease-annihilation);
   margin: 0 8px 0 0;
@@ -334,7 +334,7 @@ section h2::after {
   border: 1px solid var(--void-border);
   border-radius: 8px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 15px;
   transition: all var(--duration-normal) var(--ease-annihilation);
   margin: 0 8px 0 0;
 }
@@ -353,7 +353,7 @@ section h2::after {
   border: 1px solid var(--status-failed);
   border-radius: 8px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 15px;
   transition: all var(--duration-normal) var(--ease-annihilation);
   margin: 0 8px 0 0;
 }
@@ -372,7 +372,7 @@ section h2::after {
   border: none;
   border-radius: 6px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   transition: all var(--duration-normal) var(--ease-annihilation);
   margin: 0 6px 0 0;
@@ -390,7 +390,7 @@ section h2::after {
   border: none;
   border-radius: 6px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   transition: all var(--duration-normal) var(--ease-annihilation);
   margin: 0 6px 0 0;
@@ -407,7 +407,7 @@ section h2::after {
   border: none;
   border-radius: 6px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   transition: all var(--duration-normal) var(--ease-annihilation);
   margin: 0 6px 0 0;
@@ -425,7 +425,7 @@ section h2::after {
   border: none;
   border-radius: 6px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   transition: all var(--duration-normal) var(--ease-annihilation);
   margin: 0 6px 0 0;
@@ -461,7 +461,7 @@ section h2::after {
 
 .file-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
   border-color: var(--void-border);
 }
 
@@ -496,7 +496,7 @@ section h2::after {
 }
 
 .file-title {
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 600;
   color: var(--text-primary);
   margin-bottom: 8px;
@@ -510,7 +510,7 @@ section h2::after {
   display: flex;
   flex-wrap: wrap;
   gap: 16px;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-muted);
   font-family: var(--font-mono);
 }
@@ -528,10 +528,10 @@ section h2::after {
 .file-error {
   margin-top: 8px;
   padding: 8px 12px;
-  background: rgba(255, 71, 87, 0.1);
-  border: 1px solid rgba(255, 71, 87, 0.2);
+  background: rgba(225, 112, 85, 0.1);
+  border: 1px solid rgba(225, 112, 85, 0.2);
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--status-failed);
   font-family: var(--font-mono);
 }
@@ -557,12 +557,12 @@ section h2::after {
 .upload-area:hover {
   border-color: var(--annihilation-cyan);
   box-shadow: var(--glow-cyan);
-  background: rgba(0, 212, 170, 0.03);
+  background: rgba(45, 184, 158, 0.03);
 }
 
 .upload-area.drag-over {
   border-color: var(--annihilation-cyan);
-  background: rgba(0, 212, 170, 0.05);
+  background: rgba(45, 184, 158, 0.05);
   box-shadow: var(--glow-cyan);
 }
 
@@ -578,7 +578,7 @@ section h2::after {
 
 .upload-area p {
   color: var(--text-secondary);
-  font-size: 16px;
+  font-size: 17px;
   margin-top: 16px;
   font-weight: 500;
 }
@@ -604,7 +604,7 @@ section h2::after {
 .upload-loading {
   text-align: center;
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: 15px;
   font-family: var(--font-mono);
 }
 
@@ -613,7 +613,7 @@ section h2::after {
 .upload-success p,
 .upload-error p {
   margin-bottom: 12px;
-  font-size: 14px;
+  font-size: 15px;
   color: var(--text-secondary);
 }
 
@@ -634,7 +634,7 @@ section h2::after {
 
 .form-group label {
   display: block;
-  font-size: 14px;
+  font-size: 15px;
   color: var(--text-primary);
   margin-bottom: 8px;
   cursor: pointer;
@@ -653,7 +653,7 @@ section h2::after {
   border-radius: 8px;
   background: var(--void-card);
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: 15px;
   transition: all var(--duration-normal) var(--ease-annihilation);
 }
 
@@ -669,7 +669,7 @@ section h2::after {
   border-radius: 8px;
   background: var(--void-card);
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: 15px;
   font-family: var(--font-mono);
   resize: vertical;
   transition: all var(--duration-normal) var(--ease-annihilation);
@@ -687,7 +687,7 @@ section h2::after {
   padding: 10px;
   border: 1px solid var(--void-border);
   border-radius: 8px;
-  font-size: 14px;
+  font-size: 15px;
   font-family: var(--font-mono);
   resize: vertical;
   background: var(--void-card);
@@ -707,7 +707,7 @@ section h2::after {
 }
 
 #file-info-display {
-  font-size: 14px;
+  font-size: 15px;
   color: var(--text-secondary);
   margin-bottom: 24px;
   font-family: var(--font-mono);
@@ -771,7 +771,7 @@ section h2::after {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 700;
   background-color: var(--void-card);
   border: 2px solid var(--void-border);
@@ -779,7 +779,7 @@ section h2::after {
 }
 
 .step-label {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-muted);
   white-space: nowrap;
 }
@@ -831,20 +831,20 @@ section h2::after {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
 }
 
 #processing-message {
-  font-size: 14px;
+  font-size: 15px;
   color: var(--text-secondary);
   margin-bottom: 8px;
   font-family: var(--font-mono);
 }
 
 .current-action {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-muted);
   background-color: var(--void-card);
   border: 1px solid var(--void-border);
@@ -878,7 +878,7 @@ section h2::after {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 12px;
-  font-size: 14px;
+  font-size: 15px;
   color: var(--text-secondary);
   font-family: var(--font-mono);
 }
@@ -926,14 +926,14 @@ section h2::after {
 }
 
 .version-title {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--text-primary);
   font-family: var(--font-mono);
 }
 
 .version-time {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-muted);
   font-family: var(--font-mono);
 }
@@ -963,7 +963,7 @@ section h2::after {
   display: flex;
   gap: 12px;
   margin-bottom: 12px;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-muted);
   font-family: var(--font-mono);
 }
@@ -997,29 +997,29 @@ section h2::after {
 }
 
 .review-status {
-  font-size: 12px;
+  font-size: 13px;
   padding: 4px 8px;
   border-radius: 4px;
   margin-left: auto;
 }
 
 .review-status-pending {
-  background: rgba(74, 85, 104, 0.2);
+  background: rgba(178, 190, 195, 0.2);
   color: var(--status-pending);
 }
 
 .review-status-approved {
-  background: rgba(0, 168, 132, 0.2);
+  background: rgba(37, 154, 132, 0.15);
   color: var(--status-completed);
 }
 
 .review-status-rejected {
-  background: rgba(255, 71, 87, 0.2);
+  background: rgba(225, 112, 85, 0.15);
   color: var(--status-failed);
 }
 
 .review-status-edited {
-  background: rgba(107, 92, 231, 0.2);
+  background: rgba(124, 111, 247, 0.15);
   color: var(--ash-purple);
 }
 
@@ -1038,13 +1038,13 @@ section h2::after {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 14px;
+  font-size: 15px;
   color: var(--text-secondary);
   font-family: var(--font-mono);
 }
 
 .logs-header:hover {
-  background: rgba(0, 212, 170, 0.05);
+  background: rgba(45, 184, 158, 0.04);
 }
 
 .logs-content {
@@ -1055,14 +1055,14 @@ section h2::after {
 }
 
 .logs-list {
-  font-size: 12px;
+  font-size: 13px;
   font-family: var(--font-mono);
   color: var(--text-muted);
 }
 
 .logs-list div {
   padding: 4px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
 }
 
 .logs-list div:last-child {
@@ -1073,9 +1073,9 @@ section h2::after {
   display: flex;
   gap: 10px;
   padding: 6px 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
   align-items: baseline;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.5;
 }
 
@@ -1104,7 +1104,7 @@ section h2::after {
   color: var(--text-muted);
   white-space: nowrap;
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .log-step {
@@ -1142,7 +1142,7 @@ section h2::after {
 
 #completed-info p {
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: 15px;
 }
 
 /* 响应式设计 */
@@ -1201,9 +1201,9 @@ section h2::after {
   z-index: 9999;
   padding: 14px 28px;
   border-radius: 10px;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 500;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
   animation: feedbackSlideIn 0.3s var(--ease-annihilation);
   pointer-events: none;
   white-space: nowrap;
@@ -1224,21 +1224,21 @@ section h2::after {
 }
 
 #feedback.success {
-  background: rgba(0, 212, 170, 0.15);
+  background: rgba(45, 184, 158, 0.12);
   border: 1px solid var(--annihilation-cyan);
   color: var(--annihilation-cyan);
   backdrop-filter: blur(12px);
 }
 
 #feedback.error {
-  background: rgba(255, 71, 87, 0.15);
+  background: rgba(225, 112, 85, 0.12);
   border: 1px solid var(--status-failed);
   color: var(--status-failed);
   backdrop-filter: blur(12px);
 }
 
 #feedback.info {
-  background: rgba(107, 92, 231, 0.15);
+  background: rgba(124, 111, 247, 0.12);
   border: 1px solid var(--ash-purple);
   color: var(--ash-glow);
   backdrop-filter: blur(12px);
@@ -1265,7 +1265,7 @@ section h2::after {
 }
 
 .review-group-header:hover {
-  background: rgba(0, 212, 170, 0.03);
+  background: rgba(45, 184, 158, 0.04);
 }
 
 .review-group-diff {
@@ -1277,7 +1277,7 @@ section h2::after {
 }
 
 .review-group-count {
-  font-size: 12px;
+  font-size: 13px;
   padding: 2px 10px;
   border-radius: 10px;
   background: var(--annihilation-cyan);
@@ -1303,8 +1303,8 @@ section h2::after {
 
 .review-item-compact {
   padding: 12px 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
-  font-size: 13px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+  font-size: 14px;
 }
 
 .review-item-compact:last-child {
@@ -1314,13 +1314,13 @@ section h2::after {
 .review-item-compact .item-context {
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
   margin-bottom: 4px;
 }
 
 .review-item-compact .item-context-line {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-secondary);
   padding: 2px 8px;
   background: var(--void-deep);
@@ -1345,15 +1345,15 @@ section h2::after {
 
 /* Diff 高亮 */
 .diff-del {
-  background: rgba(255, 71, 87, 0.25);
-  color: #ff6b7a;
+  background: rgba(225, 112, 85, 0.2);
+  color: #c0392b;
   text-decoration: line-through;
   border-radius: 3px;
   padding: 0 2px;
 }
 
 .diff-ins {
-  background: rgba(0, 212, 170, 0.2);
+  background: rgba(45, 184, 158, 0.15);
   color: var(--annihilation-cyan);
   border-radius: 3px;
   padding: 0 2px;
@@ -1371,7 +1371,7 @@ section h2::after {
 }
 
 .review-section-title {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--text-muted);
   margin: 20px 0 12px;
@@ -1394,7 +1394,7 @@ section h2::after {
   border-radius: 6px;
   background: var(--void-card);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 14px;
   font-family: var(--font-mono);
   cursor: pointer;
 }
@@ -1420,7 +1420,7 @@ section h2::after {
 
 .nav-icon {
   margin-right: 6px;
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .nav-logout {
@@ -1436,7 +1436,7 @@ section h2::after {
 
 .btn-sm {
   padding: 6px 14px;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 /* --- Status Badge --- */
@@ -1445,40 +1445,40 @@ section h2::after {
   align-items: center;
   padding: 4px 12px;
   border-radius: 20px;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   font-family: var(--font-mono);
   letter-spacing: 0.5px;
 }
 
 .status-badge.status-pending {
-  background: rgba(74, 85, 104, 0.2);
+  background: rgba(178, 190, 195, 0.2);
   color: var(--status-pending);
-  border: 1px solid rgba(74, 85, 104, 0.3);
+  border: 1px solid rgba(178, 190, 195, 0.3);
 }
 
 .status-badge.status-processing {
-  background: rgba(0, 212, 170, 0.15);
+  background: rgba(45, 184, 158, 0.12);
   color: var(--status-processing);
-  border: 1px solid rgba(0, 212, 170, 0.2);
+  border: 1px solid rgba(45, 184, 158, 0.2);
 }
 
 .status-badge.status-reviewing {
-  background: rgba(107, 92, 231, 0.15);
+  background: rgba(124, 111, 247, 0.12);
   color: var(--status-reviewing);
-  border: 1px solid rgba(107, 92, 231, 0.2);
+  border: 1px solid rgba(124, 111, 247, 0.2);
 }
 
 .status-badge.status-completed {
-  background: rgba(0, 168, 132, 0.15);
+  background: rgba(37, 154, 132, 0.12);
   color: var(--status-completed);
-  border: 1px solid rgba(0, 168, 132, 0.2);
+  border: 1px solid rgba(37, 154, 132, 0.2);
 }
 
 .status-badge.status-failed {
-  background: rgba(255, 71, 87, 0.15);
+  background: rgba(225, 112, 85, 0.12);
   color: var(--status-failed);
-  border: 1px solid rgba(255, 71, 87, 0.2);
+  border: 1px solid rgba(225, 112, 85, 0.2);
 }
 
 /* --- Drop Zone (Empty State) --- */
@@ -1501,14 +1501,14 @@ section h2::after {
 .drop-zone:hover {
   border-color: var(--annihilation-cyan);
   box-shadow: var(--glow-cyan);
-  background: rgba(0, 212, 170, 0.03);
+  background: rgba(45, 184, 158, 0.03);
   border-style: solid;
 }
 
 .drop-zone.drag-over {
   border-color: var(--annihilation-cyan);
-  background: rgba(0, 212, 170, 0.06);
-  box-shadow: 0 0 40px rgba(0, 212, 170, 0.15);
+  background: rgba(45, 184, 158, 0.06);
+  box-shadow: 0 0 30px rgba(45, 184, 158, 0.1);
   border-style: solid;
   transform: scale(1.01);
 }
@@ -1535,7 +1535,7 @@ section h2::after {
 
 .drop-zone-text {
   color: var(--text-secondary);
-  font-size: 18px;
+  font-size: 19px;
   font-weight: 500;
   margin-bottom: 12px;
   transition: color var(--duration-normal) var(--ease-annihilation);
@@ -1547,7 +1547,7 @@ section h2::after {
 
 .drop-zone-hint {
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 14px;
   font-family: var(--font-mono);
 }
 
@@ -1576,7 +1576,7 @@ section h2::after {
 }
 
 .preset-label {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-muted);
   font-weight: 500;
   white-space: nowrap;
@@ -1589,7 +1589,7 @@ section h2::after {
   border: 1px solid var(--void-border);
   border-radius: 20px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   transition: all var(--duration-normal) var(--ease-annihilation);
   white-space: nowrap;
@@ -1598,7 +1598,7 @@ section h2::after {
 .preset-btn:hover {
   color: var(--annihilation-cyan);
   border-color: var(--annihilation-cyan);
-  background: rgba(0, 212, 170, 0.05);
+  background: rgba(45, 184, 158, 0.05);
   box-shadow: var(--glow-cyan);
 }
 
@@ -1668,7 +1668,7 @@ section h2::after {
 }
 
 .toggle-text {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-secondary);
 }
 
@@ -1698,7 +1698,7 @@ section h2::after {
 
 .file-card-progress-text {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
   font-family: var(--font-mono);
   margin-top: 4px;
@@ -1734,7 +1734,7 @@ section h2::after {
 }
 
 .review-progress-info {
-  font-size: 13px;
+  font-size: 14px;
   font-family: var(--font-mono);
   color: var(--text-muted);
 }
@@ -1745,11 +1745,11 @@ section h2::after {
 }
 
 .review-current-category {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--text-primary);
   padding: 4px 12px;
-  background: rgba(107, 92, 231, 0.1);
+  background: rgba(124, 111, 247, 0.1);
   border-radius: 6px;
   color: var(--ash-glow);
 }
@@ -1764,7 +1764,7 @@ section h2::after {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: 14px;
   font-family: var(--font-mono);
 }
 
@@ -1783,7 +1783,7 @@ section h2::after {
 }
 
 .btn-page:hover:not(:disabled) {
-  background: rgba(0, 212, 170, 0.1);
+  background: rgba(45, 184, 158, 0.08);
   border-color: var(--annihilation-cyan);
   color: var(--annihilation-cyan);
 }
@@ -1806,7 +1806,7 @@ section h2::after {
 
 .page-size-label {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .page-size-select {
@@ -1815,7 +1815,7 @@ section h2::after {
   border-radius: 4px;
   background: var(--void-deep);
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: 13px;
   font-family: var(--font-mono);
   cursor: pointer;
 }
@@ -1838,7 +1838,7 @@ section h2::after {
   border-radius: 6px;
   background: var(--void-deep);
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: 13px;
   font-family: var(--font-mono);
   cursor: pointer;
 }
@@ -1859,7 +1859,7 @@ section h2::after {
   background: var(--void-deep);
   border: 1px solid var(--void-border);
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   font-family: var(--font-mono);
   padding: 4px 8px;
@@ -1879,7 +1879,7 @@ section h2::after {
 }
 
 .font-scale-value {
-  font-size: 11px;
+  font-size: 12px;
   font-family: var(--font-mono);
   color: var(--text-muted);
   min-width: 32px;
@@ -1887,7 +1887,7 @@ section h2::after {
 }
 
 .keyboard-hint {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
   font-family: var(--font-mono);
   display: flex;
@@ -1905,7 +1905,7 @@ section h2::after {
   background: var(--void-deep);
   border: 1px solid var(--void-border);
   border-radius: 4px;
-  font-size: 10px;
+  font-size: 11px;
   font-family: var(--font-mono);
   color: var(--text-secondary);
   line-height: 1;
@@ -1932,11 +1932,11 @@ section h2::after {
   align-items: stretch;
   min-height: 28px;
   position: relative;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
 }
 
 .review-line:hover {
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(0, 0, 0, 0.02);
 }
 
 .review-line-gutter {
@@ -1950,8 +1950,8 @@ section h2::after {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  font-size: 12px;
-  background: rgba(0, 0, 0, 0.15);
+  font-size: 13px;
+  background: rgba(0, 0, 0, 0.04);
   border-right: 1px solid var(--void-border);
 }
 
@@ -1980,41 +1980,41 @@ section h2::after {
 
 /* 原文行（删除）- 淡红色底色 */
 .line-original {
-  background: rgba(255, 107, 107, 0.15);
-  border-left: 3px solid rgba(255, 107, 107, 0.6);
+  background: rgba(225, 112, 85, 0.08);
+  border-left: 3px solid rgba(225, 112, 85, 0.4);
 }
 
 .line-original .review-line-gutter {
-  background: rgba(255, 107, 107, 0.15);
+  background: rgba(225, 112, 85, 0.08);
   color: var(--status-failed);
 }
 
 /* 原文行中需要修改的部分 - 更深的红色 */
 .diff-highlight-original {
-  background: rgba(255, 107, 107, 0.35);
+  background: rgba(225, 112, 85, 0.2);
   border-radius: 2px;
   padding: 1px 3px;
-  color: #ff6b7a;
+  color: #c0392b;
   font-weight: 600;
 }
 
 /* 修改后行（新增）- 绿色底色 */
 .line-suggested {
-  background: rgba(80, 200, 120, 0.15);
-  border-left: 3px solid rgba(80, 200, 120, 0.6);
+  background: rgba(45, 184, 158, 0.08);
+  border-left: 3px solid rgba(45, 184, 158, 0.4);
 }
 
 .line-suggested .review-line-gutter {
-  background: rgba(80, 200, 120, 0.15);
+  background: rgba(45, 184, 158, 0.08);
   color: var(--annihilation-cyan);
 }
 
 /* 修改后行中建议文本 - 更深的绿色 */
 .diff-highlight-suggested {
-  background: rgba(80, 200, 120, 0.35);
+  background: rgba(45, 184, 158, 0.2);
   border-radius: 2px;
   padding: 1px 3px;
-  color: var(--annihilation-glow);
+  color: var(--annihilation-dim);
   font-weight: 600;
 }
 
@@ -2025,8 +2025,8 @@ section h2::after {
 
 /* 审核页面 - 逐字符对齐的 diff 高亮 */
 .line-original del.diff-del {
-  background: rgba(255, 80, 80, 0.6);
-  color: #8b0000;
+  background: rgba(225, 112, 85, 0.3);
+  color: #a93226;
   font-weight: 600;
   text-decoration: line-through;
   border-radius: 3px;
@@ -2034,8 +2034,8 @@ section h2::after {
 }
 
 .line-suggested ins.diff-ins {
-  background: rgba(60, 180, 80, 0.6);
-  color: #006400;
+  background: rgba(45, 184, 158, 0.3);
+  color: #1e8449;
   font-weight: 600;
   text-decoration: none;
   border-radius: 3px;
@@ -2046,7 +2046,7 @@ section h2::after {
 .ws-char {
   color: #888;
   font-size: 0.85em;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.06);
   border-radius: 2px;
   padding: 0 1px;
   font-family: var(--font-mono);
@@ -2058,7 +2058,7 @@ section h2::after {
 }
 
 .review-line.active .review-line-gutter {
-  background: rgba(0, 212, 170, 0.2);
+  background: rgba(45, 184, 158, 0.12);
   color: var(--annihilation-cyan);
 }
 
@@ -2075,7 +2075,7 @@ section h2::after {
   border: 1px solid var(--void-border);
   border-radius: 8px;
   padding: 6px 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   z-index: 10;
   opacity: 0;
   transition: opacity var(--duration-fast) var(--ease-annihilation);
@@ -2094,7 +2094,7 @@ section h2::after {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   white-space: nowrap;
   transition: all var(--duration-fast) var(--ease-annihilation);
@@ -2107,25 +2107,25 @@ section h2::after {
 }
 
 .floating-btn.btn-approve {
-  background: rgba(0, 212, 170, 0.15);
+  background: rgba(45, 184, 158, 0.12);
   color: var(--annihilation-cyan);
-  border: 1px solid rgba(0, 212, 170, 0.3);
+  border: 1px solid rgba(45, 184, 158, 0.25);
 }
 
 .floating-btn.btn-approve:hover {
-  background: rgba(0, 212, 170, 0.25);
-  box-shadow: 0 0 12px rgba(0, 212, 170, 0.3);
+  background: rgba(45, 184, 158, 0.2);
+  box-shadow: 0 0 10px rgba(45, 184, 158, 0.2);
 }
 
 .floating-btn.btn-reject {
-  background: rgba(255, 71, 87, 0.15);
+  background: rgba(225, 112, 85, 0.12);
   color: var(--status-failed);
-  border: 1px solid rgba(255, 71, 87, 0.3);
+  border: 1px solid rgba(225, 112, 85, 0.25);
 }
 
 .floating-btn.btn-reject:hover {
-  background: rgba(255, 71, 87, 0.25);
-  box-shadow: 0 0 12px rgba(255, 71, 87, 0.3);
+  background: rgba(225, 112, 85, 0.2);
+  box-shadow: 0 0 10px rgba(225, 112, 85, 0.2);
 }
 
 /* 批量审核按钮 */
@@ -2137,11 +2137,16 @@ section h2::after {
   padding: 6px 12px;
   border-radius: 6px;
   border: 1px solid var(--ash-purple);
-  background: rgba(107, 92, 231, 0.15);
+  background: rgba(124, 111, 247, 0.12);
   color: var(--ash-glow);
-  font-size: 12px;
+  font-size: 13px;
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-annihilation);
+}
+
+.batch-review-btn:hover {
+  background: rgba(124, 111, 247, 0.2);
+  box-shadow: 0 0 10px rgba(124, 111, 247, 0.2);
 }
 
 .batch-review-btn:hover {
@@ -2181,14 +2186,14 @@ section h2::after {
 }
 
 .batch-review-title {
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 600;
   color: var(--text-primary);
   margin-left: 16px;
 }
 
 .batch-review-count {
-  font-size: 13px;
+  font-size: 14px;
   font-family: var(--font-mono);
   color: var(--text-muted);
   margin-right: 16px;
@@ -2211,13 +2216,13 @@ section h2::after {
 }
 
 .batch-group-title {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--text-primary);
 }
 
 .batch-group-count {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-muted);
   font-family: var(--font-mono);
 }
@@ -2229,7 +2234,7 @@ section h2::after {
 
 .batch-group-item {
   padding: 12px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -2237,7 +2242,7 @@ section h2::after {
 }
 
 .batch-group-item:hover {
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(0, 0, 0, 0.02);
 }
 
 .batch-group-item:last-child {
@@ -2257,7 +2262,7 @@ section h2::after {
 
 .btn-sm {
   padding: 4px 10px;
-  font-size: 12px;
+  font-size: 13px;
   border-radius: 4px;
   border: 1px solid var(--void-border);
   background: var(--void-deep);
@@ -2267,32 +2272,32 @@ section h2::after {
 }
 
 .btn-sm:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(0, 0, 0, 0.04);
   color: var(--text-primary);
 }
 
 .btn-sm.btn-primary {
-  background: rgba(0, 212, 170, 0.15);
+  background: rgba(45, 184, 158, 0.12);
   border-color: var(--annihilation-cyan);
   color: var(--annihilation-cyan);
 }
 
 .btn-sm.btn-primary:hover {
-  background: rgba(0, 212, 170, 0.25);
+  background: rgba(45, 184, 158, 0.2);
 }
 
 /* 内联高亮增强 */
 .diff-ins {
-  background: rgba(0, 212, 170, 0.25);
-  color: var(--annihilation-glow);
+  background: rgba(45, 184, 158, 0.2);
+  color: var(--annihilation-dim);
   border-radius: 3px;
   padding: 1px 3px;
   font-weight: 700;
 }
 
 .diff-del {
-  background: rgba(255, 71, 87, 0.3);
-  color: #ff6b7a;
+  background: rgba(225, 112, 85, 0.2);
+  color: #c0392b;
   text-decoration: line-through;
   border-radius: 3px;
   padding: 1px 3px;
@@ -2315,7 +2320,7 @@ section h2::after {
   border: 1px solid var(--void-border);
   border-radius: 4px;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 12px;
   font-family: var(--font-mono);
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-annihilation);
@@ -2342,7 +2347,7 @@ section h2::after {
   border-radius: 4px;
   background: var(--void-card);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 14px;
   font-family: var(--font-mono);
   resize: vertical;
   min-height: 60px;
@@ -2373,7 +2378,7 @@ section h2::after {
 }
 
 .category-batch-bar .category-batch-label {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-secondary);
   font-weight: 500;
 }
@@ -2410,7 +2415,7 @@ section h2::after {
   text-align: center;
   padding: 40px 20px;
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: 15px;
 }
 
 /* --- Toast 增强 --- */
@@ -2435,7 +2440,7 @@ section h2::after {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: var(--loading-overlay-bg, rgba(10, 10, 15, 0.85));
+  background: rgba(245, 246, 248, 0.85);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   z-index: 100;
@@ -2460,7 +2465,7 @@ section h2::after {
 
 .loading-text {
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: 15px;
 }
 
 /* --- 响应式 --- */
@@ -2526,12 +2531,12 @@ section h2::after {
 
 /* --- 已处理卡片状态样式 --- */
 .diff-card[data-status="approved"] {
-  border-color: rgba(0, 168, 132, 0.3);
-  background: rgba(0, 168, 132, 0.03);
+  border-color: rgba(37, 154, 132, 0.25);
+  background: rgba(37, 154, 132, 0.03);
 }
 
 .diff-card[data-status="approved"] .diff-card-header {
-  border-bottom-color: rgba(0, 168, 132, 0.15);
+  border-bottom-color: rgba(37, 154, 132, 0.12);
 }
 
 .diff-card[data-status="approved"] .diff-card-body {
@@ -2547,16 +2552,16 @@ section h2::after {
   height: 100%;
   background: var(--status-completed);
   border-radius: 4px 0 0 4px;
-  box-shadow: 0 0 8px rgba(0, 168, 132, 0.3);
+  box-shadow: 0 0 6px rgba(37, 154, 132, 0.2);
 }
 
 .diff-card[data-status="rejected"] {
-  border-color: rgba(255, 71, 87, 0.25);
-  background: rgba(255, 71, 87, 0.03);
+  border-color: rgba(225, 112, 85, 0.2);
+  background: rgba(225, 112, 85, 0.03);
 }
 
 .diff-card[data-status="rejected"] .diff-card-header {
-  border-bottom-color: rgba(255, 71, 87, 0.12);
+  border-bottom-color: rgba(225, 112, 85, 0.1);
 }
 
 .diff-card[data-status="rejected"] .diff-card-body {
@@ -2573,16 +2578,16 @@ section h2::after {
   height: 100%;
   background: var(--status-failed);
   border-radius: 4px 0 0 4px;
-  box-shadow: 0 0 8px rgba(255, 71, 87, 0.2);
+  box-shadow: 0 0 6px rgba(225, 112, 85, 0.15);
 }
 
 .diff-card[data-status="edited"] {
-  border-color: rgba(107, 92, 231, 0.3);
-  background: rgba(107, 92, 231, 0.03);
+  border-color: rgba(124, 111, 247, 0.25);
+  background: rgba(124, 111, 247, 0.03);
 }
 
 .diff-card[data-status="edited"] .diff-card-header {
-  border-bottom-color: rgba(107, 92, 231, 0.15);
+  border-bottom-color: rgba(124, 111, 247, 0.12);
 }
 
 .diff-card[data-status="edited"]::after {
@@ -2594,7 +2599,7 @@ section h2::after {
   height: 100%;
   background: var(--ash-purple);
   border-radius: 4px 0 0 4px;
-  box-shadow: 0 0 8px rgba(107, 92, 231, 0.2);
+  box-shadow: 0 0 6px rgba(124, 111, 247, 0.15);
 }
 
 /* --- 上下文折叠 --- */
@@ -2620,7 +2625,7 @@ section h2::after {
   border: 1px solid var(--void-border);
   border-radius: 4px;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 12px;
   font-family: var(--font-mono);
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-annihilation);
@@ -2629,7 +2634,7 @@ section h2::after {
 .diff-context-block .diff-expand-toggle:hover {
   color: var(--annihilation-cyan);
   border-color: var(--annihilation-dim);
-  background: rgba(0, 212, 170, 0.05);
+  background: rgba(45, 184, 158, 0.05);
 }
 
 /* --- 自动前进过渡动画 --- */
@@ -2660,32 +2665,32 @@ section h2::after {
   width: 28px;
   height: 28px;
   border-radius: 6px;
-  font-size: 14px;
+  font-size: 15px;
   margin-right: 4px;
 }
 
 .toolbar-cat-icon.icon-all {
-  background: rgba(107, 92, 231, 0.15);
+  background: rgba(124, 111, 247, 0.12);
   color: var(--ash-purple);
 }
 
 .toolbar-cat-icon.icon-typo {
-  background: rgba(0, 212, 170, 0.15);
+  background: rgba(45, 184, 158, 0.12);
   color: var(--annihilation-cyan);
 }
 
 .toolbar-cat-icon.icon-semantic {
-  background: rgba(107, 92, 231, 0.15);
+  background: rgba(124, 111, 247, 0.12);
   color: var(--ash-glow);
 }
 
 .toolbar-cat-icon.icon-cleaning {
-  background: rgba(255, 71, 87, 0.15);
+  background: rgba(225, 112, 85, 0.12);
   color: var(--status-failed);
 }
 
 .toolbar-pending-count {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-muted);
   font-family: var(--font-mono);
   padding: 2px 10px;
@@ -2712,7 +2717,7 @@ section h2::after {
   border-left: 2px solid var(--ash-purple);
   color: var(--text-secondary);
   font-style: italic;
-  background: rgba(107, 92, 231, 0.04);
+  background: rgba(124, 111, 247, 0.04);
   margin-top: 2px;
   margin-bottom: 2px;
 }
