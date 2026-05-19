@@ -6,34 +6,35 @@
 /* CSS 变量定义 */
 :root {
   /* 柔和亮色背景系 */
-  --void-black: #f5f6f8;
+  --void-black: #f5f7fa;
   --void-deep: #ffffff;
-  --void-void: #2d3436;
+  --void-void: #ffffff;
   --void-card: #ffffff;
-  --void-border: #e0e4e8;
+  --void-border: #e2e8f0;
+  --void-subtle: #f1f5f9;
 
   /* 柔和青绿系 */
-  --annihilation-cyan: #2db89e;
-  --annihilation-dim: #259a84;
-  --annihilation-glow: #3dd4b8;
-  --annihilation-dark: #1f8570;
+  --annihilation-cyan: #14b8a6;
+  --annihilation-dim: #0d9488;
+  --annihilation-glow: #2dd4bf;
+  --annihilation-dark: #0f766e;
 
-  /* 柔和紫系 */
-  --ash-purple: #7c6ff7;
-  --ash-dim: #6a5ce7;
-  --ash-glow: #9589f7;
+  /* 柔和靛蓝紫系 */
+  --ash-purple: #818cf8;
+  --ash-dim: #6366f1;
+  --ash-glow: #a5b4fc;
 
   /* 状态色 - 柔和化 */
-  --status-pending: #b2bec3;
-  --status-processing: #2db89e;
-  --status-reviewing: #7c6ff7;
-  --status-completed: #259a84;
-  --status-failed: #e17055;
+  --status-pending: #cbd5e1;
+  --status-processing: #14b8a6;
+  --status-reviewing: #818cf8;
+  --status-completed: #10b981;
+  --status-failed: #f87171;
 
-  /* 文字色 - 深色适配亮色背景 */
-  --text-primary: #2d3436;
-  --text-secondary: #636e72;
-  --text-muted: #95a5a6;
+  /* 文字色 - 深灰适配亮色背景 */
+  --text-primary: #1e293b;
+  --text-secondary: #64748b;
+  --text-muted: #8898a8;
 
   /* 字体 */
   --font-display: "Noto Serif SC", "Source Han Serif SC", serif;
@@ -47,9 +48,12 @@
   --duration-normal: 300ms;
   --duration-slow: 600ms;
 
-  /* 光效 - 柔和化 */
-  --glow-cyan: 0 0 12px rgba(45, 184, 158, 0.2);
-  --glow-purple: 0 0 16px rgba(124, 111, 247, 0.15);
+  /* 光效 - 更通透 */
+  --glow-cyan: 0 0 12px rgba(20, 184, 166, 0.15);
+  --glow-purple: 0 0 16px rgba(129, 140, 248, 0.12);
+
+  /* 加载遮罩背景 */
+  --loading-overlay-bg: rgba(245, 247, 250, 0.85);
 }
 
 * {
@@ -1705,6 +1709,12 @@ section h2::after {
 }
 
 /* ========== 全屏沉浸式审核布局 ========== */
+/* 审核区域基础样式：使用主题变量，与管理页面隔离 */
+#review-section,
+#batch-review-section {
+  color: var(--text-primary);
+}
+
 .review-fullscreen {
   position: fixed;
   inset: 0;
@@ -1932,7 +1942,7 @@ section h2::after {
   align-items: stretch;
   min-height: 28px;
   position: relative;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  border-bottom: 1px solid var(--void-border);
 }
 
 .review-line:hover {
@@ -2440,7 +2450,7 @@ section h2::after {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: rgba(245, 246, 248, 0.85);
+  background: var(--loading-overlay-bg);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   z-index: 100;

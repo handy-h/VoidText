@@ -10,10 +10,39 @@ const ThemeModule = (function() {
 
   // 内置主题定义
   const BUILTIN_THEMES = {
+    light: {
+      name: '亮色护眼',
+      dotColor: '#f1f5f9',
+      isDefault: true,
+      vars: {
+        '--void-void': '#f1f5f9',
+        '--void-black': '#f8fafc',
+        '--void-deep': '#f1f5f9',
+        '--void-card': '#ffffff',
+        '--void-border': '#e2e8f0',
+        '--void-subtle': '#cbd5e1',
+        '--annihilation-dim': '#0f766e',
+        '--annihilation-cyan': '#14b8a6',
+        '--annihilation-glow': '#2dd4bf',
+        '--annihilation-dark': '#115e59',
+        '--ash-dim': '#6366f1',
+        '--ash-purple': '#818cf8',
+        '--ash-glow': '#a5b4fc',
+        '--status-pending': '#cbd5e1',
+        '--status-processing': '#14b8a6',
+        '--status-reviewing': '#818cf8',
+        '--status-completed': '#10b981',
+        '--status-failed': '#f87171',
+        '--text-primary': '#334155',
+        '--text-secondary': '#64748b',
+        '--text-muted': '#8898a8',
+        '--glow-cyan': '0 0 20px rgba(20, 184, 166, 0.15)',
+        '--glow-purple': '0 0 30px rgba(129, 140, 248, 0.12)'
+      }
+    },
     dark: {
       name: '寂灭黑',
       dotColor: '#0a0a0f',
-      isDefault: true,
       vars: {
         '--void-void': '#050508',
         '--void-black': '#0a0a0f',
@@ -175,41 +204,45 @@ const ThemeModule = (function() {
 
   // ==================== 初始化 ====================
   function init() {
-    const savedTheme = localStorage.getItem(STORAGE_KEY) || 'dark';
+    const savedTheme = localStorage.getItem(STORAGE_KEY) || 'light';
     applyTheme(savedTheme);
   }
 
   // ==================== 应用主题 ====================
   function applyTheme(themeName) {
-    const root = document.documentElement;
+    var reviewSection = document.getElementById('review-section');
+    var batchSection = document.getElementById('batch-review-section');
 
-    // 清除之前的行内 CSS 变量（自定义主题设置的）
-    Object.keys(BUILTIN_THEMES.dark.vars).forEach(function(varName) {
-      root.style.removeProperty(varName);
+    // 清除之前的行内 CSS 变量
+    var targetElements = [reviewSection, batchSection].filter(Boolean);
+    targetElements.forEach(function(el) {
+      Object.keys(BUILTIN_THEMES.dark.vars).forEach(function(varName) {
+        el.style.removeProperty(varName);
+      });
     });
 
-    if (BUILTIN_THEMES[themeName]) {
-      // 内置主题：通过 data-theme 属性让 CSS 选择器生效
-      root.setAttribute('data-theme', themeName);
-    } else if (themeName.startsWith('custom-')) {
-      // 自定义主题：设置 data-theme + 行内 CSS 变量
-      root.setAttribute('data-theme', themeName);
-      var customData = getCustomTheme(themeName.replace('custom-', ''));
-      if (customData) {
-        Object.entries(customData.vars).forEach(function(entry) {
-          root.style.setProperty(entry[0], entry[1]);
-        });
-      }
-    } else {
-      // 未知主题，回退到默认
-      root.setAttribute('data-theme', 'dark');
-      themeName = 'dark';
+    var effectiveTheme = themeName;
+    if (!BUILTIN_THEMES[themeName] && !themeName.startsWith('custom-')) {
+      effectiveTheme = 'light';
     }
 
-    currentTheme = themeName;
-    localStorage.setItem(STORAGE_KEY, themeName);
+    targetElements.forEach(function(el) {
+      el.setAttribute('data-theme', effectiveTheme);
+    });
 
-    // 更新主题按钮状态
+    if (effectiveTheme.startsWith('custom-')) {
+      var customData = getCustomTheme(effectiveTheme.replace('custom-', ''));
+      if (customData) {
+        targetElements.forEach(function(el) {
+          Object.entries(customData.vars).forEach(function(entry) {
+            el.style.setProperty(entry[0], entry[1]);
+          });
+        });
+      }
+    }
+
+    currentTheme = effectiveTheme;
+    localStorage.setItem(STORAGE_KEY, effectiveTheme);
     updateThemeButtons();
   }
 
@@ -378,9 +411,9 @@ const ThemeModule = (function() {
         var customData = getCustomTheme(editName);
         editorState.vars[v.key] = customData ? (customData.vars[v.key] || '') : '';
       } else {
-        // 默认复制当前主题的值
-        var computed = getComputedStyle(document.documentElement);
-        editorState.vars[v.key] = computed.getPropertyValue(v.key).trim();
+        // 默认从 BUILTIN_THEMES 读取值
+        var baseVars = BUILTIN_THEMES[currentTheme] ? BUILTIN_THEMES[currentTheme].vars : BUILTIN_THEMES.light.vars;
+        editorState.vars[v.key] = baseVars[v.key] || '';
       }
     });
 

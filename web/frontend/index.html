@@ -309,7 +309,7 @@
         </section>
 
         <!-- ===== 审核界面（全屏沉浸式 Diff 视图） ===== -->
-        <section id="review-section" style="display: none">
+        <section id="review-section" data-theme="light" style="display: none">
           <div class="review-fullscreen">
             <!-- 顶部工具栏 -->
             <div class="review-toolbar">
@@ -413,6 +413,13 @@
               </div>
             </div>
 
+            <!-- 审核内容区域 -->
+            <div class="review-content-area">
+              <div class="review-page-container" id="review-page-container">
+                <!-- 动态生成：审核行 -->
+              </div>
+            </div>
+
             <!-- 底部操作栏 -->
             <div class="review-bottom-bar">
               <div class="bottom-bar-left">
@@ -434,7 +441,7 @@
         </section>
 
         <!-- ===== 批量审核页面（全屏） ===== -->
-        <section id="batch-review-section" style="display: none">
+        <section id="batch-review-section" data-theme="light" style="display: none">
           <div class="review-fullscreen">
             <div class="review-toolbar">
               <div class="toolbar-left">

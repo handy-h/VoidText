@@ -12,9 +12,45 @@
   font-display: swap;
 }
 
-/* ==================== 默认主题：寂灭黑（dark） ==================== */
-:root,
-[data-theme="dark"] {
+/* ==================== 亮色护眼（light） ==================== */
+#review-section[data-theme="light"],
+#batch-review-section[data-theme="light"] {
+  --void-void: #f1f5f9;
+  --void-black: #f8fafc;
+  --void-deep: #f1f5f9;
+  --void-card: #ffffff;
+  --void-border: #e2e8f0;
+  --void-subtle: #cbd5e1;
+
+  --annihilation-dim: #0f766e;
+  --annihilation-cyan: #14b8a6;
+  --annihilation-glow: #2dd4bf;
+  --annihilation-dark: #115e59;
+
+  --ash-dim: #6366f1;
+  --ash-purple: #818cf8;
+  --ash-glow: #a5b4fc;
+
+  --status-pending: #cbd5e1;
+  --status-processing: #14b8a6;
+  --status-reviewing: #818cf8;
+  --status-completed: #10b981;
+  --status-failed: #f87171;
+
+  --text-primary: #334155;
+  --text-secondary: #64748b;
+  --text-muted: #8898a8;
+
+  --glow-cyan: 0 0 20px rgba(20, 184, 166, 0.15);
+  --glow-purple: 0 0 30px rgba(129, 140, 248, 0.12);
+
+  --loading-overlay-bg: rgba(248, 250, 252, 0.9);
+}
+
+/* ==================== 寂灭黑（dark） ==================== */
+/* 注意：只有显式选择 dark 时才应用，不绑定 :root */
+#review-section[data-theme="dark"],
+#batch-review-section[data-theme="dark"] {
   /* 虚空黑系 */
   --void-void: #050508;
   --void-black: #0a0a0f;
@@ -53,7 +89,8 @@
 }
 
 /* ==================== 羊皮纸（paper） ==================== */
-[data-theme="paper"] {
+#review-section[data-theme="paper"],
+#batch-review-section[data-theme="paper"] {
   --void-void: #e8e0d0;
   --void-black: #f5f0e8;
   --void-deep: #e8e0d0;
@@ -86,7 +123,8 @@
 }
 
 /* ==================== 绿豆沙（green） ==================== */
-[data-theme="green"] {
+#review-section[data-theme="green"],
+#batch-review-section[data-theme="green"] {
   --void-void: #b8e6be;
   --void-black: #c7edcc;
   --void-deep: #b8e6be;
@@ -119,7 +157,8 @@
 }
 
 /* ==================== 深夜蓝（night-blue） ==================== */
-[data-theme="night-blue"] {
+#review-section[data-theme="night-blue"],
+#batch-review-section[data-theme="night-blue"] {
   --void-void: #0a1420;
   --void-black: #0d1b2a;
   --void-deep: #1b2a3a;
@@ -152,7 +191,8 @@
 }
 
 /* ==================== 暖黄灯（warm） ==================== */
-[data-theme="warm"] {
+#review-section[data-theme="warm"],
+#batch-review-section[data-theme="warm"] {
   --void-void: #e8dac0;
   --void-black: #faf0e0;
   --void-deep: #f0e6d0;
@@ -186,7 +226,8 @@
 
 /* ==================== 自定义主题 ==================== */
 /* 自定义主题通过 JS 设置 data-theme="custom-{name}" + 行内 CSS 变量 */
-[data-theme^="custom-"] {
+#review-section[data-theme^="custom-"],
+#batch-review-section[data-theme^="custom-"] {
   /* 具体值由 ThemeModule 通过 document.documentElement.style.setProperty 设置 */
 }
 
@@ -228,65 +269,90 @@
 }
 
 /* 浅色主题下 Diff 高亮颜色调整 */
-[data-theme="paper"] .diff-highlight-original,
-[data-theme="green"] .diff-highlight-original,
-[data-theme="warm"] .diff-highlight-original {
+#review-section[data-theme="paper"] .diff-highlight-original,
+#batch-review-section[data-theme="paper"] .diff-highlight-original,
+#review-section[data-theme="green"] .diff-highlight-original,
+#batch-review-section[data-theme="green"] .diff-highlight-original,
+#review-section[data-theme="warm"] .diff-highlight-original,
+#batch-review-section[data-theme="warm"] .diff-highlight-original {
   color: #b03030;
 }
 
-[data-theme="paper"] .line-original del.diff-del,
-[data-theme="green"] .line-original del.diff-del,
-[data-theme="warm"] .line-original del.diff-del {
+#review-section[data-theme="paper"] .line-original del.diff-del,
+#batch-review-section[data-theme="paper"] .line-original del.diff-del,
+#review-section[data-theme="green"] .line-original del.diff-del,
+#batch-review-section[data-theme="green"] .line-original del.diff-del,
+#review-section[data-theme="warm"] .line-original del.diff-del,
+#batch-review-section[data-theme="warm"] .line-original del.diff-del {
   color: #8b0000;
 }
 
-[data-theme="paper"] .diff-highlight-suggested,
-[data-theme="green"] .diff-highlight-suggested,
-[data-theme="warm"] .diff-highlight-suggested {
+#review-section[data-theme="paper"] .diff-highlight-suggested,
+#batch-review-section[data-theme="paper"] .diff-highlight-suggested,
+#review-section[data-theme="green"] .diff-highlight-suggested,
+#batch-review-section[data-theme="green"] .diff-highlight-suggested,
+#review-section[data-theme="warm"] .diff-highlight-suggested,
+#batch-review-section[data-theme="warm"] .diff-highlight-suggested {
   color: #1a6a28;
 }
 
-[data-theme="paper"] .line-suggested ins.diff-ins,
-[data-theme="green"] .line-suggested ins.diff-ins,
-[data-theme="warm"] .line-suggested ins.diff-ins {
+#review-section[data-theme="paper"] .line-suggested ins.diff-ins,
+#batch-review-section[data-theme="paper"] .line-suggested ins.diff-ins,
+#review-section[data-theme="green"] .line-suggested ins.diff-ins,
+#batch-review-section[data-theme="green"] .line-suggested ins.diff-ins,
+#review-section[data-theme="warm"] .line-suggested ins.diff-ins,
+#batch-review-section[data-theme="warm"] .line-suggested ins.diff-ins {
   color: #006400;
 }
 
 /* 深夜蓝主题微调 */
-[data-theme="night-blue"] .diff-highlight-original {
+#review-section[data-theme="night-blue"] .diff-highlight-original,
+#batch-review-section[data-theme="night-blue"] .diff-highlight-original {
   color: #ff8a8a;
 }
 
-[data-theme="night-blue"] .line-original del.diff-del {
+#review-section[data-theme="night-blue"] .line-original del.diff-del,
+#batch-review-section[data-theme="night-blue"] .line-original del.diff-del {
   color: #ff6b6b;
 }
 
-[data-theme="night-blue"] .diff-highlight-suggested {
+#review-section[data-theme="night-blue"] .diff-highlight-suggested,
+#batch-review-section[data-theme="night-blue"] .diff-highlight-suggested {
   color: #6be89a;
 }
 
-[data-theme="night-blue"] .line-suggested ins.diff-ins {
+#review-section[data-theme="night-blue"] .line-suggested ins.diff-ins,
+#batch-review-section[data-theme="night-blue"] .line-suggested ins.diff-ins {
   color: #40c870;
 }
 
 /* 浅色主题下审核行分隔线 */
-[data-theme="paper"] .review-line,
-[data-theme="green"] .review-line,
-[data-theme="warm"] .review-line {
+#review-section[data-theme="paper"] .review-line,
+#batch-review-section[data-theme="paper"] .review-line,
+#review-section[data-theme="green"] .review-line,
+#batch-review-section[data-theme="green"] .review-line,
+#review-section[data-theme="warm"] .review-line,
+#batch-review-section[data-theme="warm"] .review-line {
   border-bottom-color: rgba(0, 0, 0, 0.06);
 }
 
 /* 浅色主题下 gutter 背景 */
-[data-theme="paper"] .review-line-gutter,
-[data-theme="green"] .review-line-gutter,
-[data-theme="warm"] .review-line-gutter {
+#review-section[data-theme="paper"] .review-line-gutter,
+#batch-review-section[data-theme="paper"] .review-line-gutter,
+#review-section[data-theme="green"] .review-line-gutter,
+#batch-review-section[data-theme="green"] .review-line-gutter,
+#review-section[data-theme="warm"] .review-line-gutter,
+#batch-review-section[data-theme="warm"] .review-line-gutter {
   background: rgba(0, 0, 0, 0.04);
 }
 
 /* 浅色主题下不可见字符 */
-[data-theme="paper"] .ws-char,
-[data-theme="green"] .ws-char,
-[data-theme="warm"] .ws-char {
+#review-section[data-theme="paper"] .ws-char,
+#batch-review-section[data-theme="paper"] .ws-char,
+#review-section[data-theme="green"] .ws-char,
+#batch-review-section[data-theme="green"] .ws-char,
+#review-section[data-theme="warm"] .ws-char,
+#batch-review-section[data-theme="warm"] .ws-char {
   background: rgba(0, 0, 0, 0.08);
   color: #666;
 }

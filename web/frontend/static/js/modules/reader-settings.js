@@ -580,7 +580,7 @@ const ReaderSettingsModule = (function() {
     });
 
     // 重置主题
-    ThemeModule.applyTheme('dark');
+    ThemeModule.applyTheme('light');
 
     // 重置字体
     applyFontFamily('默认无衬线');
