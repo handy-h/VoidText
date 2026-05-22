@@ -288,27 +288,25 @@ const ReviewModule = (function() {
     var startLine = (currentPage - 1) * pageSize;
     var endLine = Math.min(startLine + pageSize, fullLines.length);
 
-    // 渲染每一行
+    // 渲染每一行，用 DocumentFragment 批量插入
+    var fragment = document.createDocumentFragment();
+    var firstItemIndex = -1;
+
     for (var i = startLine; i < endLine; i++) {
-      var lineNum = i + 1; // 行号从1开始
+      var lineNum = i + 1;
       var lineText = fullLines[i];
       var items = lineGroups[lineNum] || [];
 
+      if (firstItemIndex < 0 && items.length > 0) firstItemIndex = i;
+
       var lineEls = createReviewLines(lineNum, lineText, items);
-      lineEls.forEach(function(el) {
-        container.appendChild(el);
-      });
+      lineEls.forEach(function(el) { fragment.appendChild(el); });
     }
+    container.appendChild(fragment);
 
     // 选中第一个有审核项的行
-    if (selectedItemIndex < 0) {
-      for (var i = startLine; i < endLine; i++) {
-        var lineNum = i + 1;
-        if (lineGroups[lineNum] && lineGroups[lineNum].length > 0) {
-          selectedItemIndex = i;
-          break;
-        }
-      }
+    if (selectedItemIndex < 0 && firstItemIndex >= 0) {
+      selectedItemIndex = firstItemIndex;
     }
     highlightSelectedItem();
   }
@@ -523,22 +521,23 @@ const ReviewModule = (function() {
   // ---------------------------------------------------------------
   // 选中高亮
   // ---------------------------------------------------------------
+  var _activeLineEl = null;
+
   function highlightSelectedItem() {
     var container = document.getElementById('review-page-container');
     if (!container) return;
 
-    // 移除所有 active
-    var allLines = container.querySelectorAll('.review-line');
-    allLines.forEach(function(line) {
-      line.classList.remove('active');
-    });
+    if (_activeLineEl) {
+      _activeLineEl.classList.remove('active');
+      _activeLineEl = null;
+    }
 
-    // 添加 active 到选中行
     if (selectedItemIndex >= 0) {
       var selectedLine = container.querySelector('[data-line-num="' + (selectedItemIndex + 1) + '"][data-type="original"]');
       if (selectedLine) {
         selectedLine.classList.add('active');
         selectedLine.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        _activeLineEl = selectedLine;
       }
     }
   }
@@ -699,159 +698,84 @@ const ReviewModule = (function() {
   // ---------------------------------------------------------------
   // 单条操作
   // ---------------------------------------------------------------
-  function approveReviewItem(itemId) {
+  function _reviewAction(endpoint, body, successMsg) {
     if (!currentFileMd5) return;
-    AppConfig.apiRequest('/files/' + currentFileMd5 + '/approve', {
+    AppConfig.apiRequest('/files/' + currentFileMd5 + endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ itemId: itemId })
+      body: JSON.stringify(body)
     })
       .then(function(data) {
         if (data.success) {
-          showFeedback('✓ 已采纳修改建议', 'success');
+          showFeedback(successMsg, 'success');
           loadReviewItems();
         } else {
           showFeedback(data.message || '操作失败', 'error');
         }
       })
-      .catch(function(err) {
-        showFeedback('操作失败: ' + err.message, 'error');
-      });
+      .catch(function(err) { showFeedback('操作失败: ' + err.message, 'error'); });
+  }
+
+  function approveReviewItem(itemId) {
+    _reviewAction('/approve', { itemId: itemId }, '✓ 已采纳修改建议');
   }
 
   function rejectReviewItem(itemId) {
-    if (!currentFileMd5) return;
-    AppConfig.apiRequest('/files/' + currentFileMd5 + '/reject', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ itemId: itemId })
-    })
-      .then(function(data) {
-        if (data.success) {
-          showFeedback('✗ 已拒绝修改建议', 'success');
-          loadReviewItems();
-        } else {
-          showFeedback(data.message || '操作失败', 'error');
-        }
-      })
-      .catch(function(err) {
-        showFeedback('操作失败: ' + err.message, 'error');
-      });
+    _reviewAction('/reject', { itemId: itemId }, '✗ 已拒绝修改建议');
   }
 
   function restoreReviewItem(itemId) {
-    AppConfig.apiRequest('/files/' + currentFileMd5 + '/restore', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ itemId: itemId })
-    })
-      .then(function(data) {
-        if (data.success) {
-          showFeedback('已恢复原文', 'success');
-          loadReviewItems();
-        } else {
-          showFeedback(data.message || '恢复失败', 'error');
-        }
-      })
-      .catch(function(err) {
-        showFeedback('恢复失败: ' + err.message, 'error');
-      });
+    _reviewAction('/restore', { itemId: itemId }, '已恢复原文');
   }
 
   // ---------------------------------------------------------------
   // 批量操作
   // ---------------------------------------------------------------
-  function batchApproveGroup(itemIds) {
+  function _batchAction(endpoint, itemIds, successMsg) {
     if (!currentFileMd5 || !itemIds.length) return;
-    AppConfig.apiRequest('/files/' + currentFileMd5 + '/batch-approve', {
+    AppConfig.apiRequest('/files/' + currentFileMd5 + endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ itemIds: itemIds })
     })
       .then(function(data) {
         if (data.success) {
-          showFeedback('✓ 已采纳 ' + itemIds.length + ' 项修改', 'success');
+          showFeedback(successMsg, 'success');
           loadReviewItems();
         } else {
           showFeedback(data.message || '批量操作失败', 'error');
         }
       })
-      .catch(function(err) {
-        showFeedback('批量操作失败: ' + err.message, 'error');
-      });
+      .catch(function(err) { showFeedback('批量操作失败: ' + err.message, 'error'); });
+  }
+
+  function batchApproveGroup(itemIds) {
+    _batchAction('/batch-approve', itemIds, '✓ 已采纳 ' + itemIds.length + ' 项修改');
   }
 
   function batchRejectGroup(itemIds) {
-    if (!currentFileMd5 || !itemIds.length) return;
-    AppConfig.apiRequest('/files/' + currentFileMd5 + '/batch-reject', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ itemIds: itemIds })
-    })
-      .then(function(data) {
-        if (data.success) {
-          showFeedback('✗ 已拒绝 ' + itemIds.length + ' 项修改', 'success');
-          loadReviewItems();
-        } else {
-          showFeedback(data.message || '批量操作失败', 'error');
-        }
-      })
-      .catch(function(err) {
-        showFeedback('批量操作失败: ' + err.message, 'error');
-      });
+    _batchAction('/batch-reject', itemIds, '✗ 已拒绝 ' + itemIds.length + ' 项修改');
   }
 
   // ---------------------------------------------------------------
   // 全局批量操作
   // ---------------------------------------------------------------
-  function batchApproveAll() {
+  function _batchAllAction(endpoint, successVerb) {
     if (!currentFileMd5) return;
     var pendingIds = reviewItems.filter(function(item) { return item.status === 'pending'; }).map(function(item) { return item.id; });
     if (pendingIds.length === 0) {
       showFeedback('没有待审核项', 'info');
       return;
     }
-    AppConfig.apiRequest('/files/' + currentFileMd5 + '/batch-approve', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ itemIds: pendingIds })
-    })
-      .then(function(data) {
-        if (data.success) {
-          showFeedback('✓ 已通过所有待审核项 (' + pendingIds.length + ')', 'success');
-          loadReviewItems();
-        } else {
-          showFeedback(data.message || '操作失败', 'error');
-        }
-      })
-      .catch(function(err) {
-        showFeedback('批量操作失败: ' + err.message, 'error');
-      });
+    _batchAction(endpoint, pendingIds, successVerb + '所有待审核项 (' + pendingIds.length + ')');
+  }
+
+  function batchApproveAll() {
+    _batchAllAction('/batch-approve', '✓ 已通过');
   }
 
   function batchRejectAll() {
-    if (!currentFileMd5) return;
-    var pendingIds = reviewItems.filter(function(item) { return item.status === 'pending'; }).map(function(item) { return item.id; });
-    if (pendingIds.length === 0) {
-      showFeedback('没有待审核项', 'info');
-      return;
-    }
-    AppConfig.apiRequest('/files/' + currentFileMd5 + '/batch-reject', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ itemIds: pendingIds })
-    })
-      .then(function(data) {
-        if (data.success) {
-          showFeedback('✗ 已拒绝所有待审核项 (' + pendingIds.length + ')', 'success');
-          loadReviewItems();
-        } else {
-          showFeedback(data.message || '操作失败', 'error');
-        }
-      })
-      .catch(function(err) {
-        showFeedback('批量操作失败: ' + err.message, 'error');
-      });
+    _batchAllAction('/batch-reject', '✗ 已拒绝');
   }
 
   // ---------------------------------------------------------------
@@ -1006,28 +930,6 @@ const ReviewModule = (function() {
   // ---------------------------------------------------------------
   // 类型/状态文本
   // ---------------------------------------------------------------
-  function getModificationTypeText(type) {
-    var map = {
-      typo: '错别字',
-      typo_correction: '错别字修正',
-      duplicate_paragraph: '重复段落',
-      advertisement: '广告',
-      grammar: '语法错误',
-      style: '风格问题',
-      character_correction: '错误内容',
-      text_deletion: '多余内容',
-      text_insertion: '缺失内容',
-      llm_fix: '智能修复',
-      punctuation: '标点符号错用',
-      html_entity: 'HTML实体',
-      whitespace: '空白格式',
-      encoding_fix: '编码修复',
-      garbled_text_removal: '乱码清除',
-      traditional_to_simple: '繁转简'
-    };
-    return map[type] || type || '';
-  }
-
   function getReviewStatusText(status) {
     var map = {
       pending: '待审核',
@@ -1036,20 +938,6 @@ const ReviewModule = (function() {
       edited: '已编辑'
     };
     return map[status] || status || '';
-  }
-
-  // ---------------------------------------------------------------
-  // 工具函数
-  // ---------------------------------------------------------------
-  function showFeedback(message, type) {
-    var fb = document.getElementById('feedback');
-    if (!fb) return;
-    fb.textContent = message;
-    fb.className = 'feedback ' + (type || 'success');
-    fb.style.display = 'block';
-    setTimeout(function() {
-      fb.style.display = 'none';
-    }, 3000);
   }
 
   // ---------------------------------------------------------------

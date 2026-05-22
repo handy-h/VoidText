@@ -169,16 +169,9 @@ const DiffUtils = (function() {
         const v = op.value;
         if (capturingBefore) {
           if (beforeLen + v.length <= contextLen) {
-            if (op.type === 'equal') {
-              prefixOrig += v;
-              prefixSugg += v;
-              beforeLen += v.length;
-            } else {
-              // 如果 equal 之前就有变更，也捕获
-              prefixOrig += v;
-              prefixSugg += v;
-              beforeLen += v.length;
-            }
+            prefixOrig += v;
+            prefixSugg += v;
+            beforeLen += v.length;
           } else {
             // 超过 contextLen，截取尾部
             const needed = contextLen - beforeLen;
@@ -195,15 +188,9 @@ const DiffUtils = (function() {
         // 变更后的上下文
         const v = op.value;
         if (afterLen + v.length <= contextLen) {
-          if (op.type === 'equal') {
-            suffixOrig += v;
-            suffixSugg += v;
-            afterLen += v.length;
-          } else {
-            suffixOrig += v;
-            suffixSugg += v;
-            afterLen += v.length;
-          }
+          suffixOrig += v;
+          suffixSugg += v;
+          afterLen += v.length;
         } else {
           const needed = contextLen - afterLen;
           if (needed > 0) {

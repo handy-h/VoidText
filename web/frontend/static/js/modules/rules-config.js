@@ -137,7 +137,7 @@ const RulesConfigModule = (function() {
           const parts = [];
           if (file.title) parts.push('\u6807\u9898: ' + file.title);
           if (file.author) parts.push('\u4F5C\u8005: ' + file.author);
-          if (file.fileSize) parts.push('\u5927\u5C0F: ' + formatFileSize(file.fileSize));
+          if (file.fileSize) parts.push('\u5927\u5C0F: ' + DomUtils.formatFileSize(file.fileSize));
           DomUtils.setTextContent(infoDiv, parts.join(" | "));
         }
 
@@ -250,36 +250,6 @@ const RulesConfigModule = (function() {
     if (currentFileMd5) {
       FileManager.downloadFile(currentFileMd5);
     }
-  }
-
-  // 格式化文件大小
-  function formatFileSize(bytes) {
-    const kb = 1024;
-    const mb = kb * 1024;
-    const gb = mb * 1024;
-    switch (true) {
-      case bytes >= gb:
-        return (bytes / gb).toFixed(1) + "GB";
-      case bytes >= mb:
-        return (bytes / mb).toFixed(1) + "MB";
-      case bytes >= kb:
-        return (bytes / kb).toFixed(1) + "KB";
-      default:
-        return bytes + "B";
-    }
-  }
-
-  // 显示反馈消息
-  function showFeedback(message, type) {
-    const fb = document.getElementById("feedback");
-    if (!fb) return;
-
-    fb.textContent = message;
-    fb.className = "feedback " + (type || "success");
-    fb.style.display = "block";
-    setTimeout(() => {
-      fb.style.display = "none";
-    }, 3000);
   }
 
   // 公共API

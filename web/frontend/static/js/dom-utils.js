@@ -295,6 +295,25 @@ const DomUtils = {
     console.warn('reprocessFile函数需要在主文件中实现');
   },
   
+  // 显示 Toast 反馈
+  showFeedback: function(message, type) {
+    const fb = document.getElementById('feedback');
+    if (!fb) return;
+    fb.textContent = message;
+    fb.className = 'feedback ' + (type || 'success');
+    fb.style.display = 'block';
+    setTimeout(() => { fb.style.display = 'none'; }, 3000);
+  },
+
+  // 格式化文件大小
+  formatFileSize: function(bytes) {
+    const kb = 1024, mb = kb * 1024, gb = mb * 1024;
+    if (bytes >= gb) return (bytes / gb).toFixed(1) + 'GB';
+    if (bytes >= mb) return (bytes / mb).toFixed(1) + 'MB';
+    if (bytes >= kb) return (bytes / kb).toFixed(1) + 'KB';
+    return bytes + 'B';
+  },
+
   // 安全地创建上传结果显示
   createUploadResult: function(data) {
     const container = this.createElement('div');
