@@ -110,5 +110,8 @@ func scanVersionRows(rows *sql.Rows) ([]VersionRecord, error) {
 		}
 		records = append(records, record)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("行迭代错误: %w", err)
+	}
 	return records, nil
 }

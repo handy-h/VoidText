@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +18,17 @@ import (
 	"voidtext/internal/file"
 	"voidtext/internal/logging"
 )
+
+// sanitizeFileName 提取纯文件名，防止路径穿越攻击
+func sanitizeFileName(name string) string {
+	clean := filepath.Base(filepath.Clean(name))
+	clean = strings.ReplaceAll(clean, "/", "_")
+	clean = strings.ReplaceAll(clean, "\\", "_")
+	if clean == "." || clean == "" {
+		clean = "upload.txt"
+	}
+	return clean
+}
 
 // UploadFile 上传文件（支持MD5识别和智能行为）
 func UploadFile(c *gin.Context) {
@@ -31,43 +43,46 @@ func UploadFile(c *gin.Context) {
 		return
 	}
 
+	// 净化文件名，防止路径穿越
+	safeFileName := sanitizeFileName(f.Filename)
+
 	// 记录上传文件信息
 	logging.Info("收到文件上传请求", map[string]interface{}{
-		"filename": f.Filename,
+		"filename": safeFileName,
 		"size":     f.Size,
 		"client_ip": c.ClientIP(),
 	})
 
 	if f.Size > config.AppConfigInstance.MaxFileSize {
 		logging.Warn("文件大小超过限制", map[string]interface{}{
-			"filename": f.Filename,
+			"filename": safeFileName,
 			"size":     f.Size,
 			"max_size": config.AppConfigInstance.MaxFileSize,
 		})
 		c.JSON(http.StatusBadRequest, errors.NewErrorResponse(
-			errors.NewWithDetails(errors.ErrBadRequest, "文件大小超过限制", 
+			errors.NewWithDetails(errors.ErrBadRequest, "文件大小超过限制",
 				fmt.Sprintf("文件大小: %d, 最大限制: %d", f.Size, config.AppConfigInstance.MaxFileSize)),
 		))
 		return
 	}
 
-	if strings.ToLower(filepath.Ext(f.Filename)) != ".txt" {
+	if strings.ToLower(filepath.Ext(safeFileName)) != ".txt" {
 		logging.Warn("不支持的文件类型", map[string]interface{}{
-			"filename": f.Filename,
-			"extension": filepath.Ext(f.Filename),
+			"filename":  safeFileName,
+			"extension": filepath.Ext(safeFileName),
 		})
 		c.JSON(http.StatusBadRequest, errors.NewErrorResponse(
-			errors.NewWithDetails(errors.ErrBadRequest, "不支持的文件类型", 
-				fmt.Sprintf("只支持 .txt 文件，当前文件: %s", f.Filename)),
+			errors.NewWithDetails(errors.ErrBadRequest, "不支持的文件类型",
+				fmt.Sprintf("只支持 .txt 文件，当前文件: %s", safeFileName)),
 		))
 		return
 	}
 
-	tempPath := filepath.Join(config.AppConfigInstance.DataDir, "temp", fmt.Sprintf("%d_%s", time.Now().UnixNano(), f.Filename))
+	tempPath := filepath.Join(config.AppConfigInstance.DataDir, "temp", fmt.Sprintf("%d_%s", time.Now().UnixNano(), safeFileName))
 	err = c.SaveUploadedFile(f, tempPath)
 	if err != nil {
 		logging.Error("保存上传文件失败", err, map[string]interface{}{
-			"filename": f.Filename,
+			"filename": safeFileName,
 			"temp_path": tempPath,
 		})
 		c.JSON(http.StatusInternalServerError, errors.NewErrorResponse(
@@ -80,7 +95,7 @@ func UploadFile(c *gin.Context) {
 	if err != nil {
 		os.Remove(tempPath)
 		logging.Error("计算文件MD5失败", err, map[string]interface{}{
-			"filename": f.Filename,
+			"filename": safeFileName,
 			"temp_path": tempPath,
 		})
 		c.JSON(http.StatusInternalServerError, errors.NewErrorResponse(
@@ -101,7 +116,10 @@ func UploadFile(c *gin.Context) {
 		return
 	}
 
-	versionRecord, _ := database.GetVersionByMd5(fileMd5)
+	versionRecord, err := database.GetVersionByMd5(fileMd5)
+	if err != nil {
+		logging.Warn("查询版本记录失败", map[string]interface{}{"file_md5": fileMd5, "error": err.Error()})
+	}
 
 	if existingFile != nil {
 		handleExistingFile(c, existingFile, tempPath, fileMd5)
@@ -109,11 +127,11 @@ func UploadFile(c *gin.Context) {
 	}
 
 	if versionRecord != nil {
-		handleIntermediateVersion(c, versionRecord, tempPath, fileMd5, f.Filename)
+		handleIntermediateVersion(c, versionRecord, tempPath, fileMd5, safeFileName)
 		return
 	}
 
-	createNewFileRecord(c, tempPath, fileMd5, f.Filename, f.Size)
+	createNewFileRecord(c, tempPath, fileMd5, safeFileName, f.Size)
 }
 
 // handleExistingFile 处理已存在的文件
@@ -348,15 +366,28 @@ func ResumeFile(c *gin.Context) {
 	})
 }
 
-// ListFiles 列出所有文件
+// ListFiles 列出所有文件（支持分页：limit/offset 查询参数）
 func ListFiles(c *gin.Context) {
-	records, err := database.ListAllFiles()
+	limit := 50
+	offset := 0
+	if l := c.Query("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 200 {
+			limit = n
+		}
+	}
+	if o := c.Query("offset"); o != "" {
+		if n, err := strconv.Atoi(o); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+
+	records, total, err := database.ListAllFiles(limit, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "读取文件列表失败: " + err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": true, "files": records})
+	c.JSON(http.StatusOK, gin.H{"success": true, "files": records, "total": total, "limit": limit, "offset": offset})
 }
 
 // GetFile 获取文件详情
@@ -376,7 +407,7 @@ func GetFile(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "file": record})
 }
 
-// GetFileContent 获取文件内容
+// GetFileContent 获取文件内容（limit 参数单位为字节，默认 1MB，最大 10MB）
 func GetFileContent(c *gin.Context) {
 	md5 := c.Param("md5")
 
@@ -390,13 +421,44 @@ func GetFileContent(c *gin.Context) {
 		return
 	}
 
-	content, err := os.ReadFile(record.FilePath)
+	const defaultLimit = 1 * 1024 * 1024  // 1MB
+	const maxLimit = 10 * 1024 * 1024     // 10MB
+	readLimit := int64(defaultLimit)
+	if q := c.Query("limit"); q != "" {
+		if n, err := strconv.ParseInt(q, 10, 64); err == nil && n > 0 {
+			if n > maxLimit {
+				n = maxLimit
+			}
+			readLimit = n
+		}
+	}
+
+	f, err := os.Open(record.FilePath)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "读取文件失败: " + err.Error()})
 		return
 	}
+	defer f.Close()
 
-	c.JSON(http.StatusOK, gin.H{"success": true, "content": string(content)})
+	buf := make([]byte, readLimit)
+	n, err := f.Read(buf)
+	if err != nil && n == 0 {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "读取文件失败: " + err.Error()})
+		return
+	}
+
+	fi, _ := f.Stat()
+	var fileSize int64
+	if fi != nil {
+		fileSize = fi.Size()
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":   true,
+		"content":   string(buf[:n]),
+		"truncated": int64(n) < fileSize,
+		"fileSize":  fileSize,
+	})
 }
 
 // DownloadFile 下载文件（支持中间版本下载）

@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 
 	"voidtext/internal/config"
 	"voidtext/internal/database"
+	"voidtext/internal/logging"
 	"voidtext/internal/processor"
 )
 
@@ -118,7 +120,10 @@ func GetFileStatus(c *gin.Context) {
 	}
 
 	if record.Status == "reviewing" || record.Status == "processing" || record.CurrentStep == "review" {
-		total, resolved, _ := database.GetReviewProgress(fileMd5)
+		total, resolved, err := database.GetReviewProgress(fileMd5)
+		if err != nil {
+			logging.Warn("获取审核进度失败", map[string]interface{}{"file_md5": fileMd5, "error": err.Error()})
+		}
 		response["reviewTotal"] = total
 		response["reviewResolved"] = resolved
 	}
@@ -410,9 +415,15 @@ func GetProcessingReport(c *gin.Context) {
 		return
 	}
 
-	total, resolved, _ := database.GetReviewProgress(fileMd5)
+	total, resolved, err := database.GetReviewProgress(fileMd5)
+	if err != nil {
+		logging.Warn("获取审核进度失败", map[string]interface{}{"file_md5": fileMd5, "error": err.Error()})
+	}
 
-	versions, _ := database.GetVersionsByOriginalMd5(fileMd5)
+	versions, err := database.GetVersionsByOriginalMd5(fileMd5)
+	if err != nil {
+		logging.Warn("获取版本历史失败", map[string]interface{}{"file_md5": fileMd5, "error": err.Error()})
+	}
 
 	report := gin.H{
 		"success": true,
@@ -447,7 +458,11 @@ func GetProcessingReport(c *gin.Context) {
 
 // updateReviewProgress 更新审核进度
 func updateReviewProgress(fileMd5 string) {
-	total, resolved, _ := database.GetReviewProgress(fileMd5)
+	total, resolved, err := database.GetReviewProgress(fileMd5)
+	if err != nil {
+		logging.Warn("获取审核进度失败", map[string]interface{}{"file_md5": fileMd5, "error": err.Error()})
+		return
+	}
 	if total > 0 {
 		stepProgress := resolved * 100 / total
 		progress := processor.CalculateProgress(processor.StepReview, stepProgress)
@@ -714,31 +729,55 @@ func finalScan(lines []string, original, suggested string) int {
 	return -1
 }
 
-// buildReportHTML 构建HTML格式报告
-func buildReportHTML(data gin.H) string {
-	file := data["file"].(gin.H)
-	review := data["review"].(gin.H)
+// reportData 报告模板数据
+type reportData struct {
+	Title    string
+	Author   string
+	FileName string
+	Status   string
+	Progress interface{}
+	Total    interface{}
+	Resolved interface{}
+}
 
-	html := fmt.Sprintf(`<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>处理报告 - %s</title>
-<style>body{font-family:sans-serif;margin:20px}table{border-collapse:collapse;width:100%%}td,th{border:1px solid #ddd;padding:8px;text-align:left}</style>
+var reportTmpl = template.Must(template.New("report").Parse(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>处理报告 - {{.Title}}</title>
+<style>body{font-family:sans-serif;margin:20px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:8px;text-align:left}</style>
 </head><body>
 <h1>处理报告</h1>
 <h2>文件信息</h2>
 <table><tr><th>属性</th><th>值</th></tr>
-<tr><td>小说名称</td><td>%s</td></tr>
-<tr><td>作者</td><td>%s</td></tr>
-<tr><td>文件名</td><td>%s</td></tr>
-<tr><td>状态</td><td>%s</td></tr>
-<tr><td>进度</td><td>%d%%</td></tr>
+<tr><td>小说名称</td><td>{{.Title}}</td></tr>
+<tr><td>作者</td><td>{{.Author}}</td></tr>
+<tr><td>文件名</td><td>{{.FileName}}</td></tr>
+<tr><td>状态</td><td>{{.Status}}</td></tr>
+<tr><td>进度</td><td>{{.Progress}}%</td></tr>
 </table>
 <h2>审核统计</h2>
-<p>总条目: %d, 已处理: %d</p>
-</body></html>`,
-		file["title"], file["title"], file["author"], file["fileName"],
-		file["status"], file["progress"], review["total"], review["resolved"])
+<p>总条目: {{.Total}}, 已处理: {{.Resolved}}</p>
+</body></html>`))
 
-	return html
+// buildReportHTML 构建HTML格式报告（使用 html/template 防止 XSS）
+func buildReportHTML(data gin.H) string {
+	fileMap, _ := data["file"].(gin.H)
+	reviewMap, _ := data["review"].(gin.H)
+
+	d := reportData{
+		Title:    fmt.Sprintf("%v", fileMap["title"]),
+		Author:   fmt.Sprintf("%v", fileMap["author"]),
+		FileName: fmt.Sprintf("%v", fileMap["fileName"]),
+		Status:   fmt.Sprintf("%v", fileMap["status"]),
+		Progress: fileMap["progress"],
+		Total:    reviewMap["total"],
+		Resolved: reviewMap["resolved"],
+	}
+
+	var buf strings.Builder
+	if err := reportTmpl.Execute(&buf, d); err != nil {
+		return fmt.Sprintf("<html><body><p>报告生成失败: %s</p></body></html>",
+			template.HTMLEscapeString(err.Error()))
+	}
+	return buf.String()
 }
 
 func formatLogDetails(log *database.ProcessingLogRecord) string {

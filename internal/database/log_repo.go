@@ -1,6 +1,7 @@
 package database
 
 import (
+	"database/sql"
 	"fmt"
 	"time"
 )
@@ -54,6 +55,9 @@ func GetProcessingLogsByFileMd5(fileMd5 string) ([]ProcessingLogRecord, error) {
 		}
 		records = append(records, record)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("行迭代错误: %w", err)
+	}
 	return records, nil
 }
 
@@ -68,8 +72,11 @@ func GetLatestProcessingLog(fileMd5 string) (*ProcessingLogRecord, error) {
 		&record.ID, &record.FileMd5, &record.Step, &record.Action,
 		&record.Details, &record.Status, &record.Timestamp,
 	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("查询最新处理日志失败: %w", err)
 	}
 	return &record, nil
 }
@@ -95,6 +102,9 @@ func GetRecentProcessingLogs(fileMd5 string, limit int) ([]ProcessingLogRecord, 
 			return nil, fmt.Errorf("扫描处理日志失败: %w", err)
 		}
 		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("行迭代错误: %w", err)
 	}
 	return records, nil
 }

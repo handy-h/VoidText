@@ -50,6 +50,16 @@ func Init(dataDir string) error {
 		return fmt.Errorf("设置缓存大小失败: %w", err)
 	}
 
+	// 启用外键约束（SQLite 默认关闭）
+	if _, err := db.Exec("PRAGMA foreign_keys = ON;"); err != nil {
+		return fmt.Errorf("启用外键约束失败: %w", err)
+	}
+
+	// 写锁等待超时：5秒内重试，避免并发写入时立即报 "database is locked"
+	if _, err := db.Exec("PRAGMA busy_timeout = 5000;"); err != nil {
+		return fmt.Errorf("设置 busy_timeout 失败: %w", err)
+	}
+
 	// SQLite并发限制：单个连接可以安全处理多个goroutine的并发操作
 	// 但写入操作必须序列化，所以设置MaxOpenConns=1确保写入顺序执行
 	// 读取操作可以并发，但SQLite驱动本身支持并发读取
@@ -193,14 +203,13 @@ func createTables() error {
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			UNIQUE(prompt_name, prompt_version)
 		)`,
-		`CREATE INDEX IF NOT EXISTS idx_files_md5 ON files(md5)`,
 		`CREATE INDEX IF NOT EXISTS idx_files_original_md5 ON files(original_md5)`,
 		`CREATE INDEX IF NOT EXISTS idx_files_status ON files(status)`,
-		`CREATE INDEX IF NOT EXISTS idx_versions_version_md5 ON versions(version_md5)`,
 		`CREATE INDEX IF NOT EXISTS idx_versions_original_md5 ON versions(original_md5)`,
 		`CREATE INDEX IF NOT EXISTS idx_review_items_file_md5 ON review_items(file_md5)`,
 		`CREATE INDEX IF NOT EXISTS idx_review_items_status ON review_items(file_md5, status)`,
-		`CREATE INDEX IF NOT EXISTS idx_processing_logs_file_md5 ON processing_logs(file_md5)`,
+		`CREATE INDEX IF NOT EXISTS idx_processing_logs_file_id ON processing_logs(file_md5, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_processing_logs_file_ts ON processing_logs(file_md5, timestamp DESC)`,
 		// 新增索引
 fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_chunk_repair_cache_file_md5 ON %s(file_md5)`, ChunkRepairCacheTable),
 fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_chunk_repair_cache_chunk_hash ON %s(chunk_hash)`, ChunkRepairCacheTable),
@@ -234,6 +243,13 @@ func migrateTables() error {
 	migrations := []string{
 		`ALTER TABLE chunk_repair_cache ADD COLUMN confidence REAL DEFAULT 1.0`,
 		`ALTER TABLE chunk_repair_cache ADD COLUMN source TEXT DEFAULT 'remote'`,
+		// 删除被 UNIQUE 约束自动覆盖的冗余索引
+		`DROP INDEX IF EXISTS idx_files_md5`,
+		`DROP INDEX IF EXISTS idx_versions_version_md5`,
+		// 用复合索引替换 processing_logs 单列索引
+		`DROP INDEX IF EXISTS idx_processing_logs_file_md5`,
+		`CREATE INDEX IF NOT EXISTS idx_processing_logs_file_id ON processing_logs(file_md5, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_processing_logs_file_ts ON processing_logs(file_md5, timestamp DESC)`,
 	}
 
 	for _, stmt := range migrations {

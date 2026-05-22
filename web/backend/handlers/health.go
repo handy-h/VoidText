@@ -2,8 +2,9 @@ package handlers
 
 import (
   "net/http"
+  "os"
   "time"
-  
+
   "github.com/gin-gonic/gin"
   "voidtext/internal/config"
   "voidtext/web/backend/middleware"
@@ -96,7 +97,18 @@ func HealthCheck(c *gin.Context) {
     Status:  "enabled",
     Message: "Five-step processing pipeline",
   }
-  
+
+  authStatus := "disabled"
+  authMsg := "No authentication configured"
+  if os.Getenv("API_TOKEN") != "" {
+    authStatus = "enabled"
+    authMsg = "Token-based authentication"
+  }
+  response.Services["authentication"] = ServiceInfo{
+    Status:  authStatus,
+    Message: authMsg,
+  }
+
   c.JSON(http.StatusOK, response)
 }
 

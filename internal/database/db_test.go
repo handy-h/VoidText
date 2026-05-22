@@ -164,7 +164,7 @@ func TestListAllFiles_ShouldReturnAllRecords(t *testing.T) {
 	CreateFile(&FileRecord{Md5: "list_001", Status: "pending"})
 	CreateFile(&FileRecord{Md5: "list_002", Status: "completed"})
 
-	records, err := ListAllFiles()
+	records, _, err := ListAllFiles(50, 0)
 	if err != nil {
 		t.Fatalf("ListAllFiles() error = %v", err)
 	}

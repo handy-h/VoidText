@@ -127,17 +127,26 @@ func ListPendingFiles() ([]FileRecord, error) {
 	return scanFileRows(rows)
 }
 
-// ListAllFiles 列出所有文件
-func ListAllFiles() ([]FileRecord, error) {
+// ListAllFiles 列出文件（分页）
+func ListAllFiles(limit, offset int) ([]FileRecord, int, error) {
+	var total int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM files`).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("查询文件总数失败: %w", err)
+	}
+
 	rows, err := db.Query(`
 		SELECT id, md5, original_md5, author, title, file_name, file_size, file_path, status, current_step, progress, rules_config, created_at, updated_at, error_msg
-		FROM files ORDER BY created_at DESC`)
+		FROM files ORDER BY created_at DESC LIMIT ? OFFSET ?`, limit, offset)
 	if err != nil {
-		return nil, fmt.Errorf("查询文件列表失败: %w", err)
+		return nil, 0, fmt.Errorf("查询文件列表失败: %w", err)
 	}
 	defer rows.Close()
 
-	return scanFileRows(rows)
+	records, err := scanFileRows(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+	return records, total, nil
 }
 
 // DeleteFile 删除文件记录
@@ -163,6 +172,9 @@ func scanFileRows(rows *sql.Rows) ([]FileRecord, error) {
 			return nil, fmt.Errorf("扫描文件记录失败: %w", err)
 		}
 		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("行迭代错误: %w", err)
 	}
 	return records, nil
 }

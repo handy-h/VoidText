@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -18,6 +19,7 @@ type RateLimiter struct {
 	maxRequests int           // 最大请求数
 	window      time.Duration // 时间窗口
 	cleanup     time.Duration // 清理间隔
+	stopCh      chan struct{}  // 停止清理 goroutine 的信号
 }
 
 // rateLimit 单个IP的限流信息
@@ -33,6 +35,7 @@ func NewRateLimiter(maxRequests int, window, cleanup time.Duration) *RateLimiter
 		maxRequests: maxRequests,
 		window:      window,
 		cleanup:     cleanup,
+		stopCh:      make(chan struct{}),
 	}
 
 	// 启动清理goroutine
@@ -74,20 +77,30 @@ func (rl *RateLimiter) Allow(ip string) bool {
 	return true
 }
 
+// Close 停止清理 goroutine，释放资源
+func (rl *RateLimiter) Close() {
+	close(rl.stopCh)
+}
+
 // cleanupExpired 清理过期的限流记录
 func (rl *RateLimiter) cleanupExpired() {
 	ticker := time.NewTicker(rl.cleanup)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		rl.mu.Lock()
-		now := time.Now()
-		for ip, limit := range rl.limits {
-			if now.After(limit.resetTime) {
-				delete(rl.limits, ip)
+	for {
+		select {
+		case <-rl.stopCh:
+			return
+		case <-ticker.C:
+			rl.mu.Lock()
+			now := time.Now()
+			for ip, limit := range rl.limits {
+				if now.After(limit.resetTime) {
+					delete(rl.limits, ip)
+				}
 			}
+			rl.mu.Unlock()
 		}
-		rl.mu.Unlock()
 	}
 }
 
@@ -193,7 +206,7 @@ func RateLimitMiddleware() gin.HandlerFunc {
 		resetTime := limiter.GetResetTime(ip)
 
 		c.Header("X-RateLimit-Limit", "100")
-		c.Header("X-RateLimit-Remaining", string(rune(remaining)))
+		c.Header("X-RateLimit-Remaining", strconv.Itoa(remaining))
 		c.Header("X-RateLimit-Reset", resetTime.Format(time.RFC1123))
 
 		c.Next()
@@ -256,8 +269,11 @@ func EndpointBasedRateLimit(maxRequests int, window time.Duration) gin.HandlerFu
 
 		if !exists {
 			mu.Lock()
-			limiter = NewRateLimiter(maxRequests, window, window*2)
-			limiters[key] = limiter
+			// double-check：避免两个 goroutine 同时进入写锁时重复创建
+			if limiter, exists = limiters[key]; !exists {
+				limiter = NewRateLimiter(maxRequests, window, window*2)
+				limiters[key] = limiter
+			}
 			mu.Unlock()
 		}
 

@@ -256,9 +256,9 @@ func TestRateLimitMiddleware(t *testing.T) {
     assert.Equal(t, http.StatusOK, w.Code)
     
     // 检查限流头信息
-    assert.Contains(t, w.Header(), "X-RateLimit-Limit")
-    assert.Contains(t, w.Header(), "X-RateLimit-Remaining")
-    assert.Contains(t, w.Header(), "X-RateLimit-Reset")
+    assert.Contains(t, w.Header(), "X-Ratelimit-Limit")
+    assert.Contains(t, w.Header(), "X-Ratelimit-Remaining")
+    assert.Contains(t, w.Header(), "X-Ratelimit-Reset")
   })
   
   t.Run("限流被禁用", func(t *testing.T) {

@@ -135,9 +135,10 @@ func TestHealthCheck(t *testing.T) {
   })
   
   t.Run("健康检查响应结构", func(t *testing.T) {
+    t.Setenv("API_TOKEN", "test-token")
     router := gin.New()
     router.GET("/health", handlers.HealthCheck)
-    
+
     w := httptest.NewRecorder()
     req, _ := http.NewRequest("GET", "/health", nil)
     router.ServeHTTP(w, req)

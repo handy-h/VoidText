@@ -82,19 +82,12 @@ func NewChunkCacheRepo() *ChunkCacheRepo {
 }
 
 // SaveChunkRepair 保存块修复结果到缓存
-// 使用事务确保原子性，避免并发写入导致的数据不一致
 func (r *ChunkCacheRepo) SaveChunkRepair(record *ChunkRepairCacheRecord) error {
-	tx, err := r.db.Begin()
-	if err != nil {
-		return fmt.Errorf("开始事务失败: %w", err)
-	}
-	defer tx.Rollback()
-
-	stmt := fmt.Sprintf(`INSERT OR REPLACE INTO %s 
+	stmt := fmt.Sprintf(`INSERT OR REPLACE INTO %s
 		(file_md5, chunk_id, chunk_hash, original_text, repaired_text, prompt_version, api_model, token_usage, processing_time_ms, confidence, source)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, ChunkRepairCacheTable)
 
-	_, err = tx.Exec(stmt,
+	_, err := r.db.Exec(stmt,
 		record.FileMd5,
 		record.ChunkID,
 		record.ChunkHash,
@@ -110,11 +103,6 @@ func (r *ChunkCacheRepo) SaveChunkRepair(record *ChunkRepairCacheRecord) error {
 	if err != nil {
 		return fmt.Errorf("插入块修复缓存失败: %w", err)
 	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("提交事务失败: %w", err)
-	}
-
 	return nil
 }
 
@@ -171,6 +159,9 @@ func (r *ChunkCacheRepo) GetUnfinishedChunks(fileMd5 string, totalChunks int) ([
 			return nil, fmt.Errorf("扫描块ID失败: %w", err)
 		}
 		cachedChunks[chunkID] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("行迭代错误: %w", err)
 	}
 
 	// 找出未完成的块
@@ -260,29 +251,22 @@ func (r *ChunkCacheRepo) GetPendingRetries(limit int) ([]RetryQueueRecord, error
 		}
 		records = append(records, record)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("行迭代错误: %w", err)
+	}
 
 	return records, nil
 }
 
 // UpdateRetryStatus 更新重试任务状态
-// 支持原子更新状态和重试计数，避免竞态条件
 func (r *ChunkCacheRepo) UpdateRetryStatus(id int64, status string, retryCount int) error {
-	tx, err := r.db.Begin()
-	if err != nil {
-		return fmt.Errorf("开始事务失败: %w", err)
-	}
-	defer tx.Rollback()
-
-	stmt := `UPDATE retry_queue SET status = ?, retry_count = ?, updated_at = ? WHERE id = ?`
-	_, err = tx.Exec(stmt, status, retryCount, time.Now(), id)
+	_, err := r.db.Exec(
+		`UPDATE retry_queue SET status = ?, retry_count = ?, updated_at = ? WHERE id = ?`,
+		status, retryCount, time.Now(), id,
+	)
 	if err != nil {
 		return fmt.Errorf("更新重试状态失败: %w", err)
 	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("提交事务失败: %w", err)
-	}
-
 	return nil
 }
 
@@ -353,49 +337,36 @@ func (r *ChunkCacheRepo) GetLatestPromptVersion(promptName string) (*PromptVersi
 }
 
 // UpdatePromptUsage 更新提示词使用统计
-// 原子更新使用次数和成功率，用于评估提示词效果
+// 用 UPSERT 原子更新，避免先读后写导致 error_pattern 等字段被 INSERT OR REPLACE 清空
 func (r *ChunkCacheRepo) UpdatePromptUsage(promptName, promptVersion string, success bool) error {
-	tx, err := r.db.Begin()
-	if err != nil {
-		return fmt.Errorf("开始事务失败: %w", err)
-	}
-	defer tx.Rollback()
-
-	// 先获取当前统计
-	var totalUses, successfulUses int
-	var promptContent, source string
-	row := tx.QueryRow(`SELECT total_uses, successful_uses, prompt_content, source FROM prompt_versions 
-		WHERE prompt_name = ? AND prompt_version = ?`, promptName, promptVersion)
-	if err := row.Scan(&totalUses, &successfulUses, &promptContent, &source); err != nil {
-		// 如果记录不存在，创建新记录
-		totalUses = 0
-		successfulUses = 0
-		promptContent = ""
-		source = "file"
-	}
-
-	// 更新统计
-	totalUses++
+	successIncrement := 0
 	if success {
-		successfulUses++
+		successIncrement = 1
 	}
-	successRate := 0.0
-	if totalUses > 0 {
-		successRate = float64(successfulUses) / float64(totalUses)
-	}
+	now := time.Now()
 
-	stmt := `INSERT OR REPLACE INTO prompt_versions 
-		(prompt_name, prompt_version, prompt_content, source, total_uses, successful_uses, success_rate, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-	_, err = tx.Exec(stmt, promptName, promptVersion, promptContent, source, totalUses, successfulUses, successRate, time.Now())
+	// ON CONFLICT DO UPDATE 只修改计数字段，保留 error_pattern、created_at 等其余字段不变
+	stmt := `
+		INSERT INTO prompt_versions
+			(prompt_name, prompt_version, prompt_content, source,
+			 total_uses, successful_uses, success_rate, updated_at)
+		VALUES (?, ?, '', 'file', 1, ?, ?, ?)
+		ON CONFLICT(prompt_name, prompt_version) DO UPDATE SET
+			total_uses      = total_uses + 1,
+			successful_uses = successful_uses + excluded.successful_uses,
+			success_rate    = CAST(successful_uses + excluded.successful_uses AS REAL)
+			                  / (total_uses + 1),
+			updated_at      = excluded.updated_at`
+
+	_, err := r.db.Exec(stmt,
+		promptName, promptVersion,
+		successIncrement,
+		float64(successIncrement),
+		now,
+	)
 	if err != nil {
 		return fmt.Errorf("更新提示词使用统计失败: %w", err)
 	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("提交事务失败: %w", err)
-	}
-
 	return nil
 }
 
@@ -474,8 +445,8 @@ func (r *ChunkCacheRepo) GetErrorRate() (float64, error) {
 
 	// 查询最近24小时内的总请求次数（缓存命中 + 错误）
 	var hitCount int
-	row = r.db.QueryRow(`SELECT COUNT(*) FROM chunk_repair_cache 
-		WHERE created_at >= datetime('now', '-24 hours')`)
+	row = r.db.QueryRow(fmt.Sprintf(`SELECT COUNT(*) FROM %s
+		WHERE created_at >= datetime('now', '-%s')`, ChunkRepairCacheTable, statsTimeWindow))
 	if err := row.Scan(&hitCount); err != nil {
 		return 0.0, fmt.Errorf("查询缓存命中次数失败: %w", err)
 	}

@@ -1,6 +1,9 @@
 package backend
 
 import (
+	"os"
+	"strings"
+
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 
@@ -10,23 +13,30 @@ import (
 
 // NewServer 创建新的Web服务器
 func NewServer() *gin.Engine {
-	r := gin.Default()
+	// 用 gin.New() 替代 gin.Default()，避免与自定义中间件重叠
+	r := gin.New()
 
-	// 添加错误处理中间件
+	// Recovery 必须最先注册，确保任何中间件 panic 都能被捕获
 	r.Use(middleware.Recovery())
 	r.Use(middleware.LoggingMiddleware())
 	r.Use(middleware.ErrorHandler())
 
-	// 添加全局限流中间件
+	// 全局限流
 	r.Use(middleware.RateLimitMiddleware())
 
 	// 开发模式：禁用静态文件缓存
 	r.Use(middleware.NoCache())
 
+	// CORS：从环境变量读取允许的 origin，多个用逗号分隔
+	// 默认仅允许 localhost，生产环境通过 CORS_ORIGINS 配置
+	corsOrigins := strings.Split(
+		getEnvStr("CORS_ORIGINS", "http://localhost:8080,http://127.0.0.1:8080"),
+		",",
+	)
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:8080", "http://127.0.0.1:8080"},
+		AllowOrigins:     corsOrigins,
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "X-API-Token", "X-Request-ID"},
 		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
 	}))
@@ -37,27 +47,28 @@ func NewServer() *gin.Engine {
 		c.File("./web/frontend/index.html")
 	})
 
-	// 健康检查端点
+	// 健康检查端点（无需鉴权）
 	r.GET("/health", handlers.HealthCheck)
 	r.GET("/health/ready", handlers.ReadinessCheck)
 	r.GET("/health/live", handlers.LivenessCheck)
 	r.GET("/health/rate-limit", handlers.RateLimitStatusCheck)
 	r.GET("/health/metrics", handlers.Metrics)
 
-	api := r.Group("/api")
+	// API 路由组：统一鉴权
+	api := r.Group("/api", middleware.AuthMiddleware())
 	{
 		// 上传文件 - 严格限流
 		api.POST("/files/upload", middleware.UploadRateLimit(), handlers.UploadFile)
-		
+
 		// 文件列表和详情 - 普通限流
 		api.GET("/files", middleware.APIRateLimit(), handlers.ListFiles)
 		api.GET("/files/:md5", middleware.APIRateLimit(), handlers.GetFile)
 		api.GET("/files/:md5/content", middleware.APIRateLimit(), handlers.GetFileContent)
 		api.GET("/files/:md5/download", middleware.APIRateLimit(), handlers.DownloadFile)
-		
+
 		// 删除文件 - 严格限流
 		api.DELETE("/files/:md5", middleware.StrictRateLimit(), handlers.DeleteFile)
-		
+
 		// 恢复文件 - 普通限流
 		api.POST("/files/:md5/resume", middleware.APIRateLimit(), handlers.ResumeFile)
 		api.PUT("/files/:md5/rules", middleware.APIRateLimit(), handlers.UpdateFileRules)
@@ -66,7 +77,7 @@ func NewServer() *gin.Engine {
 		api.POST("/files/:md5/run", middleware.APIRateLimit(), handlers.RunAllSteps)
 		api.GET("/files/:md5/status", middleware.APIRateLimit(), handlers.GetFileStatus)
 		api.GET("/files/:md5/review-items", middleware.APIRateLimit(), handlers.GetReviewItems)
-		
+
 		// 审核操作 - 普通限流
 		api.POST("/files/:md5/approve", middleware.APIRateLimit(), handlers.ApproveReviewItem)
 		api.POST("/files/:md5/reject", middleware.APIRateLimit(), handlers.RejectReviewItem)
@@ -85,3 +96,11 @@ func NewServer() *gin.Engine {
 
 	return r
 }
+
+func getEnvStr(key, defaultVal string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return defaultVal
+}
+
