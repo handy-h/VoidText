@@ -121,6 +121,26 @@ func TestValidate_ShouldFailForInvalidTemperature(t *testing.T) {
 	}
 }
 
+func TestLoad_ShouldSetDefaultLLMConcurrency(t *testing.T) {
+	os.Unsetenv("LLM_CONCURRENCY")
+	Load()
+
+	if AppConfigInstance.LLMConcurrency != 2 {
+		t.Errorf("LLMConcurrency = %d, want 2", AppConfigInstance.LLMConcurrency)
+	}
+}
+
+func TestLoad_ShouldOverrideLLMConcurrencyFromEnv(t *testing.T) {
+	os.Setenv("LLM_CONCURRENCY", "5")
+	defer os.Unsetenv("LLM_CONCURRENCY")
+
+	Load()
+
+	if AppConfigInstance.LLMConcurrency != 5 {
+		t.Errorf("LLMConcurrency = %d, want 5", AppConfigInstance.LLMConcurrency)
+	}
+}
+
 func TestGetEnvStr_ShouldReturnFallback(t *testing.T) {
 	os.Unsetenv("NONEXISTENT_KEY_TEST")
 	result := getEnvStr("NONEXISTENT_KEY_TEST", "fallback")

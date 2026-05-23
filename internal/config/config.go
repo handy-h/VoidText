@@ -38,6 +38,7 @@ type AppConfig struct {
 	CompletionModelName   string
 	CompletionTemperature float64
 	CompletionMaxTokens   int
+	LLMConcurrency        int
 
 	EnableLlmParagraphReconstruct bool
 	ParagraphChunkSize            int
@@ -103,14 +104,18 @@ func Load() error {
 		LLMApiKey:                 getEnvStr("LLM_API_KEY", ""),
 		CompletionModelName:       getEnvStr("COMPLETION_MODEL_NAME", "gpt-3.5-turbo-instruct"),
 		CompletionTemperature:     getEnvFloat("COMPLETION_TEMPERATURE", 0.3),
-		CompletionMaxTokens:              getEnvInt("COMPLETION_MAX_TOKENS", 2048),
-		EnableLlmParagraphReconstruct:    getEnvBool("ENABLE_LLM_PARAGRAPH_RECONSTRUCT", false),
-		ParagraphChunkSize:               getEnvInt("PARAGRAPH_CHUNK_SIZE", 8000),
-		EnableLocalModel:                 getEnvBool("ENABLE_LOCAL_MODEL", false),
-		LocalModelURL:                    getEnvStr("LOCAL_MODEL_URL", "http://localhost:11434"),
-		LocalModelName:                   getEnvStr("LOCAL_MODEL_NAME", "qwen2.5"),
-		LocalModelTimeout:                getEnvInt("LOCAL_MODEL_TIMEOUT", 30),
-		NameSeparators:                   getEnvStr("NAME_SEPARATORS", "-|—|·|·|_| "),
+		CompletionMaxTokens:           getEnvInt("COMPLETION_MAX_TOKENS", 2048),
+		LLMConcurrency:                getEnvInt("LLM_CONCURRENCY", 2),
+		EnableLlmParagraphReconstruct: getEnvBool("ENABLE_LLM_PARAGRAPH_RECONSTRUCT", false),
+		ParagraphChunkSize:            getEnvInt("PARAGRAPH_CHUNK_SIZE", 8000),
+		EnableLocalModel:              getEnvBool("ENABLE_LOCAL_MODEL", false),
+		LocalModelURL:                 getEnvStr("LOCAL_MODEL_URL", "http://localhost:11434"),
+		LocalModelName:                getEnvStr("LOCAL_MODEL_NAME", "qwen2.5"),
+		LocalModelTimeout:             getEnvInt("LOCAL_MODEL_TIMEOUT", 30),
+		NameSeparators:                getEnvStr("NAME_SEPARATORS", "-|—|·|·|_| "),
+	}
+	if cfg.LLMConcurrency < 1 {
+		cfg.LLMConcurrency = 1
 	}
 
 	if cfg.VectorModelURL == "" {

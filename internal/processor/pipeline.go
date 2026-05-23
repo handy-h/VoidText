@@ -1,13 +1,16 @@
 package processor
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"voidtext/internal/config"
@@ -284,6 +287,13 @@ type LlmCheckpoint struct {
 	Changes           []preprocess.Change `json:"changes"`
 }
 
+type llmParagraphResult struct {
+	Index    int
+	Repaired string
+	Changes  []preprocess.Change
+	Err      error
+}
+
 // processLlmFixStep LLM修复步骤（支持断点恢复和取消）
 func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, record *database.FileRecord) (*PipelineResult, error) {
 	if !rulesConfig.EnableModelRepair {
@@ -320,89 +330,177 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, record 
 
 	paragraphs := repairer.SplitIntoParagraphs(content)
 	totalParagraphs := len(paragraphs)
+	if totalParagraphs == 0 {
+		nextStep := GetNextStep(StepLlmFix)
+		database.UpdateFileStatus(fileMd5, "processing", nextStep, CalculateProgress(nextStep, 0), "")
+		return &PipelineResult{
+			CurrentStep: StepLlmFix,
+			NextStep:    nextStep,
+			Progress:    CalculateProgress(nextStep, 0),
+			Message:     "LLM修复完成，无需处理的段落",
+		}, nil
+	}
+	paragraphOffsets := calculateParagraphOffsets(paragraphs)
 
 	// 尝试从断点恢复
 	startIndex := 0
-	repairedParagraphs := []string{}
+	repairedParagraphs := make([]string, totalParagraphs)
+	for i := range repairedParagraphs {
+		repairedParagraphs[i] = paragraphs[i]
+	}
 	allChanges := []preprocess.Change{}
 
 	if record != nil && record.LlmProgressParagraph > 0 && record.LlmProgressParagraph < totalParagraphs {
 		startIndex = record.LlmProgressParagraph
-		// 恢复之前的已修复段落
-		for i := 0; i < startIndex; i++ {
-			repairedParagraphs = append(repairedParagraphs, paragraphs[i])
+		if record.LlmProgressCheckpoint != "" {
+			var checkpoint LlmCheckpoint
+			if err := json.Unmarshal([]byte(record.LlmProgressCheckpoint), &checkpoint); err == nil {
+				for i := 0; i < startIndex && i < len(checkpoint.RepairedParagraphs); i++ {
+					repairedParagraphs[i] = checkpoint.RepairedParagraphs[i]
+				}
+				allChanges = checkpoint.Changes
+			} else {
+				log.Printf("[LLM修复] 断点数据解析失败，仅恢复段落进度: %v", err)
+			}
 		}
 		log.Printf("[LLM修复] 断点恢复: 从段落 %d/%d 继续", startIndex+1, totalParagraphs)
 	}
 
 	const checkpointInterval = 50
+	concurrency := config.AppConfigInstance.LLMConcurrency
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	remaining := totalParagraphs - startIndex
+	if concurrency > remaining {
+		concurrency = remaining
+	}
+	progressTracker := GlobalProgressTracker.StartTracking(fileMd5, totalParagraphs)
+	if startIndex > 0 {
+		for i := 0; i < startIndex; i++ {
+			progressTracker.RecordChunkComplete(true, 0, "checkpoint")
+		}
+	}
+	defer GlobalProgressTracker.FinishTracking(fileMd5)
 
 	database.CreateProcessingLog(&database.ProcessingLogRecord{
 		FileMd5: fileMd5,
 		Step:    StepLlmFix,
 		Action:  "progress",
-		Details: fmt.Sprintf("LLM修复开始，共 %d 个段落，从第 %d 段开始", totalParagraphs, startIndex+1),
+		Details: fmt.Sprintf("LLM修复开始，共 %d 个段落，从第 %d 段开始，并发数 %d", totalParagraphs, startIndex+1, concurrency),
 		Status:  "running",
 	})
 
-	for i := startIndex; i < totalParagraphs; i++ {
-		// 定期检查取消标志
-		if i%checkpointInterval == 0 {
-			cancelled, _ := database.IsFileCancelled(fileMd5)
-			if cancelled {
-				log.Printf("[LLM修复] 文件 %s 已被取消，停止处理（已完成 %d/%d 段落）", fileMd5, i, totalParagraphs)
-				database.SetCancelFlag(fileMd5, 0) // 重置取消标志
-				return &PipelineResult{
-					CurrentStep: StepLlmFix,
-					NextStep:    "",
-					Progress:    CalculateProgress(StepLlmFix, i*100/totalParagraphs),
-					Message:     fmt.Sprintf("LLM修复已取消 (%d/%d)", i, totalParagraphs),
-				}, nil
+	jobs := make(chan int)
+	results := make(chan llmParagraphResult)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var wg sync.WaitGroup
+	for workerID := 0; workerID < concurrency; workerID++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for index := range jobs {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+
+				start := time.Now()
+				repaired, changes := repairer.RepairParagraph(paragraphs[index])
+				for changeIndex := range changes {
+					changes[changeIndex].Position += paragraphOffsets[index]
+				}
+				select {
+				case results <- llmParagraphResult{
+					Index:    index,
+					Repaired: repaired,
+					Changes:  changes,
+					Err:      nil,
+				}:
+				case <-ctx.Done():
+					return
+				}
+				source := "remote"
+				if repairer.RepairModelType != "api" {
+					source = "local"
+				}
+				progressTracker.RecordChunkComplete(true, time.Since(start).Milliseconds(), source)
+			}
+		}()
+	}
+	go func() {
+		defer close(jobs)
+		defer func() {
+			wg.Wait()
+			close(results)
+		}()
+		for i := startIndex; i < totalParagraphs; i++ {
+			select {
+			case <-ctx.Done():
+				return
+			case jobs <- i:
+			}
+		}
+	}()
+
+	nextToCommit := startIndex
+	pendingResults := make(map[int]llmParagraphResult)
+	completed := startIndex
+	cancelRequested := false
+	for result := range results {
+		if result.Err != nil {
+			return nil, result.Err
+		}
+
+		pendingResults[result.Index] = result
+		completed++
+
+		stepProgress := completed * 100 / totalParagraphs
+		database.UpdateFileStatus(fileMd5, "processing", StepLlmFix,
+			CalculateProgress(StepLlmFix, stepProgress),
+			fmt.Sprintf("LLM修复: 已完成 %d/%d 段落", completed, totalParagraphs))
+
+		for {
+			committed, ok := pendingResults[nextToCommit]
+			if !ok {
+				break
+			}
+			repairedParagraphs[nextToCommit] = committed.Repaired
+			allChanges = append(allChanges, committed.Changes...)
+			delete(pendingResults, nextToCommit)
+			nextToCommit++
+
+			if nextToCommit%checkpointInterval == 0 || nextToCommit == totalParagraphs {
+				if err := saveLlmCheckpoint(fileMd5, repairedParagraphs[:nextToCommit], allChanges, nextToCommit, totalParagraphs); err != nil {
+					log.Printf("[LLM修复] 断点保存失败: %v", err)
+				}
 			}
 		}
 
-		preview := paragraphs[i]
-		previewRunes := []rune(preview)
-		if len(previewRunes) > 40 {
-			preview = string(previewRunes[:40]) + "..."
-		}
-
-		database.UpdateFileStatus(fileMd5, "processing", StepLlmFix,
-			CalculateProgress(StepLlmFix, i*100/totalParagraphs),
-			fmt.Sprintf("LLM修复: 正在处理 %d/%d", i+1, totalParagraphs))
-
-		repaired, changes := repairer.RepairParagraph(paragraphs[i])
-		repairedParagraphs = append(repairedParagraphs, repaired)
-		allChanges = append(allChanges, changes...)
-
-		stepProgress := (i + 1) * 100 / totalParagraphs
-		database.UpdateFileStatus(fileMd5, "processing", StepLlmFix,
-			CalculateProgress(StepLlmFix, stepProgress),
-			fmt.Sprintf("LLM修复: 已完成 %d/%d 段落", i+1, totalParagraphs))
-
-		// 每隔 checkpointInterval 个段落保存断点
-		if (i+1)%checkpointInterval == 0 || i == totalParagraphs-1 {
-			checkpointContent := strings.Join(repairedParagraphs, "\n")
-			checkpointJSON, _ := json.Marshal(LlmCheckpoint{
-				ParagraphIndex:    i + 1,
-				RepairedParagraphs: repairedParagraphs,
-				Changes:           allChanges,
-			})
-			database.UpdateLlmProgress(fileMd5, i+1, string(checkpointJSON))
-			// 同时保存中间文件
-			saveIntermediateFile(fileMd5, StepLlmFix, checkpointContent)
-
-			database.CreateProcessingLog(&database.ProcessingLogRecord{
-				FileMd5: fileMd5,
-				Step:    StepLlmFix,
-				Action:  "checkpoint",
-				Details: fmt.Sprintf("断点保存: 段落 %d/%d (累计修改 %d 处)", i+1, totalParagraphs, len(allChanges)),
-				Status:  "running",
-			})
-
-			log.Printf("[LLM修复] 断点保存: %d/%d 段落完成", i+1, totalParagraphs)
+		if completed%checkpointInterval == 0 {
+			cancelled, _ := database.IsFileCancelled(fileMd5)
+			if cancelled {
+				cancelRequested = true
+				cancel()
+				database.SetCancelFlag(fileMd5, 0)
+				log.Printf("[LLM修复] 文件 %s 已被取消，已完成 %d/%d 段落，已提交 %d/%d 段落",
+					fileMd5, completed, totalParagraphs, nextToCommit, totalParagraphs)
+			}
 		}
 	}
+	if cancelRequested {
+		return &PipelineResult{
+			CurrentStep: StepLlmFix,
+			NextStep:    "",
+			Progress:    CalculateProgress(StepLlmFix, completed*100/totalParagraphs),
+			Message:     fmt.Sprintf("LLM修复已取消 (%d/%d)", completed, totalParagraphs),
+		}, nil
+	}
+	sort.Slice(allChanges, func(i, j int) bool {
+		return allChanges[i].Position < allChanges[j].Position
+	})
 
 	// 最终保存
 	repairResult := ModelRepairResult{
@@ -453,6 +551,47 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, record 
 		Progress:    progress,
 		Message:     fmt.Sprintf("LLM修复完成，修复建议: %d", len(repairResult.Changes)),
 	}, nil
+}
+
+func calculateParagraphOffsets(paragraphs []string) []int {
+	offsets := make([]int, len(paragraphs))
+	offset := 0
+	for i, paragraph := range paragraphs {
+		offsets[i] = offset
+		offset += len(paragraph)
+		if i < len(paragraphs)-1 {
+			offset++
+		}
+	}
+	return offsets
+}
+
+func saveLlmCheckpoint(fileMd5 string, repairedParagraphs []string, changes []preprocess.Change, paragraphIndex, totalParagraphs int) error {
+	checkpointContent := strings.Join(repairedParagraphs, "\n")
+	checkpointJSON, err := json.Marshal(LlmCheckpoint{
+		ParagraphIndex:    paragraphIndex,
+		RepairedParagraphs: repairedParagraphs,
+		Changes:           changes,
+	})
+	if err != nil {
+		return err
+	}
+	if err := database.UpdateLlmProgress(fileMd5, paragraphIndex, string(checkpointJSON)); err != nil {
+		return err
+	}
+	if err := saveIntermediateFile(fileMd5, StepLlmFix, checkpointContent); err != nil {
+		return err
+	}
+
+	database.CreateProcessingLog(&database.ProcessingLogRecord{
+		FileMd5: fileMd5,
+		Step:    StepLlmFix,
+		Action:  "checkpoint",
+		Details: fmt.Sprintf("断点保存: 段落 %d/%d (累计修改 %d 处)", paragraphIndex, totalParagraphs, len(changes)),
+		Status:  "running",
+	})
+	log.Printf("[LLM修复] 断点保存: %d/%d 段落完成", paragraphIndex, totalParagraphs)
+	return nil
 }
 
 // processReviewStep 审核步骤（进入审核等待状态）

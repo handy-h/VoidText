@@ -126,6 +126,21 @@ func TestRepairText_ShouldProcessAllParagraphs(t *testing.T) {
 	}
 }
 
+func TestRepairParagraph_ShouldReturnChangesWithRelativePositions(t *testing.T) {
+	initRepairerTestConfig()
+	mr := NewModelRepairer("local", "test-model")
+
+	_, changes := mr.repairLocally("她高兴及了，因该这样。")
+	if len(changes) == 0 {
+		t.Fatalf("repairLocally() should produce changes")
+	}
+	for _, change := range changes {
+		if change.Position < 0 {
+			t.Errorf("change.Position should be non-negative, got %d", change.Position)
+		}
+	}
+}
+
 func TestRepairText_ShouldReturnOriginalWhenDisabled(t *testing.T) {
 	config.AppConfigInstance.EnableModelRepair = false
 	mr := NewModelRepairer("local", "test-model")

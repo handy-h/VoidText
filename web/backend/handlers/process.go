@@ -132,6 +132,22 @@ func GetFileStatus(c *gin.Context) {
 		"fileName":    record.FileName,
 	}
 
+	if progressInfo, ok := processor.GlobalProgressTracker.GetProgress(fileMd5); ok {
+		response["chunkProgress"] = progressInfo
+	} else {
+		response["chunkProgress"] = gin.H{
+			"totalChunks":            0,
+			"processedChunks":        0,
+			"remainingChunks":        0,
+			"cacheHits":              0,
+			"apiCalls":               0,
+			"avgChunkTimeMs":         0,
+			"estimatedRemainingSecs": 0,
+			"progress":               0,
+			"elapsedSeconds":         0,
+		}
+	}
+
 	if record.Status == "processing" && record.ErrorMsg != "" {
 		response["message"] = record.ErrorMsg
 	}
