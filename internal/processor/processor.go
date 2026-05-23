@@ -4,9 +4,10 @@ import (
 	"sort"
 	"strings"
 
-	"voidtext/internal/config"
-	"voidtext/internal/processor/preprocess"
-	"voidtext/internal/processor/rules"
+	"txt-cleaning/internal/config"
+	"txt-cleaning/internal/processor/preprocess"
+	"txt-cleaning/internal/processor/rules"
+	"txt-cleaning/internal/review/manager"
 )
 
 // ProcessResult 处理结果
@@ -25,6 +26,9 @@ type ProcessingStage struct {
 	Stats   map[string]int      `json:"stats"`
 	Changes []preprocess.Change `json:"changes"`
 }
+
+// 全局审核管理器
+var reviewManager = manager.NewManager()
 
 // 全局规则管理器
 var ruleManager = rules.NewRuleManager()
@@ -124,6 +128,21 @@ func GetRuleManager() *rules.RuleManager {
 	return ruleManager
 }
 
+// ProcessWithReview 处理文本并创建审核会话
+func ProcessWithReview(content, fileID, processID string) (ProcessResult, error) {
+	result := Process(content)
+
+	// 创建审核会话
+	sessionID := processID + "_review"
+	session, err := reviewManager.CreateSession(sessionID, fileID, processID, result.Suggestions)
+	if err != nil {
+		return result, err
+	}
+
+	result.ReviewSessionID = session.ID
+	return result, nil
+}
+
 // ApplySuggestion 应用单个修改建议
 func ApplySuggestion(content string, suggestion preprocess.Change) string {
 	if suggestion.Original == "" && suggestion.Replacement == "" {
@@ -194,4 +213,9 @@ func ApplyAllSuggestions(content string, suggestions []preprocess.Change) string
 		content = ApplySuggestion(content, s)
 	}
 	return content
+}
+
+// GetReviewManager 获取审核管理器
+func GetReviewManager() *manager.Manager {
+	return reviewManager
 }

@@ -5,8 +5,6 @@
 *.so
 *.dylib
 *.test
-voidtext
-voidtext_new
 
 # Test binary, built with `go test -c`
 *.test
@@ -23,13 +21,9 @@ go.work
 # IDE and editor files
 .vscode/
 .idea/
-.codeartsdoer/
 *.swp
 *.swo
 *~
-.qoder/
-.opencode/
-
 
 # OS generated files
 .DS_Store
@@ -50,11 +44,6 @@ Thumbs.db
 # Data directories
 data/
 
-# Custom fonts (user-uploaded)
-web/frontend/static/fonts/custom/*.woff2
-web/frontend/static/fonts/custom/*.woff
-web/frontend/static/fonts/custom/*.ttf
-
 # Build artifacts
 build/
 
@@ -65,31 +54,14 @@ logs/
 # Temporary files
 tmp/
 
-# Python cache files
-*.pyc
-__pycache__/
-scripts/__pycache__/
-
-# Runtime data and binaries
-memory/
-txtclean
-
 # Backup files
 *.bak
 *.backup
-*-backup.js
-*-new.js
-*-modular.js
 
 # Configuration files (local)
 configs/local.yaml
 configs/development.yaml
 configs/production.yaml
-start-mcp.sh
-code-context-mcp
+
+
 .code-context-index-state.json
-test_data/cleaning.db
-test_data/rules.json
-internal/processor/newline_fixer_test.go
-test_data/uploads/9af7c283548338ae416b63b0f27a98a1_sample.txt
-test_data/uploads/9af7c283548338ae416b63b0f27a98a1_cleaning.txt

@@ -15,12 +15,8 @@ import (
 type AppConfig struct {
 	Port           int
 	DataDir        string
-	BaseDir        string
 	MaxFileSize    int64
 	BackupKeepDays int
-
-	// 限流配置
-	RateLimit *RateLimitConfig
 
 	EnableBasicCleaning bool
 	BasicCleaningTool   string
@@ -34,7 +30,6 @@ type AppConfig struct {
 	VectorModelApiKey         string
 
 	EnableModelRepair     bool
-	EnableEvolver         bool
 	RepairModelName       string
 	RepairModelType       string
 	LLMApiURL             string
@@ -43,13 +38,8 @@ type AppConfig struct {
 	CompletionTemperature float64
 	CompletionMaxTokens   int
 
-	// 本地模型配置（混合架构新增）
-	EnableLocalModel         bool
-	LocalModelURL            string
-	LocalModelName           string
-	LocalModelTimeout        int
-	LocalConfidenceThreshold float64
-	LocalFallbackEnabled     bool
+	EnableLlmParagraphReconstruct bool
+	ParagraphChunkSize            int
 
 	NameSeparators string
 }
@@ -82,13 +72,8 @@ func Load() error {
 	cfg := AppConfig{
 		Port:                      getEnvInt("PORT", 8080),
 		DataDir:                   getEnvStr("DATA_DIR", "./data"),
-		BaseDir:                   getEnvStr("BASE_DIR", "."),
 		MaxFileSize:               getEnvInt64("MAX_FILE_SIZE", 100*1024*1024),
 		BackupKeepDays:            getEnvInt("BACKUP_KEEP_DAYS", 7),
-
-		// 限流配置
-		RateLimit: DefaultRateLimitConfig(),
-
 		EnableBasicCleaning:       getEnvBool("ENABLE_BASIC_CLEANING", true),
 		BasicCleaningTool:         getEnvStr("BASIC_CLEANING_TOOL", "regex"),
 		TraditionalToSimple:       getEnvBool("TRADITIONAL_TO_SIMPLE", false),
@@ -99,24 +84,16 @@ func Load() error {
 		VectorModelURL:            getEnvStr("VECTOR_MODEL_URL", ""),
 		VectorModelApiKey:         getEnvStr("VECTOR_MODEL_API_KEY", ""),
 		EnableModelRepair:         getEnvBool("ENABLE_MODEL_REPAIR", true),
-		EnableEvolver:             getEnvBool("ENABLE_EVOLVER", false),
 		RepairModelName:           getEnvStr("REPAIR_MODEL_NAME", "gpt-3.5-turbo-instruct"),
 		RepairModelType:           getEnvStr("REPAIR_MODEL_TYPE", "api"),
 		LLMApiURL:                 getEnvStr("LLM_API_URL", ""),
 		LLMApiKey:                 getEnvStr("LLM_API_KEY", ""),
 		CompletionModelName:       getEnvStr("COMPLETION_MODEL_NAME", "gpt-3.5-turbo-instruct"),
 		CompletionTemperature:     getEnvFloat("COMPLETION_TEMPERATURE", 0.3),
-		CompletionMaxTokens:       getEnvInt("COMPLETION_MAX_TOKENS", 2048),
-		
-		// 本地模型配置（混合架构新增）
-		EnableLocalModel:         getEnvBool("ENABLE_LOCAL_MODEL", false),
-		LocalModelURL:            getEnvStr("LOCAL_MODEL_URL", "http://localhost:11434"),
-		LocalModelName:           getEnvStr("LOCAL_MODEL_NAME", "qwen2.5:7b-instruct-q4_K_M"),
-		LocalModelTimeout:        getEnvInt("LOCAL_MODEL_TIMEOUT", 180),
-		LocalConfidenceThreshold: getEnvFloat("LOCAL_CONFIDENCE_THRESHOLD", 0.7),
-		LocalFallbackEnabled:     getEnvBool("LOCAL_FALLBACK_ENABLED", true),
-		
-		NameSeparators:            getEnvStr("NAME_SEPARATORS", "-|—|·|·|_| "),
+		CompletionMaxTokens:              getEnvInt("COMPLETION_MAX_TOKENS", 2048),
+		EnableLlmParagraphReconstruct:    getEnvBool("ENABLE_LLM_PARAGRAPH_RECONSTRUCT", false),
+		ParagraphChunkSize:               getEnvInt("PARAGRAPH_CHUNK_SIZE", 8000),
+		NameSeparators:                   getEnvStr("NAME_SEPARATORS", "-|—|·|·|_| "),
 	}
 
 	if cfg.VectorModelURL == "" {
