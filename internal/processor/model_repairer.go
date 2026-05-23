@@ -1,6 +1,7 @@
 package processor
 
 import (
+	"fmt"
 	"log"
 	"strings"
 	"txt-cleaning/internal/config"
@@ -282,6 +283,242 @@ func (mr *ModelRepairer) compareTexts(original, repaired string) []preprocess.Ch
 	}
 
 	return changes
+}
+
+// paragraphReconstructPrompt 段落重组系统提示词（通用版，不包含任何特定书目例子）
+const paragraphReconstructPrompt = `你是一个专业的中文小说排版助手。请智能重组以下文本的段落格式。
+
+核心任务：
+识别文本中错误的换行并修正，同时为语义段落插入正确的分隔。
+
+处理原则（按优先级）：
+1. 合并被硬切断的行：如果相邻行属于同一自然段，将它们连接为一行
+2. 分离段落：在话题转换、时间推移、场景切换处插入空行作为段落分隔
+3. 保持原样：已经是正确格式的段落不做任何修改
+
+判断"应合并"的信号（任意一条满足即可）：
+- 上一行以不完整短语结尾，下一行开头是其自然延续
+- 上一行以逗号、顿号、分号结尾，且两行属于同一句子
+- 合并后能形成通顺完整的中文句子
+
+判断"应分段"的信号（任意一条满足即可）：
+- 出现明确的时间状语（如"第二天"、"几个月后"、"那年"）
+- 话题从描述转换为对话，或从对话转换为描述
+- 出现章节标记（如"第X章"、"◇"、分隔线"——"）
+- 叙事视角或场景发生明显变化
+
+对话处理：
+- 同一人物的连续话语保持连贯
+- 对话与叙述之间适当留空行
+- 引号内的内容不要拆分或重组
+
+绝对约束：
+- 不改动任何文字内容（包括标点符号）
+- 只调整换行符（\n）的位置和数量
+- 不添加或删除任何字符
+- 直接输出重组后的完整文本，不要任何说明或标记`
+
+// ReconstructParagraphs 使用LLM智能重组段落
+// 对全文进行分块处理后，逐块调用LLM识别段落边界，输出格式良好、段落结构清晰的文本
+func (mr *ModelRepairer) ReconstructParagraphs(content string) (string, error) {
+	chunkSize := config.AppConfigInstance.ParagraphChunkSize
+	if chunkSize <= 0 {
+		chunkSize = 8000
+	}
+	overlap := 200
+
+	// 智能分块：优先按双换行边界，降级到句子边界，再降级到硬分块
+	chunks := mr.smartChunk(content, chunkSize, overlap)
+	log.Printf("[段落重组] 分块完成: 总块数=%d, 分块大小=%d, 重叠=%d", len(chunks), chunkSize, overlap)
+
+	api := external.NewAPI()
+	reconstructedChunks := make([]string, 0, len(chunks))
+
+	for i, chunk := range chunks {
+		log.Printf("[段落重组] 正在处理第 %d/%d 块 (长度=%d字符)", i+1, len(chunks), len([]rune(chunk)))
+
+		resp, err := api.GenerateChatCompletion(paragraphReconstructPrompt, chunk, 0, -1)
+		if err != nil {
+			return content, fmt.Errorf("第%d块LLM调用失败: %w", i+1, err)
+		}
+		if resp == nil || len(resp.Choices) == 0 {
+			return content, fmt.Errorf("第%d块LLM返回空结果", i+1)
+		}
+
+		repaired := strings.TrimSpace(resp.Choices[0].Message.Content)
+		if repaired == "" {
+			// 降级：使用原块
+			repaired = chunk
+		}
+		reconstructedChunks = append(reconstructedChunks, repaired)
+		log.Printf("[段落重组] 第 %d/%d 块完成 (输出长度=%d字符)", i+1, len(chunks), len([]rune(repaired)))
+	}
+
+	// 合并各块（去除重叠区域）
+	result := mr.mergeChunks(reconstructedChunks, overlap)
+	log.Printf("[段落重组] 全部完成: 原始长度=%d字符, 重组后长度=%d字符",
+		len([]rune(content)), len([]rune(result)))
+
+	return result, nil
+}
+
+// smartChunk 智能分块
+// 优先按双换行边界分块，找不到则按句子结尾标点分块，再找不到则硬分块
+func (mr *ModelRepairer) smartChunk(content string, chunkSize, overlap int) []string {
+	runes := []rune(content)
+	totalLen := len(runes)
+
+	// 文本长度小于分块大小，无需分块
+	if totalLen <= chunkSize {
+		return []string{content}
+	}
+
+	chunks := make([]string, 0)
+	start := 0
+
+	for start < totalLen {
+		end := start + chunkSize
+		if end > totalLen {
+			end = totalLen
+		}
+
+		// 如果不是最后一块，尝试找最佳切割点
+		if end < totalLen {
+			end = mr.findBestSplitPoint(runes, start, end, chunkSize)
+		}
+
+		chunk := string(runes[start:end])
+		chunks = append(chunks, chunk)
+
+		// 下一块起点 = 当前结束 - 重叠
+		start = end - overlap
+		if start <= 0 || start >= totalLen {
+			break
+		}
+		// 防止无限循环
+		if start >= end {
+			start = end
+		}
+	}
+
+	return chunks
+}
+
+// findBestSplitPoint 在指定范围内找到最佳切割点
+// 优先级：双换行 > 句子结尾标点 > 原始切点
+func (mr *ModelRepairer) findBestSplitPoint(runes []rune, start, maxEnd, chunkSize int) int {
+	// 搜索范围：从 maxEnd-400 到 maxEnd+200
+	searchStart := maxEnd - 400
+	if searchStart < start {
+		searchStart = start
+	}
+	searchEnd := maxEnd + 200
+	if searchEnd > len(runes) {
+		searchEnd = len(runes)
+	}
+
+	// 优先找双换行
+	for i := maxEnd - 1; i >= searchStart && i < searchEnd; i-- {
+		if i+1 < len(runes) && runes[i] == '\n' && runes[i+1] == '\n' {
+			return i + 2
+		}
+		if i > 0 && runes[i] == '\n' && runes[i-1] == '\n' {
+			return i + 1
+		}
+	}
+
+	// 次优先找句子结尾标点（。！？）
+	sentenceEnds := map[rune]bool{'。': true, '！': true, '？': true, '"': true, '」': true}
+	for i := maxEnd - 1; i >= searchStart; i-- {
+		if sentenceEnds[runes[i]] {
+			return i + 1
+		}
+	}
+
+	// 降级到换行符
+	for i := maxEnd - 1; i >= searchStart; i-- {
+		if runes[i] == '\n' {
+			return i + 1
+		}
+	}
+
+	return maxEnd
+}
+
+// mergeChunks 合并分块处理后的结果，处理重叠区域去重
+func (mr *ModelRepairer) mergeChunks(chunks []string, overlap int) string {
+	if len(chunks) == 0 {
+		return ""
+	}
+	if len(chunks) == 1 {
+		return chunks[0]
+	}
+
+	var result strings.Builder
+	result.WriteString(chunks[0])
+
+	for i := 1; i < len(chunks); i++ {
+		prev := []rune(chunks[i-1])
+		curr := []rune(chunks[i])
+
+		if len(prev) < overlap || len(curr) < overlap {
+			// 块太短，直接拼接
+			result.WriteString("\n")
+			result.WriteString(chunks[i])
+			continue
+		}
+
+		// 找到前一块末尾与后一块开头的最长公共序列，确定去重边界
+		cutIndex := mr.findMergePoint(curr, prev)
+		if cutIndex < len(curr) {
+			result.WriteString(string(curr[cutIndex:]))
+		}
+	}
+
+	return result.String()
+}
+
+// findMergePoint 找到后一块中去重后的起始位置
+// 从前一块末尾取 overlap 字符，与后一块开头匹配找最长公共前缀
+func (mr *ModelRepairer) findMergePoint(curr, prev []rune) int {
+	if len(prev) == 0 {
+		return 0
+	}
+
+	// 取前一块末尾的搜索窗口（最多3倍overlap）
+	searchStart := len(prev) - 600
+	if searchStart < 0 {
+		searchStart = 0
+	}
+	tail := prev[searchStart:]
+
+	// 在后一块中查找与 tail 开头匹配的位置
+	bestOffset := 0
+	bestMatch := 0
+
+	// 逐字符滑动匹配
+	for offset := 0; offset < len(curr) && offset < 600; offset++ {
+		matchLen := 0
+		for k := 0; k < len(tail) && offset+k < len(curr); k++ {
+			if tail[k] == curr[offset+k] {
+				matchLen++
+			} else {
+				break
+			}
+		}
+		if matchLen > bestMatch && matchLen >= 10 {
+			bestMatch = matchLen
+			bestOffset = offset
+		}
+	}
+
+	if bestMatch >= 20 {
+		// 找到可靠的重叠点，跳过重叠部分
+		return bestOffset + bestMatch
+	}
+
+	// 未找到可靠重叠，保守处理：直接拼接
+	return 0
 }
 
 // detectCommonTypos 检测常见错别字

@@ -38,6 +38,9 @@ type AppConfig struct {
 	CompletionTemperature float64
 	CompletionMaxTokens   int
 
+	EnableLlmParagraphReconstruct bool
+	ParagraphChunkSize            int
+
 	NameSeparators string
 }
 
@@ -87,8 +90,10 @@ func Load() error {
 		LLMApiKey:                 getEnvStr("LLM_API_KEY", ""),
 		CompletionModelName:       getEnvStr("COMPLETION_MODEL_NAME", "gpt-3.5-turbo-instruct"),
 		CompletionTemperature:     getEnvFloat("COMPLETION_TEMPERATURE", 0.3),
-		CompletionMaxTokens:       getEnvInt("COMPLETION_MAX_TOKENS", 2048),
-		NameSeparators:            getEnvStr("NAME_SEPARATORS", "-|—|·|·|_| "),
+		CompletionMaxTokens:              getEnvInt("COMPLETION_MAX_TOKENS", 2048),
+		EnableLlmParagraphReconstruct:    getEnvBool("ENABLE_LLM_PARAGRAPH_RECONSTRUCT", false),
+		ParagraphChunkSize:               getEnvInt("PARAGRAPH_CHUNK_SIZE", 8000),
+		NameSeparators:                   getEnvStr("NAME_SEPARATORS", "-|—|·|·|_| "),
 	}
 
 	if cfg.VectorModelURL == "" {

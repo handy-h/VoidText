@@ -3,6 +3,7 @@ package processor
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -286,6 +287,19 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, _ *data
 		config.AppConfigInstance.RepairModelType,
 		config.AppConfigInstance.RepairModelName,
 	)
+
+	// 段落重组：使用LLM智能识别语义段落边界，合并被硬切断的行
+	if config.AppConfigInstance.EnableLlmParagraphReconstruct {
+		origLen := len([]rune(content))
+		reconstructed, err := repairer.ReconstructParagraphs(content)
+		if err != nil {
+			log.Printf("[段落重组] 失败，回退到原始段落结构: %v", err)
+		} else {
+			content = reconstructed
+			log.Printf("[段落重组] 完成: 原始长度=%d字符, 重组后长度=%d字符",
+				origLen, len([]rune(reconstructed)))
+		}
+	}
 
 	paragraphs := repairer.SplitIntoParagraphs(content)
 	totalParagraphs := len(paragraphs)
