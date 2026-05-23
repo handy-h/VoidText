@@ -15,11 +15,11 @@ import (
 
 // OllamaClient Ollama客户端
 type OllamaClient struct {
-	baseURL       string
-	modelName     string
-	timeout       time.Duration
-	httpClient    *http.Client // 用于生成请求（长超时）
-	healthClient  *http.Client // 用于健康检查（短超时）
+	baseURL      string
+	modelName    string
+	timeout      time.Duration
+	httpClient   *http.Client // 用于生成请求（长超时）
+	healthClient *http.Client // 用于健康检查（短超时）
 }
 
 // OllamaGenerateRequest Ollama生成请求
@@ -36,11 +36,11 @@ type OllamaGenerateRequest struct {
 
 // Options 模型选项
 type Options struct {
-	Temperature float64 `json:"temperature"`
-	TopP        float64 `json:"top_p,omitempty"`
-	TopK        int     `json:"top_k,omitempty"`
+	Temperature   float64 `json:"temperature"`
+	TopP          float64 `json:"top_p,omitempty"`
+	TopK          int     `json:"top_k,omitempty"`
 	RepeatPenalty float64 `json:"repeat_penalty,omitempty"`
-	Seed        int     `json:"seed,omitempty"`
+	Seed          int     `json:"seed,omitempty"`
 }
 
 // OllamaGenerateResponse Ollama生成响应（流式每个chunk和最终响应共用）
@@ -56,6 +56,23 @@ type OllamaGenerateResponse struct {
 	PromptEvalDuration int64     `json:"prompt_eval_duration,omitempty"`
 	EvalCount          int       `json:"eval_count,omitempty"`
 	EvalDuration       int64     `json:"eval_duration,omitempty"`
+}
+
+// OllamaEmbedRequest Ollama嵌入请求
+type OllamaEmbedRequest struct {
+	Model     string      `json:"model"`
+	Input     interface{} `json:"input"`
+	KeepAlive string      `json:"keep_alive,omitempty"`
+	Truncate  *bool       `json:"truncate,omitempty"`
+}
+
+// OllamaEmbeddingResponse Ollama嵌入响应
+type OllamaEmbeddingResponse struct {
+	Model           string      `json:"model"`
+	Embeddings      [][]float64 `json:"embeddings"`
+	TotalDuration   int64       `json:"total_duration,omitempty"`
+	LoadDuration    int64       `json:"load_duration,omitempty"`
+	PromptEvalCount int         `json:"prompt_eval_count,omitempty"`
 }
 
 // OllamaErrorResponse Ollama错误响应
@@ -103,10 +120,10 @@ func (oc *OllamaClient) Generate(prompt, systemPrompt string) (string, error) {
 	startTime := time.Now()
 
 	reqBody := OllamaGenerateRequest{
-		Model:      oc.modelName,
-		Prompt:     prompt,
-		Stream:     true, // 使用流式模式，避免长时间无数据导致HTTP超时
-		KeepAlive:  "5m", // 保持模型在内存中5分钟，避免冷启动延迟
+		Model:     oc.modelName,
+		Prompt:    prompt,
+		Stream:    true, // 使用流式模式，避免长时间无数据导致HTTP超时
+		KeepAlive: "5m", // 保持模型在内存中5分钟，避免冷启动延迟
 		Options: Options{
 			Temperature: 0.3,
 			TopP:        0.9,
@@ -242,18 +259,133 @@ func (oc *OllamaClient) Generate(prompt, systemPrompt string) (string, error) {
 
 	// 记录成功日志
 	logging.Info("ollama_generate_success", map[string]interface{}{
-		"url":                url,
-		"model":              oc.modelName,
-		"duration":           duration,
-		"total_duration":     finalResp.TotalDuration,
-		"prompt_eval_count":  finalResp.PromptEvalCount,
-		"eval_count":         finalResp.EvalCount,
-		"response_len":       len(resultText),
-		"source":             "local",
-		"stream":             true,
+		"url":               url,
+		"model":             oc.modelName,
+		"duration":          duration,
+		"total_duration":    finalResp.TotalDuration,
+		"prompt_eval_count": finalResp.PromptEvalCount,
+		"eval_count":        finalResp.EvalCount,
+		"response_len":      len(resultText),
+		"source":            "local",
+		"stream":            true,
 	})
 
 	return resultText, nil
+}
+
+// GenerateEmbedding 生成文本向量
+func (oc *OllamaClient) GenerateEmbedding(texts []string) (*OllamaEmbeddingResponse, error) {
+	if len(texts) == 0 {
+		return &OllamaEmbeddingResponse{
+			Model:      oc.modelName,
+			Embeddings: [][]float64{},
+		}, nil
+	}
+
+	startTime := time.Now()
+	var input interface{} = texts
+	if len(texts) == 1 {
+		input = texts[0]
+	}
+
+	reqBody := OllamaEmbedRequest{
+		Model:     oc.modelName,
+		Input:     input,
+		KeepAlive: "5m",
+	}
+
+	truncate := true
+	reqBody.Truncate = &truncate
+
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		logging.Error("ollama_embedding_marshal_failed", nil, map[string]interface{}{
+			"model": oc.modelName,
+			"error": err.Error(),
+		})
+		return nil, fmt.Errorf("序列化嵌入请求失败: %w", err)
+	}
+
+	url := oc.baseURL + "/api/embed"
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		logging.Error("ollama_embedding_request_create_failed", nil, map[string]interface{}{
+			"url":   url,
+			"model": oc.modelName,
+			"error": err.Error(),
+		})
+		return nil, fmt.Errorf("创建嵌入请求失败: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := oc.httpClient.Do(req)
+	if err != nil {
+		duration := time.Since(startTime).Milliseconds()
+		logging.Error("ollama_embedding_request_failed", nil, map[string]interface{}{
+			"url":      url,
+			"model":    oc.modelName,
+			"duration": duration,
+			"error":    err.Error(),
+			"source":   "local",
+		})
+		return nil, fmt.Errorf("ollama embedding request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read embedding error response: %w", err)
+		}
+
+		var errResp OllamaErrorResponse
+		if err := json.Unmarshal(bodyBytes, &errResp); err == nil && errResp.Error != "" {
+			duration := time.Since(startTime).Milliseconds()
+			logging.Error("ollama_embedding_api_error", nil, map[string]interface{}{
+				"url":      url,
+				"model":    oc.modelName,
+				"status":   resp.StatusCode,
+				"duration": duration,
+				"error":    errResp.Error,
+				"source":   "local",
+			})
+			return nil, fmt.Errorf("ollama embedding api error: %s", errResp.Error)
+		}
+
+		duration := time.Since(startTime).Milliseconds()
+		logging.Error("ollama_embedding_http_error", nil, map[string]interface{}{
+			"url":      url,
+			"model":    oc.modelName,
+			"status":   resp.StatusCode,
+			"duration": duration,
+			"source":   "local",
+		})
+		return nil, fmt.Errorf("HTTP error: %d", resp.StatusCode)
+	}
+
+	var embeddingResp OllamaEmbeddingResponse
+	if err := json.NewDecoder(resp.Body).Decode(&embeddingResp); err != nil {
+		logging.Error("ollama_embedding_decode_failed", nil, map[string]interface{}{
+			"url":      url,
+			"model":    oc.modelName,
+			"duration": time.Since(startTime).Milliseconds(),
+			"error":    err.Error(),
+		})
+		return nil, fmt.Errorf("解析嵌入响应失败: %w", err)
+	}
+
+	logging.Info("ollama_embedding_success", map[string]interface{}{
+		"url":          url,
+		"model":        oc.modelName,
+		"duration":     time.Since(startTime).Milliseconds(),
+		"text_count":   len(texts),
+		"vector_count": len(embeddingResp.Embeddings),
+		"source":       "local",
+	})
+
+	return &embeddingResp, nil
 }
 
 // HealthCheck 健康检查（使用独立的短超时客户端）

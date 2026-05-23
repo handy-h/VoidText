@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 	"voidtext/internal/config"
 	"voidtext/internal/external"
 	"voidtext/internal/processor/preprocess"
@@ -15,6 +16,7 @@ type VectorDetector struct {
 	VectorModelType     string
 	VectorModelName     string
 	apiClient           *external.API
+	ollamaClient        *external.OllamaClient
 }
 
 // VectorDetectionResult 向量检测结果
@@ -34,6 +36,13 @@ func NewVectorDetector(similarityThreshold float64, modelType, modelName string)
 	}
 	if modelType == "api" {
 		vd.apiClient = external.NewEmbeddingAPI()
+	} else if modelType == "ollama" {
+		timeout := time.Duration(config.AppConfigInstance.LocalModelTimeout) * time.Second
+		vd.ollamaClient = external.NewOllamaClient(
+			config.AppConfigInstance.LocalModelURL,
+			modelName,
+			timeout,
+		)
 	}
 	return vd
 }
@@ -94,7 +103,7 @@ func (vd *VectorDetector) splitIntoParagraphs(content string) []string {
 }
 
 // generateVectors 生成段落向量
-// API 模式：调用外部 Embedding 服务；local 模式：7 维混合特征（FNV-1a 哈希 + 标点密度）
+// api 模式：调用外部 Embedding 服务；ollama 模式：调用本地 Ollama embedding；local 模式：7 维混合特征
 func (vd *VectorDetector) generateVectors(paragraphs []string) ([][]float64, error) {
 	if vd.VectorModelType == "api" && vd.apiClient != nil {
 		resp, err := vd.apiClient.GenerateEmbedding(paragraphs)
@@ -108,6 +117,19 @@ func (vd *VectorDetector) generateVectors(paragraphs []string) ([][]float64, err
 		for _, d := range resp.Data {
 			vectors[d.Index] = d.Embedding
 		}
+		return vectors, nil
+	}
+
+	if vd.VectorModelType == "ollama" && vd.ollamaClient != nil {
+		resp, err := vd.ollamaClient.GenerateEmbedding(paragraphs)
+		if err != nil {
+			return nil, fmt.Errorf("ollama embedding 调用失败: %w", err)
+		}
+		if resp == nil || len(resp.Embeddings) != len(paragraphs) {
+			return nil, fmt.Errorf("ollama embedding 返回数量不匹配: 期望 %d, 实际 %d", len(paragraphs), len(resp.Embeddings))
+		}
+		vectors := make([][]float64, len(paragraphs))
+		copy(vectors, resp.Embeddings)
 		return vectors, nil
 	}
 

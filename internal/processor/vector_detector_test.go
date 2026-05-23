@@ -1,10 +1,15 @@
 package processor
 
 import (
+	"encoding/json"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
 	"voidtext/internal/config"
+	"voidtext/internal/external"
 )
 
 func initTestConfig() {
@@ -188,6 +193,58 @@ func TestGenerateVectors_ShouldReturnCorrectLength(t *testing.T) {
 	for _, vec := range vectors {
 		if len(vec) != 7 {
 			t.Errorf("generateVectors() vector length = %d, want 7", len(vec))
+		}
+	}
+}
+
+func TestGenerateVectors_ShouldUseOllamaEmbeddings(t *testing.T) {
+	initTestConfig()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/embed" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+
+		var reqBody map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+			t.Fatalf("decode request failed: %v", err)
+		}
+
+		input, ok := reqBody["input"].([]interface{})
+		if !ok || len(input) != 2 {
+			t.Fatalf("unexpected input payload: %#v", reqBody["input"])
+		}
+
+		resp := map[string]interface{}{
+			"model": "test-model",
+			"embeddings": [][]float64{
+				make([]float64, 768),
+				make([]float64, 768),
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	vd := &VectorDetector{
+		SimilarityThreshold: 0.95,
+		VectorModelType:     "ollama",
+		VectorModelName:     "test-model",
+		ollamaClient:        external.NewOllamaClient(server.URL, "test-model", 5*time.Second),
+	}
+
+	vectors, err := vd.generateVectors([]string{"段落一", "段落二"})
+	if err != nil {
+		t.Fatalf("generateVectors() unexpected error: %v", err)
+	}
+
+	if len(vectors) != 2 {
+		t.Fatalf("generateVectors() length = %d, want 2", len(vectors))
+	}
+	for _, vec := range vectors {
+		if len(vec) != 768 {
+			t.Fatalf("generateVectors() vector length = %d, want 768", len(vec))
 		}
 	}
 }
