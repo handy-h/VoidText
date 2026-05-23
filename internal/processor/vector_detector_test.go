@@ -132,7 +132,10 @@ func TestDetectDuplicates_ShouldDetectExactDuplicates(t *testing.T) {
 	vd := NewVectorDetector(0.95, "local", "test-model")
 
 	content := "第一段内容\n第二段内容\n第一段内容"
-	result := vd.DetectDuplicates(content)
+	result, err := vd.DetectDuplicates(content)
+	if err != nil {
+		t.Fatalf("DetectDuplicates() unexpected error: %v", err)
+	}
 
 	if result.Stats["duplicate_paragraphs_removed"] != 1 {
 		t.Errorf("DetectDuplicates() should detect 1 duplicate, got %d", result.Stats["duplicate_paragraphs_removed"])
@@ -144,7 +147,10 @@ func TestDetectDuplicates_ShouldNotDetectNonDuplicates(t *testing.T) {
 	vd := NewVectorDetector(0.95, "local", "test-model")
 
 	content := "第一段内容\n第二段内容\n第三段内容"
-	result := vd.DetectDuplicates(content)
+	result, err := vd.DetectDuplicates(content)
+	if err != nil {
+		t.Fatalf("DetectDuplicates() unexpected error: %v", err)
+	}
 
 	if result.Stats["duplicate_paragraphs_removed"] != 0 {
 		t.Errorf("DetectDuplicates() should not detect duplicates for different paragraphs")
@@ -156,7 +162,10 @@ func TestDetectDuplicates_ShouldHandleSingleParagraph(t *testing.T) {
 	vd := NewVectorDetector(0.95, "local", "test-model")
 
 	content := "只有一段内容"
-	result := vd.DetectDuplicates(content)
+	result, err := vd.DetectDuplicates(content)
+	if err != nil {
+		t.Fatalf("DetectDuplicates() unexpected error: %v", err)
+	}
 
 	if len(result.Changes) != 0 {
 		t.Errorf("DetectDuplicates() should not detect duplicates for single paragraph")
@@ -168,7 +177,10 @@ func TestGenerateVectors_ShouldReturnCorrectLength(t *testing.T) {
 	vd := NewVectorDetector(0.95, "local", "test-model")
 
 	paragraphs := []string{"段落一", "段落二", "段落三"}
-	vectors := vd.generateVectors(paragraphs)
+	vectors, err := vd.generateVectors(paragraphs)
+	if err != nil {
+		t.Fatalf("generateVectors() unexpected error: %v", err)
+	}
 
 	if len(vectors) != 3 {
 		t.Errorf("generateVectors() length = %d, want 3", len(vectors))

@@ -57,12 +57,14 @@ func GetFileByMd5(md5 string) (*FileRecord, error) {
 		FROM files WHERE md5 = ?`, md5)
 
 	record := &FileRecord{}
+	var errorMsg, llmCheckpoint sql.NullString
+	var llmParagraph sql.NullInt64
 	err := row.Scan(
 		&record.ID, &record.Md5, &record.OriginalMd5, &record.Author, &record.Title,
 		&record.FileName, &record.FileSize, &record.FilePath, &record.Status,
 		&record.CurrentStep, &record.Progress, &record.RulesConfig,
-		&record.CreatedAt, &record.UpdatedAt, &record.ErrorMsg,
-		&record.LlmProgressParagraph, &record.LlmProgressCheckpoint, &record.CancelFlag,
+		&record.CreatedAt, &record.UpdatedAt, &errorMsg,
+		&llmParagraph, &llmCheckpoint, &record.CancelFlag,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -70,6 +72,9 @@ func GetFileByMd5(md5 string) (*FileRecord, error) {
 	if err != nil {
 		return nil, fmt.Errorf("查询文件记录失败: %w", err)
 	}
+	record.ErrorMsg = errorMsg.String
+	record.LlmProgressParagraph = int(llmParagraph.Int64)
+	record.LlmProgressCheckpoint = llmCheckpoint.String
 	return record, nil
 }
 
@@ -80,12 +85,14 @@ func GetFileByID(id int64) (*FileRecord, error) {
 		FROM files WHERE id = ?`, id)
 
 	record := &FileRecord{}
+	var errorMsg, llmCheckpoint sql.NullString
+	var llmParagraph sql.NullInt64
 	err := row.Scan(
 		&record.ID, &record.Md5, &record.OriginalMd5, &record.Author, &record.Title,
 		&record.FileName, &record.FileSize, &record.FilePath, &record.Status,
 		&record.CurrentStep, &record.Progress, &record.RulesConfig,
-		&record.CreatedAt, &record.UpdatedAt, &record.ErrorMsg,
-		&record.LlmProgressParagraph, &record.LlmProgressCheckpoint, &record.CancelFlag,
+		&record.CreatedAt, &record.UpdatedAt, &errorMsg,
+		&llmParagraph, &llmCheckpoint, &record.CancelFlag,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -93,6 +100,9 @@ func GetFileByID(id int64) (*FileRecord, error) {
 	if err != nil {
 		return nil, fmt.Errorf("查询文件记录失败: %w", err)
 	}
+	record.ErrorMsg = errorMsg.String
+	record.LlmProgressParagraph = int(llmParagraph.Int64)
+	record.LlmProgressCheckpoint = llmCheckpoint.String
 	return record, nil
 }
 
@@ -133,17 +143,23 @@ func ListPendingFiles() ([]FileRecord, error) {
 	return scanFileRows(rows)
 }
 
-// ListAllFiles 列出所有文件
-func ListAllFiles() ([]FileRecord, error) {
+// ListAllFiles 列出所有文件（带分页）
+func ListAllFiles(limit, offset int) ([]FileRecord, int, error) {
+	var total int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM files`).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("查询文件总数失败: %w", err)
+	}
+
 	rows, err := db.Query(`
 		SELECT id, md5, original_md5, author, title, file_name, file_size, file_path, status, current_step, progress, rules_config, created_at, updated_at, error_msg, llm_progress_paragraph, llm_progress_checkpoint, cancel_flag
-		FROM files ORDER BY created_at DESC`)
+		FROM files ORDER BY created_at DESC LIMIT ? OFFSET ?`, limit, offset)
 	if err != nil {
-		return nil, fmt.Errorf("查询文件列表失败: %w", err)
+		return nil, 0, fmt.Errorf("查询文件列表失败: %w", err)
 	}
 	defer rows.Close()
 
-	return scanFileRows(rows)
+	records, err := scanFileRows(rows)
+	return records, total, err
 }
 
 // DeleteFile 删除文件记录
@@ -159,16 +175,21 @@ func scanFileRows(rows *sql.Rows) ([]FileRecord, error) {
 	var records []FileRecord
 	for rows.Next() {
 		var record FileRecord
+		var errorMsg, llmCheckpoint sql.NullString
+		var llmParagraph sql.NullInt64
 		err := rows.Scan(
 			&record.ID, &record.Md5, &record.OriginalMd5, &record.Author, &record.Title,
 			&record.FileName, &record.FileSize, &record.FilePath, &record.Status,
 			&record.CurrentStep, &record.Progress, &record.RulesConfig,
-			&record.CreatedAt, &record.UpdatedAt, &record.ErrorMsg,
-			&record.LlmProgressParagraph, &record.LlmProgressCheckpoint, &record.CancelFlag,
+			&record.CreatedAt, &record.UpdatedAt, &errorMsg,
+			&llmParagraph, &llmCheckpoint, &record.CancelFlag,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("扫描文件记录失败: %w", err)
 		}
+		record.ErrorMsg = errorMsg.String
+		record.LlmProgressParagraph = int(llmParagraph.Int64)
+		record.LlmProgressCheckpoint = llmCheckpoint.String
 		records = append(records, record)
 	}
 	return records, nil

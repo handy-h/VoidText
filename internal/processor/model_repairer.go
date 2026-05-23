@@ -6,9 +6,9 @@ import (
 	"math"
 	"strings"
 	"time"
-	"txt-cleaning/internal/config"
-	"txt-cleaning/internal/external"
-	"txt-cleaning/internal/processor/preprocess"
+	"voidtext/internal/config"
+	"voidtext/internal/external"
+	"voidtext/internal/processor/preprocess"
 )
 
 // ModelRepairer 模型修复器
@@ -16,6 +16,7 @@ type ModelRepairer struct {
 	RepairModelType string
 	RepairModelName string
 	api             *external.API
+	ollamaClient    *external.OllamaClient
 }
 
 // ModelRepairResult 模型修复结果
@@ -28,11 +29,20 @@ type ModelRepairResult struct {
 
 // NewModelRepairer 创建模型修复器
 func NewModelRepairer(modelType, modelName string) *ModelRepairer {
-	return &ModelRepairer{
+	mr := &ModelRepairer{
 		RepairModelType: modelType,
 		RepairModelName: modelName,
 		api:             external.NewAPI(),
 	}
+	if config.AppConfigInstance.EnableLocalModel {
+		timeout := time.Duration(config.AppConfigInstance.LocalModelTimeout) * time.Second
+		mr.ollamaClient = external.NewOllamaClient(
+			config.AppConfigInstance.LocalModelURL,
+			config.AppConfigInstance.LocalModelName,
+			timeout,
+		)
+	}
+	return mr
 }
 
 // RepairText 修复文本中的错别字和语法错误
@@ -92,18 +102,45 @@ func (mr *ModelRepairer) SplitIntoParagraphs(content string) []string {
 
 // RepairParagraph 修复单个段落
 func (mr *ModelRepairer) RepairParagraph(paragraph string) (string, []preprocess.Change) {
-	// 如果段落太短，直接返回
 	if len(paragraph) < 10 {
 		return paragraph, []preprocess.Change{}
 	}
 
-	// 使用外部API进行修复
+	// 本地 Ollama 优先（若已配置且当前健康）
+	if mr.ollamaClient != nil && GetHealthManager().ShouldUseLocalModel() {
+		return mr.repairWithOllama(paragraph)
+	}
+
+	// 远程 API
 	if mr.RepairModelType == "api" {
 		return mr.repairWithAPI(paragraph)
 	}
 
-	// 本地修复（简化实现）
 	return mr.repairLocally(paragraph)
+}
+
+// repairWithOllama 使用本地 Ollama 模型修复文本，失败时降级到远程 API 或本地字典
+func (mr *ModelRepairer) repairWithOllama(paragraph string) (string, []preprocess.Change) {
+	systemPrompt := "你是一个专业的中文小说校对编辑。请修正以下段落中的错别字和语法错误，保持原文风格不变。只输出修正后的文本，无需解释。"
+	userPrompt := "输入：她高兴及了，跑过去抱住他。\n输出：她高兴极了，跑过去抱住他。\n\n当前任务：\n输入：" + paragraph + "\n输出："
+
+	repairedText, err := mr.ollamaClient.Generate(userPrompt, systemPrompt)
+	if err != nil {
+		log.Printf("[Ollama修复] 调用失败，降级处理: 段落长度=%d, 错误=%v", len(paragraph), err)
+		if mr.RepairModelType == "api" {
+			return mr.repairWithAPI(paragraph)
+		}
+		return mr.repairLocally(paragraph)
+	}
+
+	repairedText = strings.TrimSpace(repairedText)
+	if repairedText == "" || repairedText == paragraph {
+		return paragraph, []preprocess.Change{}
+	}
+
+	changes := mr.compareTexts(paragraph, repairedText)
+	log.Printf("[Ollama修复] 成功: 输入长度=%d, 输出长度=%d, 修改数=%d", len(paragraph), len(repairedText), len(changes))
+	return repairedText, changes
 }
 
 // repairWithAPI 使用外部API修复文本，带重试机制
@@ -589,36 +626,4 @@ func (mr *ModelRepairer) findMergePoint(curr, prev []rune) int {
 
 	// 未找到可靠重叠，保守处理：直接拼接
 	return 0
-}
-
-// detectCommonTypos 检测常见错别字
-func (mr *ModelRepairer) detectCommonTypos(text string) []preprocess.Change {
-	changes := []preprocess.Change{}
-
-	// 常见错别字模式
-	typoPatterns := map[string]string{
-		"管":  "馆",  // 图书管 -> 图书馆
-		"及了": "极了", // 高兴及了 -> 高兴极了
-		"在次": "再次", // 在次见面 -> 再次见面
-		"哪么": "那么", // 哪么好 -> 那么好
-		"因该": "应该", // 因该去 -> 应该去
-		"以经": "已经", // 以经完成 -> 已经完成
-		"好象": "好像", // 好象是 -> 好像是
-		"做车": "坐车", // 做车去 -> 坐车去
-	}
-
-	// 应用字符串模式匹配
-	for pattern, replacement := range typoPatterns {
-		if strings.Contains(text, pattern) {
-			position := strings.Index(text, pattern)
-			changes = append(changes, preprocess.Change{
-				Type:        "typo_correction",
-				Original:    pattern,
-				Replacement: replacement,
-				Position:    position,
-			})
-		}
-	}
-
-	return changes
 }

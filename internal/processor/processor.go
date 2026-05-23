@@ -1,13 +1,13 @@
 package processor
 
 import (
+	"log"
 	"sort"
 	"strings"
 
-	"txt-cleaning/internal/config"
-	"txt-cleaning/internal/processor/preprocess"
-	"txt-cleaning/internal/processor/rules"
-	"txt-cleaning/internal/review/manager"
+	"voidtext/internal/config"
+	"voidtext/internal/processor/preprocess"
+	"voidtext/internal/processor/rules"
 )
 
 // ProcessResult 处理结果
@@ -26,9 +26,6 @@ type ProcessingStage struct {
 	Stats   map[string]int      `json:"stats"`
 	Changes []preprocess.Change `json:"changes"`
 }
-
-// 全局审核管理器
-var reviewManager = manager.NewManager()
 
 // 全局规则管理器
 var ruleManager = rules.NewRuleManager()
@@ -63,17 +60,20 @@ func Process(content string) ProcessResult {
 			config.AppConfigInstance.VectorModelType,
 			config.AppConfigInstance.VectorModelName,
 		)
-		vectorResult := vectorDetector.DetectDuplicates(currentContent)
+		vectorResult, err := vectorDetector.DetectDuplicates(currentContent)
+		if err != nil {
+			log.Printf("[向量检测] 失败，跳过此阶段: %v", err)
+		} else {
+			stages = append(stages, ProcessingStage{
+				Name:    "向量检测去重",
+				Stats:   vectorResult.Stats,
+				Changes: vectorResult.Changes,
+			})
 
-		stages = append(stages, ProcessingStage{
-			Name:    "向量检测去重",
-			Stats:   vectorResult.Stats,
-			Changes: vectorResult.Changes,
-		})
-
-		currentContent = vectorResult.Content
-		allChanges = append(allChanges, vectorResult.Changes...)
-		mergeStats(allStats, vectorResult.Stats)
+			currentContent = vectorResult.Content
+			allChanges = append(allChanges, vectorResult.Changes...)
+			mergeStats(allStats, vectorResult.Stats)
+		}
 	}
 
 	// 第三阶段：模型修复（错别字和语法错误纠正）
@@ -126,21 +126,6 @@ func mergeStats(target, source map[string]int) {
 // GetRuleManager 获取规则管理器
 func GetRuleManager() *rules.RuleManager {
 	return ruleManager
-}
-
-// ProcessWithReview 处理文本并创建审核会话
-func ProcessWithReview(content, fileID, processID string) (ProcessResult, error) {
-	result := Process(content)
-
-	// 创建审核会话
-	sessionID := processID + "_review"
-	session, err := reviewManager.CreateSession(sessionID, fileID, processID, result.Suggestions)
-	if err != nil {
-		return result, err
-	}
-
-	result.ReviewSessionID = session.ID
-	return result, nil
 }
 
 // ApplySuggestion 应用单个修改建议
@@ -215,7 +200,3 @@ func ApplyAllSuggestions(content string, suggestions []preprocess.Change) string
 	return content
 }
 
-// GetReviewManager 获取审核管理器
-func GetReviewManager() *manager.Manager {
-	return reviewManager
-}

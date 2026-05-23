@@ -71,7 +71,7 @@ func TestRepairLocally_ShouldFixTypos(t *testing.T) {
 	initRepairerTestConfig()
 	mr := NewModelRepairer("local", "test-model")
 
-	_, changes := mr.repairLocally("她高兴及了，跑过去抱住他。因该是这样的。", "test-hash")
+	_, changes := mr.repairLocally("她高兴及了，跑过去抱住他。因该是这样的。")
 	if len(changes) == 0 {
 		t.Errorf("repairLocally() should detect typos")
 	}
@@ -98,7 +98,7 @@ func TestRepairLocally_ShouldFixTuShuGuan(t *testing.T) {
 	initRepairerTestConfig()
 	mr := NewModelRepairer("local", "test-model")
 
-	_, changes := mr.repairLocally("他每天都去图书管看书。", "test-hash")
+	_, changes := mr.repairLocally("他每天都去图书管看书。")
 	if len(changes) == 0 {
 		t.Errorf("repairLocally() should detect 图书管 typo")
 	}

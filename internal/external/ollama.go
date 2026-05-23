@@ -306,13 +306,3 @@ func (oc *OllamaClient) CorrectText(text string) (string, error) {
 
 	return oc.Generate(userPrompt, systemPrompt)
 }
-
-// GetModelName 获取模型名称
-func (oc *OllamaClient) GetModelName() string {
-	return oc.modelName
-}
-
-// GetBaseURL 获取基础URL
-func (oc *OllamaClient) GetBaseURL() string {
-	return oc.baseURL
-}

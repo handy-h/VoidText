@@ -73,9 +73,5 @@ func DefaultRateLimitConfig() *RateLimitConfig {
 
 // GetRateLimitConfig 获取限流配置
 func GetRateLimitConfig() *RateLimitConfig {
-  if AppConfigInstance.RateLimit != nil {
-    return AppConfigInstance.RateLimit
-  }
-  
   return DefaultRateLimitConfig()
 }

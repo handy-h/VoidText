@@ -4,7 +4,8 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 
-	"txt-cleaning/web/backend/handlers"
+	"voidtext/web/backend/handlers"
+	"voidtext/web/backend/middleware"
 )
 
 // NewServer 创建新的Web服务器
@@ -14,10 +15,12 @@ func NewServer() *gin.Engine {
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"http://localhost:8080", "http://127.0.0.1:8080"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "X-API-Token"},
 		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
 	}))
+
+	r.Use(middleware.AuthMiddleware())
 
 	r.Static("/static", "./web/frontend/static")
 

@@ -1,9 +1,11 @@
 package processor
 
 import (
+	"fmt"
 	"math"
 	"strings"
 	"voidtext/internal/config"
+	"voidtext/internal/external"
 	"voidtext/internal/processor/preprocess"
 )
 
@@ -12,6 +14,7 @@ type VectorDetector struct {
 	SimilarityThreshold float64
 	VectorModelType     string
 	VectorModelName     string
+	apiClient           *external.API
 }
 
 // VectorDetectionResult 向量检测结果
@@ -24,15 +27,19 @@ type VectorDetectionResult struct {
 
 // NewVectorDetector 创建向量检测器
 func NewVectorDetector(similarityThreshold float64, modelType, modelName string) *VectorDetector {
-	return &VectorDetector{
+	vd := &VectorDetector{
 		SimilarityThreshold: similarityThreshold,
 		VectorModelType:     modelType,
 		VectorModelName:     modelName,
 	}
+	if modelType == "api" {
+		vd.apiClient = external.NewEmbeddingAPI()
+	}
+	return vd
 }
 
 // DetectDuplicates 检测重复内容
-func (vd *VectorDetector) DetectDuplicates(content string) VectorDetectionResult {
+func (vd *VectorDetector) DetectDuplicates(content string) (VectorDetectionResult, error) {
 	result := VectorDetectionResult{
 		Content:  content,
 		Original: content,
@@ -42,18 +49,21 @@ func (vd *VectorDetector) DetectDuplicates(content string) VectorDetectionResult
 
 	// 如果向量检测被禁用，直接返回
 	if !config.AppConfigInstance.EnableVectorDetection {
-		return result
+		return result, nil
 	}
 
 	// 按段落分割文本
 	paragraphs := vd.splitIntoParagraphs(content)
 
 	if len(paragraphs) <= 1 {
-		return result
+		return result, nil
 	}
 
 	// 生成向量表示
-	vectors := vd.generateVectors(paragraphs)
+	vectors, err := vd.generateVectors(paragraphs)
+	if err != nil {
+		return result, err
+	}
 
 	// 检测重复段落
 	duplicateIndices := vd.findDuplicateIndices(vectors, paragraphs)
@@ -63,7 +73,7 @@ func (vd *VectorDetector) DetectDuplicates(content string) VectorDetectionResult
 		result = vd.removeDuplicateParagraphs(result, paragraphs, duplicateIndices)
 	}
 
-	return result
+	return result, nil
 }
 
 // splitIntoParagraphs 将文本分割为段落
@@ -84,10 +94,24 @@ func (vd *VectorDetector) splitIntoParagraphs(content string) []string {
 }
 
 // generateVectors 生成段落向量
-// 使用 7 维混合特征：语义维度（长度、标点密度）+ 判别维度（FNV-1a 文本哈希）
-func (vd *VectorDetector) generateVectors(paragraphs []string) [][]float64 {
-	vectors := make([][]float64, len(paragraphs))
+// API 模式：调用外部 Embedding 服务；local 模式：7 维混合特征（FNV-1a 哈希 + 标点密度）
+func (vd *VectorDetector) generateVectors(paragraphs []string) ([][]float64, error) {
+	if vd.VectorModelType == "api" && vd.apiClient != nil {
+		resp, err := vd.apiClient.GenerateEmbedding(paragraphs)
+		if err != nil {
+			return nil, fmt.Errorf("embedding API 调用失败: %w", err)
+		}
+		if resp == nil || len(resp.Data) != len(paragraphs) {
+			return nil, fmt.Errorf("embedding API 返回数量不匹配: 期望 %d, 实际 %d", len(paragraphs), len(resp.Data))
+		}
+		vectors := make([][]float64, len(paragraphs))
+		for _, d := range resp.Data {
+			vectors[d.Index] = d.Embedding
+		}
+		return vectors, nil
+	}
 
+	vectors := make([][]float64, len(paragraphs))
 	for i, paragraph := range paragraphs {
 		runes := []rune(paragraph)
 		runeLen := float64(len(runes))
@@ -95,7 +119,7 @@ func (vd *VectorDetector) generateVectors(paragraphs []string) [][]float64 {
 		vector := make([]float64, 7)
 
 		// 语义特征（均归一化到 [0,1]）
-		vector[0] = math.Min(runeLen/500.0, 1.0) // 段落长度（截断到 500 runes）
+		vector[0] = math.Min(runeLen/500.0, 1.0)
 		if runeLen > 0 {
 			vector[1] = float64(strings.Count(paragraph, "。")) / runeLen
 			vector[2] = float64(strings.Count(paragraph, "，")) / runeLen
@@ -112,7 +136,7 @@ func (vd *VectorDetector) generateVectors(paragraphs []string) [][]float64 {
 		vectors[i] = vector
 	}
 
-	return vectors
+	return vectors, nil
 }
 
 // fnv1a64 计算字符串的 FNV-1a 64 位哈希值

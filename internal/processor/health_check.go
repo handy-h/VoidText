@@ -113,14 +113,6 @@ func (hcm *HealthCheckManager) Stop() {
 	logging.Info("health_check_stopped", nil)
 }
 
-// runHealthChecks 运行健康检查循环（仅包含定期检查，初始检查由Start同步完成）
-func (hcm *HealthCheckManager) runHealthChecks() {
-	// 立即执行一次健康检查，避免初始状态为不健康
-	hcm.performHealthChecks()
-
-	hcm.runHealthChecksLoop()
-}
-
 // runHealthChecksLoop 定期执行健康检查的循环
 func (hcm *HealthCheckManager) runHealthChecksLoop() {
 	ticker := time.NewTicker(hcm.checkInterval)

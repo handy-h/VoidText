@@ -54,6 +54,7 @@ func main() {
 	logging.Info("数据库初始化完成", nil)
 
 	// 初始化Web服务
+	processor.GetHealthManager().Start()
 	server := backend.NewServer()
 
 	// 启动服务器

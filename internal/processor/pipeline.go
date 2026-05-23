@@ -6,14 +6,15 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
-	"txt-cleaning/internal/config"
-	"txt-cleaning/internal/database"
-	"txt-cleaning/internal/file"
-	"txt-cleaning/internal/processor/preprocess"
-	"txt-cleaning/internal/processor/rules"
+	"voidtext/internal/config"
+	"voidtext/internal/database"
+	"voidtext/internal/file"
+	"voidtext/internal/processor/preprocess"
+	"voidtext/internal/processor/rules"
 )
 
 const (
@@ -230,7 +231,10 @@ func processIndexingStep(fileMd5, content string, rulesConfig RulesConfig, _ *da
 		config.AppConfigInstance.VectorModelType,
 		config.AppConfigInstance.VectorModelName,
 	)
-	detectResult := detector.DetectDuplicates(content)
+	detectResult, err := detector.DetectDuplicates(content)
+	if err != nil {
+		return nil, fmt.Errorf("向量检测失败: %w", err)
+	}
 
 	if err := saveIntermediateFile(fileMd5, StepIndexing, detectResult.Content); err != nil {
 		return nil, fmt.Errorf("保存中间文件失败: %w", err)
@@ -597,10 +601,15 @@ func saveIntermediateFile(fileMd5, step, content string) error {
 }
 
 // removeAdContent 根据正则模式移除广告内容
-func removeAdContent(content, _ string) string {
-	cleaner := NewBasicCleaner(false)
-	_ = cleaner
-	return content
+func removeAdContent(content, pattern string) string {
+	if pattern == "" {
+		return content
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return content
+	}
+	return re.ReplaceAllString(content, "")
 }
 
 // buildSortedChanges 从审核项构建排序后的修改建议

@@ -555,19 +555,3 @@ func UpdateFileRules(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "规则更新成功"})
 }
-
-func formatFileSize(bytes int64) string {
-	const kb = 1024
-	const mb = kb * 1024
-	const gb = mb * 1024
-	switch {
-	case bytes >= gb:
-		return fmt.Sprintf("%.1fGB", float64(bytes)/float64(gb))
-	case bytes >= mb:
-		return fmt.Sprintf("%.1fMB", float64(bytes)/float64(mb))
-	case bytes >= kb:
-		return fmt.Sprintf("%.1fKB", float64(bytes)/float64(kb))
-	default:
-		return fmt.Sprintf("%dB", bytes)
-	}
-}

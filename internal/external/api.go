@@ -187,27 +187,6 @@ type API struct {
 	isLocalModel          bool         // 是否为本地模型
 }
 
-// IsLocalModel 检查是否为本地模型
-func (api *API) IsLocalModel() bool {
-	api.mu.RLock()
-	defer api.mu.RUnlock()
-	return api.isLocalModel
-}
-
-// GetBaseURL 获取基础URL
-func (api *API) GetBaseURL() string {
-	api.mu.RLock()
-	defer api.mu.RUnlock()
-	return api.baseURL
-}
-
-// GetCompletionModelName 获取完成模型名称
-func (api *API) GetCompletionModelName() string {
-	api.mu.RLock()
-	defer api.mu.RUnlock()
-	return api.completionModelName
-}
-
 // NewAPI 创建新的API客户端
 func NewAPI() *API {
 	return &API{
@@ -219,22 +198,19 @@ func NewAPI() *API {
 		completionTemperature: config.AppConfigInstance.CompletionTemperature,
 		completionMaxTokens:   config.AppConfigInstance.CompletionMaxTokens,
 		retryConfig:           DefaultRetryConfig(),
-		isLocalModel:          false, // 默认为远程API
+		isLocalModel:          false,
 	}
 }
 
-// NewLocalAPI 创建本地模型API客户端
-func NewLocalAPI(baseURL string) *API {
+// NewEmbeddingAPI 创建专用于 Embedding 的 API 客户端，使用向量检测独立配置
+func NewEmbeddingAPI() *API {
 	return &API{
-		client:                getGlobalHTTPClient(),
-		baseURL:               baseURL,
-		apiKey:                "", // 本地模型不需要API Key
-		embeddingModelName:    "",
-		completionModelName:   "qwen2.5:7b-instruct-q4_K_M",
-		completionTemperature: 0.3,
-		completionMaxTokens:   2048,
-		retryConfig:           DefaultRetryConfig(),
-		isLocalModel:          true,
+		client:             getGlobalHTTPClient(),
+		baseURL:            config.AppConfigInstance.VectorModelURL,
+		apiKey:             config.AppConfigInstance.VectorModelApiKey,
+		embeddingModelName: config.AppConfigInstance.VectorModelName,
+		retryConfig:        DefaultRetryConfig(),
+		isLocalModel:       false,
 	}
 }
 
@@ -727,50 +703,3 @@ func (api *API) CorrectText(text string) (string, error) {
 
 	return text, nil
 }
-
-// GenerateSummary 生成文本摘要（带重试）
-func (api *API) GenerateSummary(text string) (string, error) {
-	systemPrompt := "你是一个专业的文本摘要生成器。请为以下文本生成一个简洁的摘要。"
-	userPrompt := text
-
-	resp, err := api.GenerateChatCompletion(systemPrompt, userPrompt, api.completionMaxTokens, api.completionTemperature)
-	if err != nil {
-		return "", err
-	}
-
-	if len(resp.Choices) > 0 {
-		return resp.Choices[0].Message.Content, nil
-	}
-
-	return "", nil
-}
-
-// SetRetryConfig 设置重试配置（线程安全）
-func (api *API) SetRetryConfig(config *RetryConfig) {
-	api.mu.Lock()
-	defer api.mu.Unlock()
-	api.retryConfig = config
-}
-
-// GetRetryConfig 获取重试配置（线程安全）
-func (api *API) GetRetryConfig() *RetryConfig {
-	api.mu.RLock()
-	defer api.mu.RUnlock()
-	return api.retryConfig
-}
-
-// UpdateBaseURL 更新API基础URL（线程安全）
-func (api *API) UpdateBaseURL(baseURL string) {
-	api.mu.Lock()
-	defer api.mu.Unlock()
-	api.baseURL = baseURL
-}
-
-// UpdateAPIKey 更新API密钥（线程安全）
-func (api *API) UpdateAPIKey(apiKey string) {
-	api.mu.Lock()
-	defer api.mu.Unlock()
-	api.apiKey = apiKey
-}
-
-

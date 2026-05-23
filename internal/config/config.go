@@ -15,6 +15,7 @@ import (
 type AppConfig struct {
 	Port           int
 	DataDir        string
+	BaseDir        string
 	MaxFileSize    int64
 	BackupKeepDays int
 
@@ -40,6 +41,11 @@ type AppConfig struct {
 
 	EnableLlmParagraphReconstruct bool
 	ParagraphChunkSize            int
+
+	EnableLocalModel   bool
+	LocalModelURL      string
+	LocalModelName     string
+	LocalModelTimeout  int
 
 	NameSeparators string
 }
@@ -69,9 +75,16 @@ func Load() error {
 	// 打印实际加载的环境变量值
 	log.Printf("DATA_DIR=%s", os.Getenv("DATA_DIR"))
 
+	// 获取当前工作目录作为 BaseDir
+	baseDir, err := os.Getwd()
+	if err != nil {
+		baseDir = "."
+	}
+
 	cfg := AppConfig{
 		Port:                      getEnvInt("PORT", 8080),
 		DataDir:                   getEnvStr("DATA_DIR", "./data"),
+		BaseDir:                   baseDir,
 		MaxFileSize:               getEnvInt64("MAX_FILE_SIZE", 100*1024*1024),
 		BackupKeepDays:            getEnvInt("BACKUP_KEEP_DAYS", 7),
 		EnableBasicCleaning:       getEnvBool("ENABLE_BASIC_CLEANING", true),
@@ -93,6 +106,10 @@ func Load() error {
 		CompletionMaxTokens:              getEnvInt("COMPLETION_MAX_TOKENS", 2048),
 		EnableLlmParagraphReconstruct:    getEnvBool("ENABLE_LLM_PARAGRAPH_RECONSTRUCT", false),
 		ParagraphChunkSize:               getEnvInt("PARAGRAPH_CHUNK_SIZE", 8000),
+		EnableLocalModel:                 getEnvBool("ENABLE_LOCAL_MODEL", false),
+		LocalModelURL:                    getEnvStr("LOCAL_MODEL_URL", "http://localhost:11434"),
+		LocalModelName:                   getEnvStr("LOCAL_MODEL_NAME", "qwen2.5"),
+		LocalModelTimeout:                getEnvInt("LOCAL_MODEL_TIMEOUT", 30),
 		NameSeparators:                   getEnvStr("NAME_SEPARATORS", "-|—|·|·|_| "),
 	}
 
