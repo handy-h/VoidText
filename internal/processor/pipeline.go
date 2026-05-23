@@ -236,8 +236,9 @@ func processIndexingStep(fileMd5, content string, rulesConfig RulesConfig, _ *da
 		return nil, fmt.Errorf("保存中间文件失败: %w", err)
 	}
 
+	var items []database.ReviewItemRecord
 	for _, change := range detectResult.Changes {
-		item := database.ReviewItemRecord{
+		items = append(items, database.ReviewItemRecord{
 			FileMd5:          fileMd5,
 			OriginalText:     change.Original,
 			SuggestedText:    change.Replacement,
@@ -246,8 +247,10 @@ func processIndexingStep(fileMd5, content string, rulesConfig RulesConfig, _ *da
 			PositionStart:    change.Position,
 			PositionEnd:      change.Position + len(change.Original),
 			Status:           "pending",
-		}
-		database.CreateReviewItems([]database.ReviewItemRecord{item})
+		})
+	}
+	if len(items) > 0 {
+		database.CreateReviewItems(items)
 	}
 
 	nextStep := GetNextStep(StepIndexing)
@@ -270,8 +273,15 @@ func processIndexingStep(fileMd5, content string, rulesConfig RulesConfig, _ *da
 	}, nil
 }
 
-// processLlmFixStep LLM修复步骤
-func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, _ *database.FileRecord) (*PipelineResult, error) {
+// LlmCheckpoint LLM修复断点数据
+type LlmCheckpoint struct {
+	ParagraphIndex    int                `json:"paragraphIndex"`
+	RepairedParagraphs []string          `json:"repairedParagraphs"`
+	Changes           []preprocess.Change `json:"changes"`
+}
+
+// processLlmFixStep LLM修复步骤（支持断点恢复和取消）
+func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, record *database.FileRecord) (*PipelineResult, error) {
 	if !rulesConfig.EnableModelRepair {
 		nextStep := GetNextStep(StepLlmFix)
 		database.UpdateFileStatus(fileMd5, "processing", nextStep, CalculateProgress(nextStep, 0), "")
@@ -291,7 +301,10 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, _ *data
 	// 段落重组：使用LLM智能识别语义段落边界，合并被硬切断的行
 	if config.AppConfigInstance.EnableLlmParagraphReconstruct {
 		origLen := len([]rune(content))
-		reconstructed, err := repairer.ReconstructParagraphs(content)
+		reconstructed, err := repairer.ReconstructParagraphsWithCheckpoint(content, fileMd5, func(done, total int) {
+			// 每完成一块就更新进度
+			log.Printf("[段落重组] 进度: %d/%d 块完成", done, total)
+		})
 		if err != nil {
 			log.Printf("[段落重组] 失败，回退到原始段落结构: %v", err)
 		} else {
@@ -304,19 +317,47 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, _ *data
 	paragraphs := repairer.SplitIntoParagraphs(content)
 	totalParagraphs := len(paragraphs)
 
+	// 尝试从断点恢复
+	startIndex := 0
+	repairedParagraphs := []string{}
+	allChanges := []preprocess.Change{}
+
+	if record != nil && record.LlmProgressParagraph > 0 && record.LlmProgressParagraph < totalParagraphs {
+		startIndex = record.LlmProgressParagraph
+		// 恢复之前的已修复段落
+		for i := 0; i < startIndex; i++ {
+			repairedParagraphs = append(repairedParagraphs, paragraphs[i])
+		}
+		log.Printf("[LLM修复] 断点恢复: 从段落 %d/%d 继续", startIndex+1, totalParagraphs)
+	}
+
+	const checkpointInterval = 50
+
 	database.CreateProcessingLog(&database.ProcessingLogRecord{
 		FileMd5: fileMd5,
 		Step:    StepLlmFix,
 		Action:  "progress",
-		Details: fmt.Sprintf("LLM修复开始，共 %d 个段落", totalParagraphs),
+		Details: fmt.Sprintf("LLM修复开始，共 %d 个段落，从第 %d 段开始", totalParagraphs, startIndex+1),
 		Status:  "running",
 	})
 
-	repairedParagraphs := []string{}
-	allChanges := []preprocess.Change{}
+	for i := startIndex; i < totalParagraphs; i++ {
+		// 定期检查取消标志
+		if i%checkpointInterval == 0 {
+			cancelled, _ := database.IsFileCancelled(fileMd5)
+			if cancelled {
+				log.Printf("[LLM修复] 文件 %s 已被取消，停止处理（已完成 %d/%d 段落）", fileMd5, i, totalParagraphs)
+				database.SetCancelFlag(fileMd5, 0) // 重置取消标志
+				return &PipelineResult{
+					CurrentStep: StepLlmFix,
+					NextStep:    "",
+					Progress:    CalculateProgress(StepLlmFix, i*100/totalParagraphs),
+					Message:     fmt.Sprintf("LLM修复已取消 (%d/%d)", i, totalParagraphs),
+				}, nil
+			}
+		}
 
-	for i, paragraph := range paragraphs {
-		preview := paragraph
+		preview := paragraphs[i]
 		previewRunes := []rune(preview)
 		if len(previewRunes) > 40 {
 			preview = string(previewRunes[:40]) + "..."
@@ -326,15 +367,7 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, _ *data
 			CalculateProgress(StepLlmFix, i*100/totalParagraphs),
 			fmt.Sprintf("LLM修复: 正在处理 %d/%d", i+1, totalParagraphs))
 
-		database.CreateProcessingLog(&database.ProcessingLogRecord{
-			FileMd5: fileMd5,
-			Step:    StepLlmFix,
-			Action:  "progress",
-			Details: fmt.Sprintf("正在修复段落 %d/%d: %s", i+1, totalParagraphs, preview),
-			Status:  "running",
-		})
-
-		repaired, changes := repairer.RepairParagraph(paragraph)
+		repaired, changes := repairer.RepairParagraph(paragraphs[i])
 		repairedParagraphs = append(repairedParagraphs, repaired)
 		allChanges = append(allChanges, changes...)
 
@@ -343,15 +376,31 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, _ *data
 			CalculateProgress(StepLlmFix, stepProgress),
 			fmt.Sprintf("LLM修复: 已完成 %d/%d 段落", i+1, totalParagraphs))
 
-		database.CreateProcessingLog(&database.ProcessingLogRecord{
-			FileMd5: fileMd5,
-			Step:    StepLlmFix,
-			Action:  "progress",
-			Details: fmt.Sprintf("已完成段落 %d/%d (修改 %d 处)", i+1, totalParagraphs, len(changes)),
-			Status:  "running",
-		})
+		// 每隔 checkpointInterval 个段落保存断点
+		if (i+1)%checkpointInterval == 0 || i == totalParagraphs-1 {
+			checkpointContent := strings.Join(repairedParagraphs, "\n")
+			checkpointJSON, _ := json.Marshal(LlmCheckpoint{
+				ParagraphIndex:    i + 1,
+				RepairedParagraphs: repairedParagraphs,
+				Changes:           allChanges,
+			})
+			database.UpdateLlmProgress(fileMd5, i+1, string(checkpointJSON))
+			// 同时保存中间文件
+			saveIntermediateFile(fileMd5, StepLlmFix, checkpointContent)
+
+			database.CreateProcessingLog(&database.ProcessingLogRecord{
+				FileMd5: fileMd5,
+				Step:    StepLlmFix,
+				Action:  "checkpoint",
+				Details: fmt.Sprintf("断点保存: 段落 %d/%d (累计修改 %d 处)", i+1, totalParagraphs, len(allChanges)),
+				Status:  "running",
+			})
+
+			log.Printf("[LLM修复] 断点保存: %d/%d 段落完成", i+1, totalParagraphs)
+		}
 	}
 
+	// 最终保存
 	repairResult := ModelRepairResult{
 		Content: strings.Join(repairedParagraphs, "\n"),
 		Changes: allChanges,
@@ -361,8 +410,10 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, _ *data
 		return nil, fmt.Errorf("保存中间文件失败: %w", err)
 	}
 
+	// 批量写入审核项
+	var llmItems []database.ReviewItemRecord
 	for _, change := range repairResult.Changes {
-		item := database.ReviewItemRecord{
+		llmItems = append(llmItems, database.ReviewItemRecord{
 			FileMd5:          fileMd5,
 			OriginalText:     change.Original,
 			SuggestedText:    change.Replacement,
@@ -371,9 +422,14 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, _ *data
 			PositionStart:    change.Position,
 			PositionEnd:      change.Position + len(change.Original),
 			Status:           "pending",
-		}
-		database.CreateReviewItems([]database.ReviewItemRecord{item})
+		})
 	}
+	if len(llmItems) > 0 {
+		database.CreateReviewItems(llmItems)
+	}
+
+	// 清除断点记录
+	database.UpdateLlmProgress(fileMd5, 0, "")
 
 	nextStep := GetNextStep(StepLlmFix)
 	progress := CalculateProgress(nextStep, 0)

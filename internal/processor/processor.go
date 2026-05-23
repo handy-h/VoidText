@@ -143,12 +143,6 @@ func ProcessWithReview(content, fileID, processID string) (ProcessResult, error)
 	return result, nil
 }
 
-// GetSuggestions 获取修改建议
-func GetSuggestions(content string) []preprocess.Change {
-	result := Process(content)
-	return result.Suggestions
-}
-
 // ApplySuggestion 应用单个修改建议
 func ApplySuggestion(content string, suggestion preprocess.Change) string {
 	if suggestion.Original == "" && suggestion.Replacement == "" {

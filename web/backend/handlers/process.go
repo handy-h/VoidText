@@ -57,6 +57,13 @@ func RunAllSteps(c *gin.Context) {
 		}()
 
 		for _, step := range stepsToRun {
+			// 在每步开始前检查取消标志
+			cancelled, _ := database.IsFileCancelled(fileMd5)
+			if cancelled {
+				database.SetCancelFlag(fileMd5, 0)
+				database.UpdateFileStatus(fileMd5, "cancelled", "", 0, "用户取消")
+				return
+			}
 			_, err := processor.ProcessStep(fileMd5, step)
 			if err != nil {
 				database.UpdateFileStatus(fileMd5, "failed", step, 0, err.Error())
@@ -74,6 +81,29 @@ func RunAllSteps(c *gin.Context) {
 		"success": true,
 		"message": "处理已启动",
 	})
+}
+
+// CancelProcessing 取消处理中的任务
+func CancelProcessing(c *gin.Context) {
+	fileMd5 := c.Param("md5")
+
+	record, err := database.GetFileByMd5(fileMd5)
+	if err != nil || record == nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "文件不存在"})
+		return
+	}
+
+	if record.Status != "processing" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "文件未在处理中"})
+		return
+	}
+
+	if err := database.SetCancelFlag(fileMd5, 1); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "设置取消标志失败"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "取消信号已发送，将在下一检查点停止"})
 }
 
 // GetFileStatus 获取文件处理状态

@@ -62,3 +62,6 @@ tmp/
 configs/local.yaml
 configs/development.yaml
 configs/production.yaml
+
+
+.code-context-index-state.json

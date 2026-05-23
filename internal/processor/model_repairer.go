@@ -3,7 +3,9 @@ package processor
 import (
 	"fmt"
 	"log"
+	"math"
 	"strings"
+	"time"
 	"txt-cleaning/internal/config"
 	"txt-cleaning/internal/external"
 	"txt-cleaning/internal/processor/preprocess"
@@ -13,6 +15,7 @@ import (
 type ModelRepairer struct {
 	RepairModelType string
 	RepairModelName string
+	api             *external.API
 }
 
 // ModelRepairResult 模型修复结果
@@ -28,6 +31,7 @@ func NewModelRepairer(modelType, modelName string) *ModelRepairer {
 	return &ModelRepairer{
 		RepairModelType: modelType,
 		RepairModelName: modelName,
+		api:             external.NewAPI(),
 	}
 }
 
@@ -102,42 +106,58 @@ func (mr *ModelRepairer) RepairParagraph(paragraph string) (string, []preprocess
 	return mr.repairLocally(paragraph)
 }
 
-// repairWithAPI 使用外部API修复文本
+// repairWithAPI 使用外部API修复文本，带重试机制
 func (mr *ModelRepairer) repairWithAPI(paragraph string) (string, []preprocess.Change) {
-	api := external.NewAPI()
-
 	systemPrompt := "你是一个专业的中文小说校对编辑。请修正以下段落中的错别字和语法错误，保持原文风格不变。只输出修正后的文本，无需解释。"
 	userPrompt := "输入：她高兴及了，跑过去抱住他。\n输出：她高兴极了，跑过去抱住他。\n\n当前任务：\n输入：" + paragraph + "\n输出："
 
-	resp, err := api.GenerateChatCompletion(systemPrompt, userPrompt, 0, -1)
-	if err != nil || resp == nil || len(resp.Choices) == 0 {
-		log.Printf("[LLM修复] API调用失败，回退到本地修复: 段落长度=%d, 错误=%v", len(paragraph), err)
-		return mr.repairLocally(paragraph)
+	maxRetries := 3
+	baseDelay := 2 * time.Second
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		resp, err := mr.api.GenerateChatCompletion(systemPrompt, userPrompt, 0, -1)
+		if err == nil && resp != nil && len(resp.Choices) > 0 {
+			// 成功响应
+			repairedText := strings.TrimSpace(resp.Choices[0].Message.Content)
+			if repairedText == "" || repairedText == paragraph {
+				return paragraph, []preprocess.Change{}
+			}
+			changes := mr.compareTexts(paragraph, repairedText)
+			log.Printf("[LLM修复] 成功: 输入长度=%d, 输出长度=%d, 修改数=%d (第%d次尝试)", len(paragraph), len(repairedText), len(changes), attempt+1)
+			return repairedText, changes
+		}
+
+		// 判断错误是否可重试
+		if !isRetryableError(err) || attempt == maxRetries-1 {
+			log.Printf("[LLM修复] API调用失败，回退到本地修复: 段落长度=%d, 错误=%v, 尝试=%d", len(paragraph), err, attempt+1)
+			return mr.repairLocally(paragraph)
+		}
+
+		// 指数退避
+		delay := time.Duration(math.Pow(2, float64(attempt))) * baseDelay
+		log.Printf("[LLM修复] API可重试错误，第%d次重试，等待%v: %v", attempt+1, delay, err)
+		time.Sleep(delay)
 	}
 
-	repairedText := strings.TrimSpace(resp.Choices[0].Message.Content)
-
-	if repairedText == "" || repairedText == paragraph {
-		return paragraph, []preprocess.Change{}
-	}
-
-	changes := mr.compareTexts(paragraph, repairedText)
-	log.Printf("[LLM修复] 成功: 输入长度=%d, 输出长度=%d, 修改数=%d", len(paragraph), len(repairedText), len(changes))
-
-	return repairedText, changes
+	// 所有重试均失败，回退本地修复
+	log.Printf("[LLM修复] %d次重试全部失败，回退到本地修复: 段落长度=%d", maxRetries, len(paragraph))
+	return mr.repairLocally(paragraph)
 }
 
-// buildRepairPrompt 构造修复提示词
-func (mr *ModelRepairer) buildRepairPrompt(text string) string {
-	return `你是一个专业的中文小说校对编辑。请修正以下段落中的错别字和语法错误，保持原文风格不变。只输出修正后的文本，无需解释。
-
-示例：
-输入：她高兴及了，跑过去抱住他。
-输出：她高兴极了，跑过去抱住他。
-
-当前任务：
-输入：` + text + `
-输出：`
+// isRetryableError 判断API错误是否可重试
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	// 可重试的HTTP状态码
+	retryableCodes := []string{"429", "500", "502", "503", "504", "timeout", "connection reset", "EOF", "broken pipe"}
+	for _, code := range retryableCodes {
+		if strings.Contains(errStr, code) {
+			return true
+		}
+	}
+	return false
 }
 
 // repairLocally 本地修复（简化实现）
@@ -331,13 +351,12 @@ func (mr *ModelRepairer) ReconstructParagraphs(content string) (string, error) {
 	chunks := mr.smartChunk(content, chunkSize, overlap)
 	log.Printf("[段落重组] 分块完成: 总块数=%d, 分块大小=%d, 重叠=%d", len(chunks), chunkSize, overlap)
 
-	api := external.NewAPI()
 	reconstructedChunks := make([]string, 0, len(chunks))
 
 	for i, chunk := range chunks {
 		log.Printf("[段落重组] 正在处理第 %d/%d 块 (长度=%d字符)", i+1, len(chunks), len([]rune(chunk)))
 
-		resp, err := api.GenerateChatCompletion(paragraphReconstructPrompt, chunk, 0, -1)
+		resp, err := mr.api.GenerateChatCompletion(paragraphReconstructPrompt, chunk, 0, -1)
 		if err != nil {
 			return content, fmt.Errorf("第%d块LLM调用失败: %w", i+1, err)
 		}
@@ -355,6 +374,57 @@ func (mr *ModelRepairer) ReconstructParagraphs(content string) (string, error) {
 	}
 
 	// 合并各块（去除重叠区域）
+	result := mr.mergeChunks(reconstructedChunks, overlap)
+	log.Printf("[段落重组] 全部完成: 原始长度=%d字符, 重组后长度=%d字符",
+		len([]rune(content)), len([]rune(result)))
+
+	return result, nil
+}
+
+// ReconstructParagraphsWithCheckpoint 带断点保存的段落重组
+// fileMd5 用于断点恢复，checkpointFn 为进度回调（参数：已完成块数, 总块数）
+func (mr *ModelRepairer) ReconstructParagraphsWithCheckpoint(content, fileMd5 string, checkpointFn func(done, total int)) (string, error) {
+	chunkSize := config.AppConfigInstance.ParagraphChunkSize
+	if chunkSize <= 0 {
+		chunkSize = 8000
+	}
+	overlap := 200
+
+	chunks := mr.smartChunk(content, chunkSize, overlap)
+	totalChunks := len(chunks)
+	log.Printf("[段落重组] 分块完成: 总块数=%d, 分块大小=%d, 重叠=%d", totalChunks, chunkSize, overlap)
+
+	reconstructedChunks := make([]string, 0, totalChunks)
+
+	for i, chunk := range chunks {
+		log.Printf("[段落重组] 正在处理第 %d/%d 块 (长度=%d字符)", i+1, totalChunks, len([]rune(chunk)))
+
+		resp, err := mr.api.GenerateChatCompletion(paragraphReconstructPrompt, chunk, 0, -1)
+		if err != nil {
+			// 保存当前进度
+			if len(reconstructedChunks) > 0 && fileMd5 != "" {
+				partial := mr.mergeChunks(reconstructedChunks, overlap)
+				log.Printf("[段落重组] 第%d块失败，已保存 %d/%d 块的部分结果（%d字符）", i+1, i, totalChunks, len([]rune(partial)))
+			}
+			return content, fmt.Errorf("第%d块LLM调用失败: %w", i+1, err)
+		}
+		if resp == nil || len(resp.Choices) == 0 {
+			return content, fmt.Errorf("第%d块LLM返回空结果", i+1)
+		}
+
+		repaired := strings.TrimSpace(resp.Choices[0].Message.Content)
+		if repaired == "" {
+			repaired = chunk // 降级：使用原块
+		}
+		reconstructedChunks = append(reconstructedChunks, repaired)
+		log.Printf("[段落重组] 第 %d/%d 块完成 (输出长度=%d字符)", i+1, totalChunks, len([]rune(repaired)))
+
+		// 每处理完一块就保存断点
+		if fileMd5 != "" && checkpointFn != nil {
+			checkpointFn(i+1, totalChunks)
+		}
+	}
+
 	result := mr.mergeChunks(reconstructedChunks, overlap)
 	log.Printf("[段落重组] 全部完成: 原始长度=%d字符, 重组后长度=%d字符",
 		len([]rune(content)), len([]rune(result)))

@@ -28,9 +28,20 @@ func Init(dataDir string) error {
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 
+	// 启用 WAL 模式，允许并发读写，改善 LLM 修复期间的 HTTP 响应速度
+	if _, err := db.Exec(`PRAGMA journal_mode=WAL`); err != nil {
+		return fmt.Errorf("启用WAL模式失败: %w", err)
+	}
+	if _, err := db.Exec(`PRAGMA synchronous=NORMAL`); err != nil {
+		return fmt.Errorf("设置同步模式失败: %w", err)
+	}
+
 	if err := db.Ping(); err != nil {
 		return fmt.Errorf("数据库连接测试失败: %w", err)
 	}
+
+	// 迁移：为已有库添加断点恢复所需的列
+	migrateSchema(db)
 
 	if err := createTables(); err != nil {
 		return fmt.Errorf("创建表结构失败: %w", err)
@@ -69,7 +80,10 @@ func createTables() error {
 			rules_config TEXT,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			error_msg TEXT
+			error_msg TEXT,
+			llm_progress_paragraph INTEGER NOT NULL DEFAULT 0,
+			llm_progress_checkpoint TEXT,
+			cancel_flag INTEGER NOT NULL DEFAULT 0
 		)`,
 		`CREATE TABLE IF NOT EXISTS versions (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -121,4 +135,16 @@ func createTables() error {
 	}
 
 	return nil
+}
+
+// migrateSchema 执行数据库迁移
+func migrateSchema(db *sql.DB) {
+	migrations := []string{
+		`ALTER TABLE files ADD COLUMN llm_progress_paragraph INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE files ADD COLUMN llm_progress_checkpoint TEXT`,
+		`ALTER TABLE files ADD COLUMN cancel_flag INTEGER NOT NULL DEFAULT 0`,
+	}
+	for _, stmt := range migrations {
+		db.Exec(stmt) // 忽略已存在的列错误
+	}
 }

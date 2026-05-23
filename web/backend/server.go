@@ -37,6 +37,7 @@ func NewServer() *gin.Engine {
 		api.PUT("/files/:md5/rules", handlers.UpdateFileRules)
 
 		api.POST("/files/:md5/run", handlers.RunAllSteps)
+		api.POST("/files/:md5/cancel", handlers.CancelProcessing)
 		api.GET("/files/:md5/status", handlers.GetFileStatus)
 		api.GET("/files/:md5/review-items", handlers.GetReviewItems)
 		api.POST("/files/:md5/approve", handlers.ApproveReviewItem)
