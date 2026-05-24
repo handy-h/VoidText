@@ -192,6 +192,14 @@ func processCleaningStep(fileMd5, content string, rulesConfig RulesConfig, _ *da
 	ruleMgr := rules.NewRuleManager()
 	cleanResult.Content = ruleMgr.ApplyRules(cleanResult.Content)
 
+	// 换行修复：为缺少换行符的文本智能添加段落分隔
+	newlineFixer := NewNewlineFixer()
+	fixResult := newlineFixer.Fix(cleanResult.Content)
+	if fixResult.Content != cleanResult.Content {
+		cleanResult.Content = fixResult.Content
+		log.Printf("[基础清洗] 换行修复完成: 段落数=%d, 修改=%d", fixResult.Stats["total_paragraphs"], len(fixResult.Changes))
+	}
+
 	if err := saveIntermediateFile(fileMd5, StepCleaning, cleanResult.Content); err != nil {
 		return nil, fmt.Errorf("保存中间文件失败: %w", err)
 	}
@@ -513,6 +521,9 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, record 
 		return nil, fmt.Errorf("保存中间文件失败: %w", err)
 	}
 
+	// 合并同一行相邻的变更，减少审核项数量
+	repairResult.Changes = mergeAdjacentChanges(repairResult.Changes, content)
+
 	// 批量写入审核项
 	var llmItems []database.ReviewItemRecord
 	for _, change := range repairResult.Changes {
@@ -552,6 +563,69 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, record 
 		Progress:    progress,
 		Message:     fmt.Sprintf("LLM修复完成，修复建议: %d", len(repairResult.Changes)),
 	}, nil
+}
+
+// mergeAdjacentChanges 合并同一行中相邻的变更项，减少审核项数量
+// 当两个 change 在同一行内且间隔小于 threshold 字符时合并为一个
+func mergeAdjacentChanges(changes []preprocess.Change, content string) []preprocess.Change {
+	if len(changes) < 2 {
+		return changes
+	}
+
+	// 将 content 按行拆分，用于判断 change 是否在同一行
+	lines := strings.Split(content, "\n")
+
+	// 为每个 change 计算所在行号
+	type changeWithLine struct {
+		change preprocess.Change
+		line   int
+	}
+	changesWithLine := make([]changeWithLine, len(changes))
+	for i, c := range changes {
+		line := 0
+		pos := 0
+		for j, lineStr := range lines {
+			if c.Position >= pos && c.Position <= pos+len(lineStr) {
+				line = j
+				break
+			}
+			pos += len(lineStr) + 1
+		}
+		changesWithLine[i] = changeWithLine{change: c, line: line}
+	}
+
+	// 排序并按行合并
+	sort.Slice(changesWithLine, func(i, j int) bool {
+		if changesWithLine[i].line != changesWithLine[j].line {
+			return changesWithLine[i].line < changesWithLine[j].line
+		}
+		return changesWithLine[i].change.Position < changesWithLine[j].change.Position
+	})
+
+	const mergeThreshold = 10 // 同一行内间隔 < 10 字符的变更合并为一个
+	var merged []preprocess.Change
+	current := changesWithLine[0]
+
+	for i := 1; i < len(changesWithLine); i++ {
+		next := changesWithLine[i]
+		if current.line == next.line {
+			// 在同一行内
+			currentEnd := current.change.Position + len(current.change.Original)
+			gap := next.change.Position - currentEnd
+			if gap >= 0 && gap < mergeThreshold {
+				// 合并：扩展 current 的 Original 和 Replacement
+				origGap := content[currentEnd:next.change.Position]
+				current.change.Original = current.change.Original + origGap + next.change.Original
+				current.change.Replacement = current.change.Replacement + origGap + next.change.Replacement
+				continue
+			}
+		}
+		merged = append(merged, current.change)
+		current = next
+	}
+	merged = append(merged, current.change)
+
+	return merged
 }
 
 func calculateParagraphOffsets(paragraphs []string) []int {
@@ -596,7 +670,7 @@ func saveLlmCheckpoint(fileMd5 string, repairedParagraphs []string, changes []pr
 }
 
 // processReviewStep 审核步骤（进入审核等待状态）
-func processReviewStep(fileMd5, _ string, _ *database.FileRecord) (*PipelineResult, error) {
+func processReviewStep(fileMd5, content string, record *database.FileRecord) (*PipelineResult, error) {
 	total, resolved, err := database.GetReviewProgress(fileMd5)
 	if err != nil {
 		return nil, fmt.Errorf("查询审核进度失败: %w", err)
@@ -611,6 +685,15 @@ func processReviewStep(fileMd5, _ string, _ *database.FileRecord) (*PipelineResu
 			Progress:    CalculateProgress(nextStep, 0),
 			Message:     "无需审核，直接进入下一步",
 		}, nil
+	}
+
+	// 保存审核基线：固定 LLM 修复后的文本，确保审核期间不会被覆盖
+	baselinePath := filepath.Join(config.AppConfigInstance.DataDir, "uploads", fileMd5+"_review_baseline.txt")
+	if err := os.WriteFile(baselinePath, []byte(content), 0644); err != nil {
+		return nil, fmt.Errorf("保存审核基线文件失败: %w", err)
+	}
+	if err := database.SetReviewBaselinePath(fileMd5, baselinePath); err != nil {
+		return nil, fmt.Errorf("记录审核基线路径失败: %w", err)
 	}
 
 	stepProgress := 0
@@ -706,7 +789,7 @@ func AdvanceFromReview(fileMd5 string) (*PipelineResult, error) {
 	return ProcessStep(fileMd5, nextStep)
 }
 
-// saveIntermediateFile 保存中间文件并记录版本
+// saveIntermediateFile 保存中间文件并记录版本（不更新 file_path，避免审核基线被覆盖）
 func saveIntermediateFile(fileMd5, step, content string) error {
 	filePath := filepath.Join(config.AppConfigInstance.DataDir, "uploads", fileMd5+"_"+step+".txt")
 	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
@@ -730,11 +813,15 @@ func saveIntermediateFile(fileMd5, step, content string) error {
 		Step:        step,
 	})
 
+	// 仅更新 file_path（非审核步骤时），审核基线由 processReviewStep 独立维护
 	record, _ := database.GetFileByMd5(fileMd5)
 	if record != nil {
-		record.FilePath = filePath
-		db := database.GetDB()
-		db.Exec(`UPDATE files SET file_path = ? WHERE md5 = ?`, filePath, fileMd5)
+		// 审核步骤不更新 file_path，因为过程审核已使用独立基线
+		if step != StepReview && step != StepFinalizing {
+			record.FilePath = filePath
+			db := database.GetDB()
+			db.Exec(`UPDATE files SET file_path = ? WHERE md5 = ?`, filePath, fileMd5)
+		}
 	}
 
 	return nil

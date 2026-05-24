@@ -86,10 +86,11 @@ func CreateFileWithVersion(fileRecord *FileRecord, versionRecord *VersionRecord)
     }
     
     result, err := tx.Exec(`
-      INSERT INTO files (md5, original_md5, author, title, file_name, file_size, file_path, status, current_step, progress, rules_config, created_at, updated_at, error_msg)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      INSERT INTO files (md5, original_md5, author, title, file_name, file_size, file_path, review_baseline_path, status, current_step, progress, rules_config, created_at, updated_at, error_msg)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       fileRecord.Md5, fileRecord.OriginalMd5, fileRecord.Author, fileRecord.Title,
       fileRecord.FileName, fileRecord.FileSize, fileRecord.FilePath,
+      fileRecord.ReviewBaselinePath,
       fileRecord.Status, fileRecord.CurrentStep, fileRecord.Progress,
       fileRecord.RulesConfig, now, now, fileRecord.ErrorMsg,
     )

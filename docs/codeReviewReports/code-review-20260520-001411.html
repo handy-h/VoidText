@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VoidText 代码审核报告 - 20260520-001411</title>
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --panel: #ffffff;
+      --text: #111827;
+      --muted: #64748b;
+      --border: #dbe3ef;
+      --red-bg: #fee2e2;
+      --red: #b91c1c;
+      --yellow-bg: #fef3c7;
+      --yellow: #92400e;
+      --blue-bg: #dbeafe;
+      --blue: #1d4ed8;
+      --green-bg: #dcfce7;
+      --green: #166534;
+      --shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans SC", sans-serif;
+      line-height: 1.6;
+    }
+
+    header {
+      background: #ffffff;
+      border-bottom: 1px solid var(--border);
+      padding: 32px 24px;
+    }
+
+    .wrap {
+      max-width: 1180px;
+      margin: 0 auto;
+    }
+
+    h1, h2, h3 {
+      margin: 0;
+      line-height: 1.25;
+    }
+
+    h1 {
+      font-size: 28px;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      font-size: 21px;
+      margin-bottom: 16px;
+    }
+
+    h3 {
+      font-size: 16px;
+      margin-bottom: 8px;
+    }
+
+    p { margin: 0 0 12px; }
+
+    .subtitle {
+      color: var(--muted);
+      margin-top: 10px;
+    }
+
+    main {
+      padding: 24px;
+    }
+
+    section {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      margin-bottom: 22px;
+      padding: 22px;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 18px;
+    }
+
+    .metric {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      background: #fbfdff;
+    }
+
+    .metric-label {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .metric-value {
+      font-size: 28px;
+      font-weight: 750;
+      margin-top: 6px;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 3px 10px;
+      font-size: 12px;
+      font-weight: 650;
+      border: 1px solid transparent;
+    }
+
+    .tag-red { background: var(--red-bg); color: var(--red); border-color: #fecaca; }
+    .tag-yellow { background: var(--yellow-bg); color: var(--yellow); border-color: #fde68a; }
+    .tag-blue { background: var(--blue-bg); color: var(--blue); border-color: #bfdbfe; }
+    .tag-green { background: var(--green-bg); color: var(--green); border-color: #bbf7d0; }
+
+    .issue {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin: 12px 0;
+      padding: 16px;
+    }
+
+    .critical { background: var(--red-bg); border-color: #fecaca; }
+    .improve { background: var(--yellow-bg); border-color: #fde68a; }
+    .suggest { background: var(--blue-bg); border-color: #bfdbfe; }
+    .good { background: var(--green-bg); border-color: #bbf7d0; }
+
+    .issue-title {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+      font-weight: 750;
+    }
+
+    .field {
+      margin: 6px 0;
+    }
+
+    .field strong {
+      display: inline-block;
+      min-width: 98px;
+    }
+
+    code {
+      background: rgba(15, 23, 42, 0.08);
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 0.92em;
+    }
+
+    pre {
+      overflow-x: auto;
+      background: #0f172a;
+      color: #e2e8f0;
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .table-scroll {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 760px;
+      background: #ffffff;
+    }
+
+    th, td {
+      border: 1px solid var(--border);
+      padding: 10px 12px;
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th {
+      background: #eef2f7;
+      font-weight: 750;
+    }
+
+    tbody tr:nth-child(even) {
+      background: #f8fafc;
+    }
+
+    tbody tr:hover {
+      background: #eaf2ff;
+    }
+
+    footer {
+      color: var(--muted);
+      padding: 10px 24px 36px;
+    }
+
+    @media (max-width: 760px) {
+      header, main { padding: 18px; }
+      section { padding: 16px; }
+      .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      h1 { font-size: 23px; }
+    }
+
+    @media print {
+      body {
+        background: #ffffff;
+        print-color-adjust: exact;
+        -webkit-print-color-adjust: exact;
+      }
+      section {
+        box-shadow: none;
+        break-inside: avoid;
+      }
+      .table-scroll { overflow: visible; }
+      table { min-width: 0; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>VoidText（湮文）代码审核报告</h1>
+      <p class="subtitle">审核开始时间：2026-05-20 00:14:11（Asia/Shanghai）｜审核范围：cmd/、internal/、web/backend/、web/frontend/、go.mod</p>
+      <p class="subtitle">说明：当前会话没有可调用的 code-context MCP 工具入口，已按要求改用本地只读检索、关键文件读取、go test 和 go vet 作为补充审查依据。</p>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section id="overview">
+      <h2>部分一：审核概览</h2>
+      <p>总体评分：<strong>68 / 100</strong>。项目结构清晰，SQLite WAL、事务封装、分层目录和部分单元测试基础较好；但当前测试不可通过，外部 API 重试、HTML 输出转义、HTTP 服务安全超时和数据库完整性配置存在需要优先修复的问题。</p>
+      <div class="summary-grid">
+        <div class="metric"><div class="metric-label">总体评分</div><div class="metric-value">68</div></div>
+        <div class="metric"><div class="metric-label">严重问题</div><div class="metric-value">5</div></div>
+        <div class="metric"><div class="metric-label">待改进</div><div class="metric-value">8</div></div>
+        <div class="metric"><div class="metric-label">建议</div><div class="metric-value">6</div></div>
+      </div>
+      <p class="subtitle">验证结果：<code>go test ./...</code> 失败；<code>go vet ./...</code> 在沙箱外运行后也因同一编译错误中断。</p>
+    </section>
+
+    <section id="critical">
+      <h2>部分二：严重问题列表</h2>
+
+      <article class="issue critical">
+        <div class="issue-title"><span class="tag tag-red">🔴 严重</span> 测试套件当前无法通过</div>
+        <div class="field"><strong>问题位置：</strong><code>internal/processor/newline_fixer_test.go:213</code></div>
+        <div class="field"><strong>问题描述：</strong>测试引用了不存在的 <code>DetectParagraphBoundaries</code> 方法，导致 <code>internal/processor</code> 包编译失败，并阻断 <code>go test ./...</code> 与 <code>go vet ./...</code>。</div>
+        <div class="field"><strong>严重程度：</strong>🔴 严重</div>
+        <div class="field"><strong>修复建议：</strong>确认该方法是被重命名还是删除；若功能仍存在，更新测试调用到新 API；若功能已删除，移除或重写该测试用例，并补齐当前换行修复 API 的等价行为测试。</div>
+        <div class="field"><strong>预估修复时间：</strong>30分钟</div>
+      </article>
+
+      <article class="issue critical">
+        <div class="issue-title"><span class="tag tag-red">🔴 严重</span> 限流响应头数值转换错误</div>
+        <div class="field"><strong>问题位置：</strong><code>web/backend/middleware/rate_limit.go:195-197</code></div>
+        <div class="field"><strong>问题描述：</strong><code>string(rune(remaining))</code> 会把数字 99 转成字符 <code>c</code>，导致 <code>X-RateLimit-Remaining</code> 响应头不可用，测试也已失败。</div>
+        <div class="field"><strong>严重程度：</strong>🔴 严重</div>
+        <div class="field"><strong>修复建议：</strong>使用 <code>strconv.Itoa(remaining)</code> 输出十进制字符串，并将 <code>X-RateLimit-Limit</code> 改为实际配置值；测试中应使用 <code>Header.Get</code> 校验大小写规范化后的 header。</div>
+        <div class="field"><strong>预估修复时间：</strong>10分钟</div>
+      </article>
+
+      <article class="issue critical">
+        <div class="issue-title"><span class="tag tag-red">🔴 严重</span> API 重试时请求体可能被复用为空</div>
+        <div class="field"><strong>问题位置：</strong><code>internal/external/api.go:363-372</code></div>
+        <div class="field"><strong>问题描述：</strong>重试循环只 clone 请求对象，没有在每次重试前通过 <code>req.GetBody</code> 重建 <code>Body</code>，首次请求失败后后续请求可能发送空 JSON。</div>
+        <div class="field"><strong>严重程度：</strong>🔴 严重</div>
+        <div class="field"><strong>修复建议：</strong>在 retry 循环内执行 <code>if req.GetBody != nil { clonedReq.Body, err = req.GetBody() }</code>，或把请求创建改成工厂函数，每次重试重新 marshal 并创建新 <code>http.Request</code>。</div>
+        <div class="field"><strong>预估修复时间：</strong>45分钟</div>
+      </article>
+
+      <article class="issue critical">
+        <div class="issue-title"><span class="tag tag-red">🔴 严重</span> HTML 报告接口未转义用户可控字段</div>
+        <div class="field"><strong>问题位置：</strong><code>web/backend/handlers/process.go:722-739</code></div>
+        <div class="field"><strong>问题描述：</strong><code>buildReportHTML</code> 使用 <code>fmt.Sprintf</code> 直接拼接标题、作者、文件名等字段，上传文件名或元数据包含 HTML 时存在 XSS 风险。</div>
+        <div class="field"><strong>严重程度：</strong>🔴 严重</div>
+        <div class="field"><strong>修复建议：</strong>改用 <code>html/template</code> 渲染，或至少对所有插值字段使用 <code>html.EscapeString</code>；同时为 <code>?format=html</code> 增加覆盖恶意文件名的测试。</div>
+        <div class="field"><strong>预估修复时间：</strong>1小时</div>
+      </article>
+
+      <article class="issue critical">
+        <div class="issue-title"><span class="tag tag-red">🔴 严重</span> HTTP Server 未配置基础超时</div>
+        <div class="field"><strong>问题位置：</strong><code>cmd/voidtext/main.go:60-63</code></div>
+        <div class="field"><strong>问题描述：</strong><code>http.Server</code> 只设置了地址和 Handler，缺少 <code>ReadHeaderTimeout</code>、<code>ReadTimeout</code>、<code>WriteTimeout</code>、<code>IdleTimeout</code>，对慢速连接和资源占用攻击缺少保护。</div>
+        <div class="field"><strong>严重程度：</strong>🔴 严重</div>
+        <div class="field"><strong>修复建议：</strong>按上传和长轮询场景设置合理超时，例如 <code>ReadHeaderTimeout: 5*time.Second</code>、<code>ReadTimeout: 120*time.Second</code>、<code>WriteTimeout: 120*time.Second</code>、<code>IdleTimeout: 60*time.Second</code>。</div>
+        <div class="field"><strong>预估修复时间：</strong>15分钟</div>
+      </article>
+    </section>
+
+    <section id="improvements">
+      <h2>部分三：待改进列表</h2>
+
+      <article class="issue improve">
+        <div class="issue-title"><span class="tag tag-yellow">🟡 待改进</span> SQLite 未启用外键约束和 busy timeout</div>
+        <div class="field"><strong>问题位置：</strong><code>internal/database/db.go:31-56</code></div>
+        <div class="field"><strong>问题描述：</strong>数据库启用了 WAL，但未设置 <code>PRAGMA foreign_keys = ON</code> 和 <code>PRAGMA busy_timeout</code>，完整性和并发写等待策略不足。</div>
+        <div class="field"><strong>严重程度：</strong>🟡 待改进</div>
+        <div class="field"><strong>修复建议：</strong>初始化后执行 <code>PRAGMA foreign_keys = ON;</code>、<code>PRAGMA busy_timeout = 5000;</code>，并在 schema 中补充必要外键或显式说明为何不使用外键。</div>
+        <div class="field"><strong>预估修复时间：</strong>1小时</div>
+      </article>
+
+      <article class="issue improve">
+        <div class="issue-title"><span class="tag tag-yellow">🟡 待改进</span> 数据库访问未系统传播请求 Context</div>
+        <div class="field"><strong>问题位置：</strong><code>internal/database/file_repo.go:31-132</code></div>
+        <div class="field"><strong>问题描述：</strong>仓储层大量使用 <code>db.Exec</code>、<code>db.Query</code>、<code>db.QueryRow</code>，HTTP 请求取消或超时无法向下传播。</div>
+        <div class="field"><strong>严重程度：</strong>🟡 待改进</div>
+        <div class="field"><strong>修复建议：</strong>新增 <code>Context</code> 版本仓储 API，例如 <code>GetFileByMd5(ctx, md5)</code>，handler 传入 <code>c.Request.Context()</code>；后台任务使用任务级 context。</div>
+        <div class="field"><strong>预估修复时间：</strong>2小时</div>
+      </article>
+
+      <article class="issue improve">
+        <div class="issue-title"><span class="tag tag-yellow">🟡 待改进</span> 扫描 rows 后未检查迭代错误</div>
+        <div class="field"><strong>问题位置：</strong><code>internal/database/file_repo.go:152-167</code></div>
+        <div class="field"><strong>问题描述：</strong><code>scanFileRows</code> 循环后没有检查 <code>rows.Err()</code>，网络、驱动或上下文错误可能被吞掉。</div>
+        <div class="field"><strong>严重程度：</strong>🟡 待改进</div>
+        <div class="field"><strong>修复建议：</strong>在返回前增加 <code>if err := rows.Err(); err != nil { return nil, fmt.Errorf("遍历文件记录失败: %w", err) }</code>，并同步检查其他仓储扫描函数。</div>
+        <div class="field"><strong>预估修复时间：</strong>30分钟</div>
+      </article>
+
+      <article class="issue improve">
+        <div class="issue-title"><span class="tag tag-yellow">🟡 待改进</span> 配置目录创建错误被忽略</div>
+        <div class="field"><strong>问题位置：</strong><code>internal/config/config.go:165-168</code></div>
+        <div class="field"><strong>问题描述：</strong><code>ensureDir</code> 忽略 <code>os.MkdirAll</code> 返回错误，启动阶段可能在数据目录不可写时继续运行并在后续流程中失败。</div>
+        <div class="field"><strong>严重程度：</strong>🟡 待改进</div>
+        <div class="field"><strong>修复建议：</strong>让 <code>ensureDir</code> 返回 error，<code>Load</code> 聚合并返回目录创建失败；启动时直接失败并输出清晰日志。</div>
+        <div class="field"><strong>预估修复时间：</strong>30分钟</div>
+      </article>
+
+      <article class="issue improve">
+        <div class="issue-title"><span class="tag tag-yellow">🟡 待改进</span> 配置校验函数未在启动路径调用</div>
+        <div class="field"><strong>问题位置：</strong><code>internal/config/config.go:214-227</code>、<code>cmd/voidtext/main.go:21-25</code></div>
+        <div class="field"><strong>问题描述：</strong><code>Validate</code> 已定义但启动时未调用，非法端口、温度或阈值会进入运行期。</div>
+        <div class="field"><strong>严重程度：</strong>🟡 待改进</div>
+        <div class="field"><strong>修复建议：</strong><code>config.Load()</code> 后立即调用 <code>config.Validate()</code>；将必需 LLM 配置缺失按功能开关给出明确错误或降级日志。</div>
+        <div class="field"><strong>预估修复时间：</strong>20分钟</div>
+      </article>
+
+      <article class="issue improve">
+        <div class="issue-title"><span class="tag tag-yellow">🟡 待改进</span> WorkerPool 关闭和提交之间存在竞态风险</div>
+        <div class="field"><strong>问题位置：</strong><code>internal/processor/worker_pool.go:118-146</code></div>
+        <div class="field"><strong>问题描述：</strong><code>Shutdown</code> 关闭 <code>jobQueue</code> 时，其他 goroutine 若同时调用 <code>Submit</code> 可能向已关闭 channel 发送并 panic。</div>
+        <div class="field"><strong>严重程度：</strong>🟡 待改进</div>
+        <div class="field"><strong>修复建议：</strong>增加受锁保护的 <code>closed</code> 状态，关闭时先标记 closed，再关闭队列；<code>Submit</code> 在同一把锁下检查状态，或改用只 cancel、不关闭由提交方写入的 channel。</div>
+        <div class="field"><strong>预估修复时间：</strong>1小时</div>
+      </article>
+
+      <article class="issue improve">
+        <div class="issue-title"><span class="tag tag-yellow">🟡 待改进</span> API 成功日志可能因空 choices panic</div>
+        <div class="field"><strong>问题位置：</strong><code>internal/external/api.go:702-708</code></div>
+        <div class="field"><strong>问题描述：</strong><code>GenerateChatCompletion</code> 在记录成功日志时直接访问 <code>chatResp.Choices[0]</code>，上游返回空 choices 会触发 panic。</div>
+        <div class="field"><strong>严重程度：</strong>🟡 待改进</div>
+        <div class="field"><strong>修复建议：</strong>decode 后先校验 <code>len(chatResp.Choices) &gt; 0</code>，为空时返回带上下文的错误；日志中避免依赖第一个元素。</div>
+        <div class="field"><strong>预估修复时间：</strong>15分钟</div>
+      </article>
+
+      <article class="issue improve">
+        <div class="issue-title"><span class="tag tag-yellow">🟡 待改进</span> 技术栈声明与实际前端实现不一致</div>
+        <div class="field"><strong>问题位置：</strong><code>web/frontend/index.html:7-9</code>、<code>go.mod:7-8</code></div>
+        <div class="field"><strong>问题描述：</strong>审查任务声明 Vue 3、Tailwind CSS、ECharts 5、Gin v1.12，但实际页面未引入这些前端库，<code>go.mod</code> 中 Gin 为 v1.9.1。</div>
+        <div class="field"><strong>严重程度：</strong>🟡 待改进</div>
+        <div class="field"><strong>修复建议：</strong>确认是文档过期还是迁移未完成；若采用原生 JS/CSS，应更新技术栈文档和测试策略；若要迁移 Vue/Tailwind/ECharts，应建立构建链路和组件边界。</div>
+        <div class="field"><strong>预估修复时间：</strong>1小时</div>
+      </article>
+    </section>
+
+    <section id="suggestions">
+      <h2>部分四：建议列表</h2>
+
+      <article class="issue suggest">
+        <div class="issue-title"><span class="tag tag-blue">🔵 建议</span> 统一 API 响应结构</div>
+        <div class="field"><strong>问题位置：</strong><code>web/backend/handlers/files.go:124-155</code></div>
+        <div class="field"><strong>问题描述：</strong>部分接口返回 <code>{success, message}</code>，项目规范要求 <code>{code, message, data}</code>，响应格式不一致会增加前端兼容成本。</div>
+        <div class="field"><strong>严重程度：</strong>🔵 建议</div>
+        <div class="field"><strong>修复建议：</strong>定义统一 response helper，逐步迁移 handler；前端 API 层兼容旧字段，迁移完成后删除兼容逻辑。</div>
+        <div class="field"><strong>预估修复时间：</strong>2小时</div>
+      </article>
+
+      <article class="issue suggest">
+        <div class="issue-title"><span class="tag tag-blue">🔵 建议</span> 中间件中存在重复 panic 恢复逻辑</div>
+        <div class="field"><strong>问题位置：</strong><code>web/backend/server.go:13-18</code>、<code>web/backend/middleware/error_handler.go:14-80</code></div>
+        <div class="field"><strong>问题描述：</strong><code>gin.Default()</code> 自带 Logger/Recovery，同时又注册自定义 <code>Recovery</code> 与 <code>ErrorHandler</code> 的 recover 逻辑，职责重复。</div>
+        <div class="field"><strong>严重程度：</strong>🔵 建议</div>
+        <div class="field"><strong>修复建议：</strong>改用 <code>gin.New()</code>，只保留一套日志和恢复中间件，并明确顺序：Recovery、RequestID/Logging、CORS、RateLimit、NoCache、业务路由。</div>
+        <div class="field"><strong>预估修复时间：</strong>45分钟</div>
+      </article>
+
+      <article class="issue suggest">
+        <div class="issue-title"><span class="tag tag-blue">🔵 建议</span> 限流清理 goroutine 缺少停止机制</div>
+        <div class="field"><strong>问题位置：</strong><code>web/backend/middleware/rate_limit.go:29-40</code>、<code>web/backend/middleware/rate_limit.go:77-92</code></div>
+        <div class="field"><strong>问题描述：</strong>每个限流器创建后都会启动清理 goroutine，但没有 stop/cancel 入口，测试和动态限流器场景会保留后台 goroutine。</div>
+        <div class="field"><strong>严重程度：</strong>🔵 建议</div>
+        <div class="field"><strong>修复建议：</strong>为 <code>RateLimiter</code> 增加 <code>Stop()</code> 或接收 context；测试中显式关闭，生产中由 server shutdown 管理。</div>
+        <div class="field"><strong>预估修复时间：</strong>1小时</div>
+      </article>
+
+      <article class="issue suggest">
+        <div class="issue-title"><span class="tag tag-blue">🔵 建议</span> 前端全局内联事件可逐步收敛</div>
+        <div class="field"><strong>问题位置：</strong><code>web/frontend/index.html:19-27</code>、<code>web/frontend/static/js/main.js:1-30</code></div>
+        <div class="field"><strong>问题描述：</strong>页面大量依赖 <code>onclick</code> 和全局桥接函数，模块边界较弱，也不利于后续引入 CSP。</div>
+        <div class="field"><strong>严重程度：</strong>🔵 建议</div>
+        <div class="field"><strong>修复建议：</strong>将导航、上传、规则按钮的绑定迁移到模块初始化中的 <code>addEventListener</code>，最终移除内联事件和全局桥接层。</div>
+        <div class="field"><strong>预估修复时间：</strong>2小时</div>
+      </article>
+
+      <article class="issue suggest">
+        <div class="issue-title"><span class="tag tag-blue">🔵 建议</span> 缺少前端自动化测试</div>
+        <div class="field"><strong>问题位置：</strong><code>web/frontend/static/js/modules/review.js:266-314</code></div>
+        <div class="field"><strong>问题描述：</strong>审核分页、批量审核、差异渲染是核心交互，但当前只看到 Go 测试，没有对应前端单测或浏览器回归测试。</div>
+        <div class="field"><strong>严重程度：</strong>🔵 建议</div>
+        <div class="field"><strong>修复建议：</strong>为 diff 渲染和审核分页补充轻量 JS 单测；关键流程用 Playwright 覆盖上传、处理状态、审核、下载。</div>
+        <div class="field"><strong>预估修复时间：</strong>4小时</div>
+      </article>
+
+      <article class="issue suggest">
+        <div class="issue-title"><span class="tag tag-blue">🔵 建议</span> 部分错误包装未使用 %w</div>
+        <div class="field"><strong>问题位置：</strong><code>web/backend/handlers/process.go:71</code>、<code>internal/external/api.go:458</code></div>
+        <div class="field"><strong>问题描述：</strong>部分新错误使用 <code>%v</code> 拼接底层错误，后续无法用 <code>errors.Is</code> 或 <code>errors.As</code> 判断原因。</div>
+        <div class="field"><strong>严重程度：</strong>🔵 建议</div>
+        <div class="field"><strong>修复建议：</strong>对需要保留因果链的错误改用 <code>%w</code>，并在调用层针对可恢复错误增加 <code>errors.Is/As</code> 分支。</div>
+        <div class="field"><strong>预估修复时间：</strong>30分钟</div>
+      </article>
+    </section>
+
+    <section id="good">
+      <h2>部分五：亮点列表</h2>
+      <article class="issue good">
+        <div class="issue-title"><span class="tag tag-green">✅ 亮点</span> SQLite 初始化考虑了 WAL 与连接池约束</div>
+        <p>在 <code>internal/database/db.go:31-60</code> 中启用了 WAL、设置了同步模式、缓存大小和 <code>SetMaxOpenConns(1)</code>，符合 SQLite 单写者模型下的保守并发策略。</p>
+      </article>
+      <article class="issue good">
+        <div class="issue-title"><span class="tag tag-green">✅ 亮点</span> 多表写入已有事务封装</div>
+        <p><code>internal/database/transaction.go:45-203</code> 提供了事务辅助函数，并用于文件和版本记录、删除相关数据、状态日志等原子操作，减少了半写入状态。</p>
+      </article>
+      <article class="issue good">
+        <div class="issue-title"><span class="tag tag-green">✅ 亮点</span> 前端差异渲染对文本做了转义</div>
+        <p><code>web/frontend/static/js/diff-utils.js:3-9</code> 通过 textContent 生成转义文本，再组合 diff HTML，降低了审核文本渲染中的 XSS 风险。</p>
+      </article>
+      <article class="issue good">
+        <div class="issue-title"><span class="tag tag-green">✅ 亮点</span> 后台处理采用工作池限制并发</div>
+        <p><code>internal/processor/worker_pool.go:58-75</code> 使用固定工作池处理文件任务，避免每次请求无上限创建 goroutine。</p>
+      </article>
+      <article class="issue good">
+        <div class="issue-title"><span class="tag tag-green">✅ 亮点</span> 测试覆盖已有基础</div>
+        <p>仓库包含配置、数据库、文件解析、处理器、规则、预处理、后处理、健康检查、限流等测试文件，具备继续提升质量的基础。</p>
+      </article>
+    </section>
+
+    <section id="checklist">
+      <h2>部分六：按技术栈分类的详细审查表</h2>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>检查项</th>
+              <th>状态</th>
+              <th>说明</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>Go 错误处理：%w 包装</td><td><span class="tag tag-yellow">警告</span></td><td>多数数据库和文件错误使用了 <code>%w</code>，但少量路径仍使用 <code>%v</code> 拼接底层错误。</td></tr>
+            <tr><td>Go 错误处理：errors.Is / errors.As</td><td><span class="tag tag-yellow">警告</span></td><td><code>internal/external/api.go</code> 已使用 <code>errors.As</code> 和 <code>errors.Is</code>，但上层业务错误分类较少。</td></tr>
+            <tr><td>Context 传播</td><td><span class="tag tag-yellow">警告</span></td><td>事务支持 context，但多数仓储和外部请求入口未从 Gin request context 向下传递。</td></tr>
+            <tr><td>Goroutine 安全</td><td><span class="tag tag-yellow">警告</span></td><td>工作池和进度追踪器使用锁保护状态，但 shutdown/submit、限流器清理 goroutine 生命周期需要补强。</td></tr>
+            <tr><td>Gin 路由分组</td><td><span class="tag tag-green">通过</span></td><td><code>/api</code> 分组明确，上传、文件、处理、审核、规则接口边界清晰。</td></tr>
+            <tr><td>Gin JSON 绑定</td><td><span class="tag tag-green">通过</span></td><td>JSON handler 使用 <code>c.ShouldBindJSON</code>，避免了 <code>Bind</code> 自动写响应的副作用。</td></tr>
+            <tr><td>Gin 中间件顺序</td><td><span class="tag tag-yellow">警告</span></td><td><code>gin.Default()</code> 与自定义 recovery/logging 叠加，建议统一为 <code>gin.New()</code> 后显式注册。</td></tr>
+            <tr><td>HTTP Server 安全超时</td><td><span class="tag tag-red">失败</span></td><td>入口 <code>http.Server</code> 未设置读写和空闲超时。</td></tr>
+            <tr><td>SQLite WAL</td><td><span class="tag tag-green">通过</span></td><td>已执行 <code>PRAGMA journal_mode = WAL</code>，并设置单连接写入策略。</td></tr>
+            <tr><td>SQLite busy_timeout</td><td><span class="tag tag-yellow">警告</span></td><td>未看到 <code>PRAGMA busy_timeout</code>，并发写等待策略不明确。</td></tr>
+            <tr><td>SQLite 外键约束</td><td><span class="tag tag-yellow">警告</span></td><td>schema 没有外键定义，也未启用 <code>PRAGMA foreign_keys</code>。</td></tr>
+            <tr><td>rows.Close</td><td><span class="tag tag-green">通过</span></td><td>抽查仓储查询基本都有 <code>defer rows.Close()</code>。</td></tr>
+            <tr><td>rows.Err</td><td><span class="tag tag-yellow">警告</span></td><td>扫描辅助函数未统一在迭代后检查 <code>rows.Err()</code>。</td></tr>
+            <tr><td>事务边界</td><td><span class="tag tag-green">通过</span></td><td>建表、创建文件+版本、删除相关数据等操作已有事务边界。</td></tr>
+            <tr><td>查询性能和索引</td><td><span class="tag tag-green">通过</span></td><td>md5、status、review、log、cache 等常用字段已有索引；未发现明显 N+1 热点。</td></tr>
+            <tr><td>前端 Vue 3</td><td><span class="tag tag-yellow">警告</span></td><td>实际实现为原生 JS 模块，没有 Vue 3 Composition API；与任务技术栈不一致。</td></tr>
+            <tr><td>Tailwind CSS</td><td><span class="tag tag-yellow">警告</span></td><td>未看到 Tailwind CDN，引入的是项目自有 CSS 文件。</td></tr>
+            <tr><td>ECharts</td><td><span class="tag tag-yellow">警告</span></td><td>未发现 ECharts 引入、初始化、resize 或 dispose 逻辑。</td></tr>
+            <tr><td>前端 XSS 防护</td><td><span class="tag tag-yellow">警告</span></td><td>diff 渲染有转义亮点，但通用 <code>DomUtils.setHTML</code> 和后端 HTML 报告仍需要约束。</td></tr>
+            <tr><td>前端事件生命周期</td><td><span class="tag tag-yellow">警告</span></td><td>存在全局 inline onclick 和 document 级监听，建议模块化注册与清理。</td></tr>
+            <tr><td>测试覆盖</td><td><span class="tag tag-red">失败</span></td><td>测试文件覆盖面不错，但当前 <code>go test ./...</code> 失败，必须先恢复绿色状态。</td></tr>
+            <tr><td>配置管理</td><td><span class="tag tag-yellow">警告</span></td><td>环境变量加载清晰，但目录创建错误被忽略，配置校验未接入启动路径。</td></tr>
+            <tr><td>日志规范</td><td><span class="tag tag-yellow">警告</span></td><td>结构化日志基础较好；外部 API 日志未记录 token，但仍建议统一脱敏 URL 和错误体。</td></tr>
+            <tr><td>代码组织</td><td><span class="tag tag-green">通过</span></td><td>cmd/internal/web 分层明确，数据库、处理器、外部 API、前端模块边界基本清晰。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <p>审核人：AI Assistant</p>
+      <p>审核时间：2026-05-20 00:14:11 - 2026-05-20 00:17:00（Asia/Shanghai）</p>
+      <p>下次复审建议：修复严重问题并让 <code>go test ./...</code> 全量通过后立即复审；若近期发版，建议发版前再次执行安全与回归审查。</p>
+    </div>
+  </footer>
+</body>
+</html>

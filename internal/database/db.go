@@ -74,6 +74,7 @@ func createTables() error {
 			file_name TEXT,
 			file_size INTEGER,
 			file_path TEXT,
+			review_baseline_path TEXT,
 			status TEXT NOT NULL DEFAULT 'pending',
 			current_step TEXT,
 			progress INTEGER NOT NULL DEFAULT 0,
@@ -143,6 +144,7 @@ func migrateSchema(db *sql.DB) {
 		`ALTER TABLE files ADD COLUMN llm_progress_paragraph INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE files ADD COLUMN llm_progress_checkpoint TEXT`,
 		`ALTER TABLE files ADD COLUMN cancel_flag INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE files ADD COLUMN review_baseline_path TEXT`,
 	}
 	for _, stmt := range migrations {
 		db.Exec(stmt) // 忽略已存在的列错误

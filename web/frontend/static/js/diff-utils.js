@@ -258,7 +258,8 @@ const DiffUtils = (function() {
     return visualizeWhitespace(escapeHtml(text));
   }
 
-  // 渲染逐字符对齐的 diff（用于审核页面展示）
+  // 渲染逐字符对齐的 diff（VS Code 风格 - token 级精细对比）
+  // 只标记实际变化的 token，保留相同的 token 不标记，一目了然
   // 双向空格填充：哪边短就在哪边填充空格，保证字符位置对齐
   // 空格只用于展示，实际保存时不会包含这些填充空格
   // @param {string} lineText - 当前行的完整文本
@@ -268,40 +269,110 @@ const DiffUtils = (function() {
     var origText = item.original || item.originalText || '';   // 被修改的原文片段
     var suggText = item.suggested || item.suggestedText || ''; // 替换后的建议片段
 
-    // 在当前行中查找原文的实际位置（position 可能是旧版本的偏移量）
-    var pos = lineText.indexOf(origText);
-    if (pos < 0) {
-      // 找不到原文，直接返回原文行
+    if (suggText === origText) {
       return {
         originalHtml: escAndVisualize(lineText),
         suggestedHtml: escAndVisualize(lineText)
       };
     }
 
-    // 计算前后缀
+    // 在当前行中查找原文的实际位置（position 可能是旧版本的偏移量）
+    var pos = lineText.indexOf(origText);
+    if (pos < 0) {
+      // 精确匹配失败，fallback：直接用全文 diff
+      var replacedText = lineText.substring(0, pos >= 0 ? pos : 0) +
+                         suggText +
+                         lineText.substring(pos >= 0 ? pos + origText.length : lineText.length);
+      return renderInlineDiff(lineText, replacedText);
+    }
+
     var prefix = lineText.substring(0, pos);
-    var origSuffix = lineText.substring(pos + origText.length);
+    var suffix = lineText.substring(pos + origText.length);
 
-    // 双向对齐：计算需要填充的空格数
-    var origLen = origText.length;
-    var suggLen = suggText.length;
-    var diff = origLen - suggLen;
+    // ── 对 origText 和 suggText 做 token 级精确 diff ──
+    var ops = diff(origText, suggText);
+    ops = mergeOps(ops);
 
-    var origDisplay = origText;
-    var suggDisplay = suggText;
+    var origHtml = '';
+    var suggHtml = '';
+    var origDisplayLen = 0;  // 原文侧显示的视觉字符数
+    var suggDisplayLen = 0;  // 建议侧显示的视觉字符数
 
-    if (diff > 0) {
+    ops.forEach(function(op) {
+      var viz = escAndVisualize(op.value);
+      switch (op.type) {
+        case 'equal':
+          // 相同内容：两边都一样
+          origHtml += viz;
+          suggHtml += viz;
+          origDisplayLen += op.value.length;
+          suggDisplayLen += op.value.length;
+          break;
+        case 'delete':
+          // 被删除的内容：只在原文行标红
+          origHtml += '<del class="diff-del">' + viz + '</del>';
+          origDisplayLen += op.value.length;
+          break;
+        case 'insert':
+          // 新增内容：只在建议行标绿
+          suggHtml += '<ins class="diff-ins">' + viz + '</ins>';
+          suggDisplayLen += op.value.length;
+          break;
+      }
+    });
+
+    // 双向空格填充：保证原文和建议的显示宽度一致，字符位置对齐
+    var lenDiff = origDisplayLen - suggDisplayLen;
+    if (lenDiff > 0) {
       // 建议比原文短，在建议后填充空格
-      suggDisplay = suggText + ' '.repeat(diff);
-    } else if (diff < 0) {
+      suggHtml += escAndVisualize(' '.repeat(lenDiff));
+    } else if (lenDiff < 0) {
       // 原文比建议短，在原文后填充空格
-      origDisplay = origText + ' '.repeat(-diff);
+      origHtml += escAndVisualize(' '.repeat(-lenDiff));
     }
 
     return {
-      originalHtml: escAndVisualize(prefix) + '<del class="diff-del">' + escAndVisualize(origDisplay) + '</del>' + escAndVisualize(origSuffix),
-      suggestedHtml: escAndVisualize(prefix) + '<ins class="diff-ins">' + escAndVisualize(suggDisplay) + '</ins>' + escAndVisualize(origSuffix)
+      originalHtml: escAndVisualize(prefix) + origHtml + escAndVisualize(suffix),
+      suggestedHtml: escAndVisualize(prefix) + suggHtml + escAndVisualize(suffix)
     };
+  }
+
+  // 合并渲染同一行多个审核项为一个 diff 视图
+  // 将多个变更叠加到同一行中，生成一个综合的原文/建议 diff
+  // @param {string} lineText - 当前行的完整文本
+  // @param {Array} items - 同一行的所有审核项
+  // @returns {Object} { originalHtml, suggestedHtml }
+  function renderMergedDiff(lineText, items) {
+    if (!items || items.length === 0) {
+      return { originalHtml: escAndVisualize(lineText), suggestedHtml: escAndVisualize(lineText) };
+    }
+
+    // 收集有实际变更的项目，排除纯相等的项
+    var changes = [];
+    items.forEach(function(item) {
+      var orig = item.original || item.originalText || '';
+      var sugg = item.suggested || item.suggestedText || '';
+      if (sugg && sugg !== orig) {
+        var pos = lineText.indexOf(orig);
+        if (pos >= 0) {
+          changes.push({ pos: pos, origLen: orig.length, orig: orig, sugg: sugg });
+        }
+      }
+    });
+
+    if (changes.length === 0) {
+      return { originalHtml: escAndVisualize(lineText), suggestedHtml: escAndVisualize(lineText) };
+    }
+
+    // 从右到左应用变更，防止位置偏移
+    changes.sort(function(a, b) { return b.pos - a.pos; });
+    var mergedText = lineText;
+    changes.forEach(function(c) {
+      mergedText = mergedText.substring(0, c.pos) + c.sugg + mergedText.substring(c.pos + c.origLen);
+    });
+
+    // 使用 inline diff 展示原文和合并后建议的差异
+    return renderInlineDiff(lineText, mergedText);
   }
 
   // 公共 API
@@ -311,7 +382,8 @@ const DiffUtils = (function() {
     diff,
     renderInlineDiff,
     renderDiffPreview,
-    renderAlignedDiff
+    renderAlignedDiff,
+    renderMergedDiff
   };
 })();
 

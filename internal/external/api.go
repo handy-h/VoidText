@@ -24,7 +24,6 @@ var (
 	globalHTTPClientOnce sync.Once
 )
 
-
 // getGlobalHTTPClient 获取全局HTTP客户端单例
 // 配置MaxIdleConnsPerHost=100提高并发性能，支持大量API调用
 func getGlobalHTTPClient() *http.Client {
@@ -323,7 +322,6 @@ func (api *API) doRequestWithRetry(req *http.Request) (*http.Response, error) {
 		}
 	}
 
-
 	for retry := 0; retry <= config.MaxRetries; retry++ {
 		if retry > 0 {
 			// 计算退避延迟
@@ -390,36 +388,36 @@ func (api *API) doRequestWithRetry(req *http.Request) (*http.Response, error) {
 		case statusCode == 429: // 限流
 			shouldRetry = true
 			logging.Warn("api_rate_limited", map[string]interface{}{
-				"retry":     retry,
-				"status":    statusCode,
-				"error":     errorBody,
-				"url":       req.URL.String(),
+				"retry":  retry,
+				"status": statusCode,
+				"error":  errorBody,
+				"url":    req.URL.String(),
 			})
-			
+
 		case statusCode >= 500: // 服务器错误
 			shouldRetry = true
 			logging.Error("api_server_error", nil, map[string]interface{}{
-				"retry":     retry,
-				"status":    statusCode,
-				"error":     errorBody,
-				"url":       req.URL.String(),
+				"retry":  retry,
+				"status": statusCode,
+				"error":  errorBody,
+				"url":    req.URL.String(),
 			})
-			
+
 		case statusCode == 400: // 客户端错误（通常不重试）
 			logging.Error("api_client_error", nil, map[string]interface{}{
-				"retry":     retry,
-				"status":    statusCode,
-				"error":     errorBody,
-				"url":       req.URL.String(),
+				"retry":  retry,
+				"status": statusCode,
+				"error":  errorBody,
+				"url":    req.URL.String(),
 			})
 			lastErr = fmt.Errorf("API错误 (状态码: %d): %s", statusCode, errorBody)
-			
+
 		default: // 其他错误
 			logging.Error("api_other_error", nil, map[string]interface{}{
-				"retry":     retry,
-				"status":    statusCode,
-				"error":     errorBody,
-				"url":       req.URL.String(),
+				"retry":  retry,
+				"status": statusCode,
+				"error":  errorBody,
+				"url":    req.URL.String(),
 			})
 			lastErr = fmt.Errorf("API错误 (状态码: %d): %s", statusCode, errorBody)
 		}
@@ -466,6 +464,21 @@ func (api *API) GenerateEmbedding(texts []string) (*EmbeddingResponse, error) {
 			"reason":  "API未配置",
 		})
 		return nil, nil
+	}
+
+	if len(texts) == 0 {
+		return &EmbeddingResponse{
+			Data: []struct {
+				Object    string    `json:"object"`
+				Index     int       `json:"index"`
+				Embedding []float64 `json:"embedding"`
+			}{},
+		}, nil
+	}
+
+	const embeddingBatchSize = 25
+	if len(texts) > embeddingBatchSize {
+		return api.generateEmbeddingBatches(texts, embeddingBatchSize)
 	}
 
 	url := api.baseURL + "/embeddings"
@@ -526,6 +539,45 @@ func (api *API) GenerateEmbedding(texts []string) (*EmbeddingResponse, error) {
 	})
 
 	return &embeddingResp, nil
+}
+
+// generateEmbeddingBatches 分批生成文本嵌入，避免单次请求超过服务端限制
+func (api *API) generateEmbeddingBatches(texts []string, batchSize int) (*EmbeddingResponse, error) {
+	combined := &EmbeddingResponse{
+		Data: make([]struct {
+			Object    string    `json:"object"`
+			Index     int       `json:"index"`
+			Embedding []float64 `json:"embedding"`
+		}, len(texts)),
+	}
+
+	totalTokens := 0
+	for start := 0; start < len(texts); start += batchSize {
+		end := start + batchSize
+		if end > len(texts) {
+			end = len(texts)
+		}
+
+		batch := texts[start:end]
+		resp, err := api.GenerateEmbedding(batch)
+		if err != nil {
+			return nil, err
+		}
+		if resp == nil {
+			return nil, fmt.Errorf("embedding API 返回空结果")
+		}
+		totalTokens += resp.Usage.TotalTokens
+
+		for _, item := range resp.Data {
+			if item.Index < 0 || item.Index >= len(batch) {
+				return nil, fmt.Errorf("embedding API 返回索引越界: %d", item.Index)
+			}
+			combined.Data[start+item.Index] = item
+		}
+	}
+
+	combined.Usage.TotalTokens = totalTokens
+	return combined, nil
 }
 
 // GenerateCompletion 生成文本完成（Legacy API，带重试机制）

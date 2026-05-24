@@ -337,34 +337,39 @@ const ReviewModule = (function() {
 
       result.push(line);
     } else {
-      // 有审核项的行 - 使用 renderAlignedDiff 实现逐字符对齐
-      // 按 position 排序
+      // 有审核项的行 - 使用合并 diff 或多条 diff
       var sortedItems = items.slice().sort(function(a, b) {
         return (a.position || 0) - (b.position || 0);
       });
 
-      // 为每个审核项生成对齐的 HTML
-      var origHtmlParts = [];
-      var suggHtmlMap = {}; // itemId -> suggestedHtml
+      var isSingleItem = sortedItems.length === 1;
 
-      sortedItems.forEach(function(item) {
+      var origHtml, suggHtml;
+
+      if (isSingleItem) {
+        // 单个审核项：使用原有的逐字符对齐 diff
+        var item = sortedItems[0];
         var sugg = item.suggested || item.suggestedText || '';
         var orig = item.original || item.originalText || '';
 
         if (sugg && sugg !== orig) {
-          // 使用 renderAlignedDiff 生成对齐的 HTML
           var aligned = DiffUtils.renderAlignedDiff(lineText, item);
-          origHtmlParts.push(aligned.originalHtml);
-          suggHtmlMap[item.id] = aligned.suggestedHtml;
+          origHtml = aligned.originalHtml;
+          suggHtml = aligned.suggestedHtml;
         } else {
-          // 没有修改的项，直接使用原文
-          origHtmlParts.push(DiffUtils.renderAlignedDiff(lineText, {
+          origHtml = DiffUtils.renderAlignedDiff(lineText, {
             original: orig,
             suggested: orig,
             position: item.position || 0
-          }).originalHtml);
+          }).originalHtml;
+          suggHtml = origHtml;
         }
-      });
+      } else {
+        // 多个审核项：使用合并 diff，生成一条综合建议行
+        var merged = DiffUtils.renderMergedDiff(lineText, sortedItems);
+        origHtml = merged.originalHtml;
+        suggHtml = merged.suggestedHtml;
+      }
 
       // 渲染原文行
       var origLine = DomUtils.createElement('div', {
@@ -378,8 +383,7 @@ const ReviewModule = (function() {
       origLine.appendChild(gutter);
 
       var content = DomUtils.createElement('div', { className: 'review-line-content' });
-      // 使用第一个审核项的对齐结果（所有审核项共用同一行）
-      content.innerHTML = origHtmlParts.length > 0 ? origHtmlParts[0] : lineText;
+      content.innerHTML = origHtml || lineText;
       origLine.appendChild(content);
 
       // 浮动操作框
@@ -413,28 +417,28 @@ const ReviewModule = (function() {
 
       result.push(origLine);
 
-      // 渲染建议行（每个审核项一行，使用对齐的 HTML）
-      sortedItems.forEach(function(item) {
-        var suggHtml = suggHtmlMap[item.id];
-        if (suggHtml) {
-          var suggLine = DomUtils.createElement('div', {
-            className: 'review-line line-suggested',
-            'data-line-num': String(lineNum),
-            'data-type': 'suggested',
-            'data-item-id': String(item.id)
-          });
+      // 渲染建议行（单条或多条合并为一条综合建议）
+      if (suggHtml && origHtml !== suggHtml) {
+        var suggLine = DomUtils.createElement('div', {
+          className: 'review-line line-suggested',
+          'data-line-num': String(lineNum),
+          'data-type': 'suggested'
+        });
 
-          var suggGutter = DomUtils.createElement('div', { className: 'review-line-gutter' });
+        var suggGutter = DomUtils.createElement('div', { className: 'review-line-gutter' });
+        if (isSingleItem) {
           DomUtils.setTextContent(suggGutter, '→');
-          suggLine.appendChild(suggGutter);
-
-          var suggContent = DomUtils.createElement('div', { className: 'review-line-content' });
-          suggContent.innerHTML = suggHtml;
-          suggLine.appendChild(suggContent);
-
-          result.push(suggLine);
+        } else {
+          DomUtils.setTextContent(suggGutter, '⇒');
         }
-      });
+        suggLine.appendChild(suggGutter);
+
+        var suggContent = DomUtils.createElement('div', { className: 'review-line-content' });
+        suggContent.innerHTML = suggHtml;
+        suggLine.appendChild(suggContent);
+
+        result.push(suggLine);
+      }
     }
 
     return result;

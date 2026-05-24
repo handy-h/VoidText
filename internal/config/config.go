@@ -106,7 +106,7 @@ func Load() error {
 		CompletionTemperature:     getEnvFloat("COMPLETION_TEMPERATURE", 0.3),
 		CompletionMaxTokens:           getEnvInt("COMPLETION_MAX_TOKENS", 2048),
 		LLMConcurrency:                getEnvInt("LLM_CONCURRENCY", 2),
-		EnableLlmParagraphReconstruct: getEnvBool("ENABLE_LLM_PARAGRAPH_RECONSTRUCT", false),
+		EnableLlmParagraphReconstruct: getEnvBool("ENABLE_LLM_PARAGRAPH_RECONSTRUCT", true),
 		ParagraphChunkSize:            getEnvInt("PARAGRAPH_CHUNK_SIZE", 8000),
 		EnableLocalModel:              getEnvBool("ENABLE_LOCAL_MODEL", false),
 		LocalModelURL:                 getEnvStr("LOCAL_MODEL_URL", "http://localhost:11434"),

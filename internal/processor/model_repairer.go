@@ -137,6 +137,9 @@ func (mr *ModelRepairer) repairWithOllama(paragraph string) (string, []preproces
 	if repairedText == "" || repairedText == paragraph {
 		return paragraph, []preprocess.Change{}
 	}
+	if !mr.validateRepair(paragraph, repairedText) {
+		return paragraph, []preprocess.Change{}
+	}
 
 	changes := mr.compareTexts(paragraph, repairedText)
 	log.Printf("[Ollama修复] 成功: 输入长度=%d, 输出长度=%d, 修改数=%d", len(paragraph), len(repairedText), len(changes))
@@ -157,6 +160,9 @@ func (mr *ModelRepairer) repairWithAPI(paragraph string) (string, []preprocess.C
 			// 成功响应
 			repairedText := strings.TrimSpace(resp.Choices[0].Message.Content)
 			if repairedText == "" || repairedText == paragraph {
+				return paragraph, []preprocess.Change{}
+			}
+			if !mr.validateRepair(paragraph, repairedText) {
 				return paragraph, []preprocess.Change{}
 			}
 			changes := mr.compareTexts(paragraph, repairedText)
@@ -436,6 +442,7 @@ func (mr *ModelRepairer) ReconstructParagraphsWithCheckpoint(content, fileMd5 st
 	for i, chunk := range chunks {
 		log.Printf("[段落重组] 正在处理第 %d/%d 块 (长度=%d字符)", i+1, totalChunks, len([]rune(chunk)))
 
+		// 段落重组使用远程 API（避免本地模型加载导致 OOM）
 		resp, err := mr.api.GenerateChatCompletion(paragraphReconstructPrompt, chunk, 0, -1)
 		if err != nil {
 			// 保存当前进度
@@ -626,4 +633,106 @@ func (mr *ModelRepairer) findMergePoint(curr, prev []rune) int {
 
 	// 未找到可靠重叠，保守处理：直接拼接
 	return 0
+}
+
+// validateRepair 校验LLM修复结果的质量
+// 如果修复结果与原始文本差异过大，返回 false 表示拒绝该修复
+// 这可以防止LLM产生不合理的输出（如"他是。"→"他是是"）被误接受
+func (mr *ModelRepairer) validateRepair(original, repaired string) bool {
+	origLen := len([]rune(original))
+	repLen := len([]rune(repaired))
+
+	if origLen == 0 || repLen == 0 {
+		return false
+	}
+
+	// 短文本（< 15 字符）校验更严格：只要长度不同就拒绝
+	if origLen < 15 || repLen < 15 {
+		if origLen != repLen {
+			log.Printf("[修复校验] 拒绝修复（短文本长度变化）: 原始=%d字符 修复=%d字符", origLen, repLen)
+			return false
+		}
+	}
+
+	// 长度差比例超过 20% 且长度差 > 2，拒绝
+	lenDiff := float64(abs(origLen - repLen))
+	maxLen := float64(max(origLen, repLen))
+	if lenDiff > 2 && lenDiff/maxLen > 0.20 {
+		log.Printf("[修复校验] 拒绝修复（长度变化过大）: 原始=%d字符 修复=%d字符", origLen, repLen)
+		return false
+	}
+
+	// 编辑距离校验：仅对短段落（≤ 500 字符）计算编辑距离
+	// 长段落的内存和时间开销过大，只用长度差判断
+	if origLen <= 500 && repLen <= 500 {
+		origRunes := []rune(original)
+		repRunes := []rune(repaired)
+		editDist := levenshteinDistanceRunes(origRunes, repRunes)
+		if float64(editDist)/maxLen > 0.25 {
+			log.Printf("[修复校验] 拒绝修复（编辑距离过大）: 原文=%d字符 编辑距离=%d 比例=%.2f",
+				origLen, editDist, float64(editDist)/maxLen)
+			return false
+		}
+	}
+
+	return true
+}
+
+// levenshteinDistanceRunes 计算两个 rune 切片的莱文斯坦编辑距离，使用O(min(m,n))空间的优化实现
+func levenshteinDistanceRunes(a, b []rune) int {
+	m, n := len(a), len(b)
+
+	// 确保 a 是较短的，以节省空间
+	if m > n {
+		a, b = b, a
+		m, n = n, m
+	}
+
+	// 当前行和前一行
+	prev := make([]int, m+1)
+	curr := make([]int, m+1)
+
+	for i := 0; i <= m; i++ {
+		prev[i] = i
+	}
+
+	for j := 1; j <= n; j++ {
+		curr[0] = j
+		for i := 1; i <= m; i++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			curr[i] = min3(
+				prev[i]+1,      // 删除
+				curr[i-1]+1,    // 插入
+				prev[i-1]+cost, // 替换
+			)
+		}
+		prev, curr = curr, prev
+	}
+
+	return prev[m]
+}
+
+// abs 返回整数的绝对值
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+// min3 返回三个整数的最小值
+func min3(a, b, c int) int {
+	if a < b {
+		if a < c {
+			return a
+		}
+		return c
+	}
+	if b < c {
+		return b
+	}
+	return c
 }

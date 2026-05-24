@@ -177,7 +177,13 @@ func GetReviewItems(c *gin.Context) {
 		return
 	}
 
-	content, err := os.ReadFile(record.FilePath)
+	// 审核阶段使用审核基线的文件内容来解析行号上下文
+	filePath := record.FilePath
+	if record.Status == "reviewing" && record.ReviewBaselinePath != "" {
+		filePath = record.ReviewBaselinePath
+	}
+
+	content, err := os.ReadFile(filePath)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "读取文件失败"})
 		return

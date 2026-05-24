@@ -408,6 +408,7 @@ func GetFile(c *gin.Context) {
 }
 
 // GetFileContent 获取文件内容（limit 参数单位为字节，默认 1MB，最大 10MB）
+// 审核阶段优先使用 review_baseline_path 作为稳定的审核基线
 func GetFileContent(c *gin.Context) {
 	md5 := c.Param("md5")
 
@@ -419,6 +420,12 @@ func GetFileContent(c *gin.Context) {
 	if record == nil {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "文件不存在"})
 		return
+	}
+
+	// 审核阶段使用固定的审核基线文件，避免流水线覆盖 file_path 导致底稿不稳定
+	filePath := record.FilePath
+	if record.Status == "reviewing" && record.ReviewBaselinePath != "" {
+		filePath = record.ReviewBaselinePath
 	}
 
 	const defaultLimit = 1 * 1024 * 1024  // 1MB
@@ -433,7 +440,7 @@ func GetFileContent(c *gin.Context) {
 		}
 	}
 
-	f, err := os.Open(record.FilePath)
+	f, err := os.Open(filePath)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "读取文件失败: " + err.Error()})
 		return

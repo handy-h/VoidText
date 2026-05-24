@@ -1,126 +1,42 @@
-# AGENTS.md — VoidText (湮文)
+# Repository Guidelines
 
-Chinese novel TXT cleaning tool. Go backend, SQLite, Gin web framework, SPA frontend.
+## Project Structure & Module Organization
 
-## Entrypoint & Build
+VoidText is a single Go module (`module voidtext`) for cleaning Chinese novel TXT files. The backend entrypoint is `cmd/voidtext/main.go`, which loads config, initializes SQLite, and starts the Gin server. Core packages live under `internal/`: `config/`, `database/`, `processor/`, `file/`, `external/`, `logging/`, and `review/manager/`. The five-step pipeline is in `internal/processor/pipeline.go`.
 
-```
-# Build
-go build -o voidtext ./cmd/voidtext/
+The web layer is split between `web/backend/` for Gin routes, handlers, and middleware, and `web/frontend/` for the static SPA (`index.html`, CSS, and modular JavaScript in `static/js/modules/`). Test scripts are under `testing/`; longer architecture and API notes are in `repowikis/`. Runtime files belong in `data/` and should not be committed.
 
-# Run directly
-go run ./cmd/voidtext/
+## Build, Test, and Development Commands
 
-# Run built binary (reads .env from executable dir first, then working dir)
-./voidtext
-```
+- `make dev`: run locally with `go run`, console logs, and Gin debug mode.
+- `make build`: tidy and verify modules, then build `./voidtext`.
+- `make run`: run the compiled binary.
+- `go test ./...`: run all Go tests.
+- `go test -v -count=1 ./internal/processor/`: run one package without cache.
+- `./testing/unit_testing/run_unit_tests.sh [module]`: run the project unit test script.
+- `./testing/smoking_testing/run_smoke_tests.sh [server-url]`: run smoke tests against a live server.
+- `go fmt ./...` and `go vet ./...`: format and check Go code before review.
 
-## Config
+## Coding Style & Naming Conventions
 
-- `.env` file loaded via `godotenv`. Template at `.env.template`.
-- Port defaults to `8080` (`PORT` env var).
-- LLM API: `LLM_API_URL`, `LLM_API_KEY`, `COMPLETION_MODEL_NAME`.
-- Local Ollama fallback: `ENABLE_LOCAL_MODEL=true`, `LOCAL_MODEL_URL`, `LOCAL_MODEL_NAME`.
-- Data directory defaults to `./data` (gitignored, auto-created on startup).
-- Old config keys (`EXTERNAL_API_URL`, `EXTERNAL_API_KEY`, `EMBEDDING_MODEL_NAME`) auto-mapped for backward compat.
+Use Go 1.25+. Keep formatting compatible with `gofmt`; local style prefers 2-space indentation, K&R braces, and lines under 120 characters. Use `camelCase` for variables/functions, `PascalCase` for types, and `UPPER_SNAKE_CASE` for constants. Database fields use `snake_case`; filenames use `kebab-case`. Avoid `any` and magic values. API responses should keep the `{ code, message, data }` shape.
 
-## Architecture
+## Testing Guidelines
 
-- **Single Go module** (`module voidtext`, Go 1.25, `modernc.org/sqlite` — no CGO).
-- Entrypoint: `cmd/voidtext/main.go` → loads config → inits SQLite → starts Gin HTTP server.
-- **5-step pipeline** (in order): `cleaning` → `indexing` → `llm_fix` → `review` → `finalizing`.
-- Each step saves intermediate file + version record; skipped steps auto-advance.
-- Pipeline steps: `internal/processor/pipeline.go` (step definitions, file pipeline.go also has older `Process()` for single-run).
+Place Go tests beside source files or in existing `test/` subdirectories. Follow the project convention `should_行为_条件` for test names when adding new tests. Use `DATA_DIR=./test_data` or the provided scripts when tests need isolated runtime data. Smoke tests require the server to be running and authentication disabled or a valid API token supplied.
 
-### Directory layout
+## Commit & Pull Request Guidelines
 
-```
-cmd/voidtext/          — main.go (entrypoint)
-internal/
-  config/              — .env loader, AppConfig struct, rate-limit config
-  database/            — SQLite init (WAL mode, SetMaxOpenConns(1)), CRUD repos
-  processor/           — pipeline, cleaners, vector detector, model repairer, worker pool, rules engine
-    preprocess/        — encoding detection (GBK/UTF-8), text normalization
-    postprocess/       — output formatting
-    rules/             — regex-based rule engine
-    model/             — embedding/similarity
-  file/                — MD5 computation, filename→author+title parser
-  external/            — API client (api.go) + Ollama client (ollama.go)
-  logging/             — structured JSON logger
-  review/manager/      — review session management
-web/
-  backend/             — Gin router, handlers, middleware (rate-limit, error, recovery)
-  frontend/            — index.html + modular JS in static/js/modules/
-scripts/               — run.sh, evolver.py (Python, for prompt tuning)
-config/prompts/        — (directory exists, empty — intended for prompt templates)
-testing/
-  unit_testing/        — test plans + run_unit_tests.sh
-  smoking_testing/     — test plans + run_smoke_tests.sh (needs running server)
-repowikis/             — Chinese technical docs (architecture, API, deploy, dev guide)
-data/                  — runtime data (gitignored): cleaning.db, uploads/, backups/, temp/
-```
+Recent history uses concise prefixes such as `feat:`, `fix:`, `refactor:`, and Chinese summaries. Keep commits scoped to one logical change. Pull requests should describe behavior changes, list test commands run, link related issues, and include screenshots or screen recordings for frontend UI changes.
 
-### SQLite specifics (from db.go)
+## Security & Configuration Tips
 
-- WAL journal mode, `SetMaxOpenConns(1)` (SQLite write serialization).
-- `SetConnMaxLifetime(5 * time.Minute)`.
-- Tables: `files`, `versions`, `review_items`, `processing_logs`, `chunk_repair_cache`, `retry_queue`, `prompt_versions`.
-- DB file: `{DATA_DIR}/cleaning.db`.
+Configure local settings through `.env`; never commit API keys, LLM credentials, databases, uploads, backups, or generated runtime logs. Check `API_TOKEN`, rate-limit settings, model endpoints, and `DATA_DIR` before running smoke tests or sharing a local build.
 
-## Testing
+## Agent-Specific Instructions
 
-```bash
-# All tests
-go test ./...
+All agent replies, explanations, analysis, suggestions, and code comments must be in Chinese. Keep code identifiers, keywords, function names, variables, and external API names in English as required by the language or framework.
 
-# Single package (with cache disabled)
-go test -v -count=1 ./internal/database/
+When inspecting project code, use the `code-context` MCP service first for semantic search, symbol lookup, dependency analysis, and file context. Use `rg`, file globbing, or direct reads only when `code-context` is unavailable or insufficient. Do not guess APIs, function signatures, or call chains; confirm them with `code-context` before editing.
 
-# Unit test runner script
-./testing/unit_testing/run_unit_tests.sh [module]
-
-# Smoke test runner (requires running server)
-./testing/smoke_testing/run_smoke_tests.sh [server-url]
-
-# Combined test runner (root-level)
-./run_tests.sh    # sets DATA_DIR=./test_data, cleans up before/after
-```
-
-**Test quirks:**
-- `run_tests.sh` sets `DATA_DIR=./test_data`.
-- Test data directory cleaned before and after run.
-- Tests at: `internal/*/test/`, `web/backend/*/test/`, and alongside source files (`*_test.go`).
-- Go test files exist for: config, database, file (md5, parser), processor (pipeline, model_repairer, vector_detector, rules, preprocess, postprocess), review manager, middleware (rate_limit), handlers (health).
-- Smoke tests operate against a live server via curl.
-
-## Tooling quirks
-
-- **Go 1.25 required** (see go.mod).
-- No formatter/linter config found — rely on `go fmt` and `go vet`.
-- `go vet ./...` recommended before commits.
-- Pre-commit hooks: none detected.
-- CI: none detected (no `.github/workflows/`).
-- `claude.md` at root is a coding-style instruction file (2-space indent, K&R braces, ≤120 line width, camelCase/PascalCase/UPPER_SNAKE_CASE naming, Chinese responses for AI, test names `should_行为_条件`). Treat as agent-style guide.
-
-## Styling conventions (from claude.md)
-
-- Indent: 2 spaces. K&R braces. Line width ≤ 120.
-- camelCase for vars/functions (bool prefix: `is`/`has`/`can`).
-- PascalCase for types, UPPER_SNAKE_CASE for constants.
-- snake_case for DB fields, kebab-case for filenames.
-- No `any` — strict typing. Functions ≤ 80 lines. No magic values.
-- Public API gets JSDoc-style comments.
-- Tests: `should_行为_条件` naming.
-- API response format: `{ code, message, data }`.
-
-## Key gotchas
-
-- **Auth must be disabled** or token provided for curl/smoke tests.
-- Upload filename format: `author - title.txt` (separators configurable via `NAME_SEPARATORS`).
-- File identity = MD5 of content (dedup by MD5 on upload).
-- `config/prompts/` exists but is empty — don't expect files there unless created.
-- `memory/errors.jsonl` stores runtime error logs (gitignored).
-- Hybrid model architecture: local Ollama first, fallback to remote API, then local dict.
-- `ENABLE_EVOLVER` controls self-tuning prompt optimizer (Python script at `scripts/evolver.py`).
-- Processing can run in background after browser closes (server-side state).
-- Large files default limit: 100MB (`MAX_FILE_SIZE`).
+Before modifying code, confirm relevant dependencies and affected symbols through `code-context`. When debugging errors, trace the source through `code-context` first, then explain findings in concise, structured Chinese.
