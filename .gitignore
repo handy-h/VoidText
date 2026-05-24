@@ -65,3 +65,8 @@ configs/production.yaml
 
 
 .code-context-index-state.json
+.codex/config.toml
+voidtext
+.gitignore
+.gitignore
+code-text/code-context-mcp
