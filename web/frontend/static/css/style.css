@@ -1427,10 +1427,6 @@ section h2::after {
   font-size: 15px;
 }
 
-.nav-logout {
-  margin-left: auto;
-}
-
 /* --- Section Header Actions --- */
 .section-header-actions {
   display: flex;

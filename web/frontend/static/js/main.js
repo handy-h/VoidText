@@ -5,11 +5,6 @@
 
 let currentFileMd5 = null;
 
-// ========== 认证 ==========
-function handleLogout() {
-  // 本地工具无认证，占位供 HTML onclick 使用
-}
-
 // ========== 视图切换 ==========
 function showSection(section) {
   FileManager.showSection(section);

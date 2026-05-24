@@ -282,9 +282,9 @@ func processIndexingStep(fileMd5, content string, rulesConfig RulesConfig, _ *da
 
 // LlmCheckpoint LLM修复断点数据
 type LlmCheckpoint struct {
-	ParagraphIndex    int                `json:"paragraphIndex"`
-	RepairedParagraphs []string          `json:"repairedParagraphs"`
-	Changes           []preprocess.Change `json:"changes"`
+	ParagraphIndex     int                 `json:"paragraphIndex"`
+	RepairedParagraphs []string            `json:"repairedParagraphs"`
+	Changes            []preprocess.Change `json:"changes"`
 }
 
 type llmParagraphResult struct {
@@ -431,18 +431,19 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, record 
 		}()
 	}
 	go func() {
-		defer close(jobs)
-		defer func() {
-			wg.Wait()
-			close(results)
-		}()
 		for i := startIndex; i < totalParagraphs; i++ {
 			select {
 			case <-ctx.Done():
+				close(jobs)
+				wg.Wait()
+				close(results)
 				return
 			case jobs <- i:
 			}
 		}
+		close(jobs)
+		wg.Wait()
+		close(results)
 	}()
 
 	nextToCommit := startIndex
@@ -569,9 +570,9 @@ func calculateParagraphOffsets(paragraphs []string) []int {
 func saveLlmCheckpoint(fileMd5 string, repairedParagraphs []string, changes []preprocess.Change, paragraphIndex, totalParagraphs int) error {
 	checkpointContent := strings.Join(repairedParagraphs, "\n")
 	checkpointJSON, err := json.Marshal(LlmCheckpoint{
-		ParagraphIndex:    paragraphIndex,
+		ParagraphIndex:     paragraphIndex,
 		RepairedParagraphs: repairedParagraphs,
-		Changes:           changes,
+		Changes:            changes,
 	})
 	if err != nil {
 		return err

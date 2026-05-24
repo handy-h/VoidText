@@ -19,12 +19,13 @@ type ProcessingProgress struct {
 	ChunkTimes        []int64 // 记录每个chunk的处理时间（毫秒）
 }
 
+const maxTrackedChunkTimes = 1000
+
 // NewProcessingProgress 创建进度追踪器
 func NewProcessingProgress(fileMd5 string, totalChunks int) *ProcessingProgress {
-	// 限制切片容量，防止内存泄漏
-	maxTrackedChunks := 1000
-	if totalChunks > maxTrackedChunks {
-		totalChunks = maxTrackedChunks
+	trackedChunkTimesCap := totalChunks
+	if trackedChunkTimesCap > maxTrackedChunkTimes {
+		trackedChunkTimesCap = maxTrackedChunkTimes
 	}
 
 	return &ProcessingProgress{
@@ -32,7 +33,7 @@ func NewProcessingProgress(fileMd5 string, totalChunks int) *ProcessingProgress 
 		TotalChunks:   totalChunks,
 		StartTime:     time.Now(),
 		LastChunkTime: time.Now(),
-		ChunkTimes:    make([]int64, 0, totalChunks),
+		ChunkTimes:    make([]int64, 0, trackedChunkTimesCap),
 	}
 }
 
@@ -42,7 +43,7 @@ func (pp *ProcessingProgress) RecordChunkComplete(success bool, processingMs int
 	defer pp.progressMu.Unlock()
 
 	pp.ProcessedChunks++
-	
+
 	// 根据处理来源更新统计
 	switch source {
 	case "cache":
@@ -53,9 +54,11 @@ func (pp *ProcessingProgress) RecordChunkComplete(success bool, processingMs int
 	case "remote":
 		pp.APICalls++
 	}
-	
+
 	pp.TotalProcessingMs += processingMs
-	pp.ChunkTimes = append(pp.ChunkTimes, processingMs)
+	if len(pp.ChunkTimes) < maxTrackedChunkTimes {
+		pp.ChunkTimes = append(pp.ChunkTimes, processingMs)
+	}
 	pp.LastChunkTime = time.Now()
 }
 
@@ -72,8 +75,15 @@ func (pp *ProcessingProgress) GetProgress() ProgressInfo {
 		avgChunkTimeMs = apiTotalTime / int64(pp.APICalls)
 	}
 
-	// 计算剩余chunk数
-	remainingChunks := pp.TotalChunks - pp.ProcessedChunks
+	processedChunks := pp.ProcessedChunks
+	if pp.TotalChunks > 0 && processedChunks > pp.TotalChunks {
+		processedChunks = pp.TotalChunks
+	}
+
+	remainingChunks := pp.TotalChunks - processedChunks
+	if remainingChunks < 0 {
+		remainingChunks = 0
+	}
 
 	// 预估剩余时间（秒）
 	estimatedRemainingSeconds := int64(0)
@@ -95,12 +105,15 @@ func (pp *ProcessingProgress) GetProgress() ProgressInfo {
 	// 计算进度百分比（使用浮点数提高精度）
 	progress := 0
 	if pp.TotalChunks > 0 {
-		progress = int(float64(pp.ProcessedChunks) / float64(pp.TotalChunks) * 100)
+		progress = int(float64(processedChunks) / float64(pp.TotalChunks) * 100)
+		if progress > 100 {
+			progress = 100
+		}
 	}
 
 	return ProgressInfo{
 		TotalChunks:            pp.TotalChunks,
-		ProcessedChunks:        pp.ProcessedChunks,
+		ProcessedChunks:        processedChunks,
 		RemainingChunks:        remainingChunks,
 		CacheHits:              pp.CacheHits,
 		APICalls:               pp.APICalls,
@@ -131,7 +144,7 @@ var GlobalProgressTracker = &ProgressTracker{
 
 // ProgressTracker 进度追踪器
 type ProgressTracker struct {
-	trackerMu   sync.RWMutex
+	trackerMu  sync.RWMutex
 	progresses map[string]*ProcessingProgress
 }
 

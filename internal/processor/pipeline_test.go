@@ -1,9 +1,13 @@
 package processor
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"voidtext/internal/config"
+	"voidtext/internal/database"
 	"voidtext/internal/processor/preprocess"
 )
 
@@ -221,5 +225,65 @@ func TestMergeStats_ShouldCombineStats(t *testing.T) {
 	}
 	if target["c"] != 4 {
 		t.Errorf("mergeStats() c = %d, want 4", target["c"])
+	}
+}
+
+func TestProcessLlmFixStep_ShouldCompleteWithConcurrency(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := database.Init(tmpDir); err != nil {
+		t.Fatalf("database.Init() error = %v", err)
+	}
+	defer database.Close()
+
+	uploadsDir := filepath.Join(tmpDir, "uploads")
+	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
+		t.Fatalf("os.MkdirAll() error = %v", err)
+	}
+
+	fileMd5 := "llm-fix-concurrency-md5"
+	inputPath := filepath.Join(uploadsDir, fileMd5+".txt")
+	content := "这是第一段内容，长度足够触发本地修复逻辑。\n这是第二段内容，长度也足够触发本地修复逻辑。\n这是第三段内容，继续用于测试并发完成。"
+	if err := os.WriteFile(inputPath, []byte(content), 0644); err != nil {
+		t.Fatalf("os.WriteFile() error = %v", err)
+	}
+
+	config.AppConfigInstance = config.AppConfig{
+		EnableModelRepair: true,
+		RepairModelType:   "local",
+		RepairModelName:   "test-model",
+		LLMConcurrency:    2,
+		DataDir:           tmpDir,
+	}
+
+	record := &database.FileRecord{
+		Md5:      fileMd5,
+		FileName: "test.txt",
+		FilePath: inputPath,
+		Status:   "processing",
+	}
+	if err := database.CreateFile(record); err != nil {
+		t.Fatalf("database.CreateFile() error = %v", err)
+	}
+
+	resultCh := make(chan *PipelineResult, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		result, err := processLlmFixStep(fileMd5, content, RulesConfig{EnableModelRepair: true}, record)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		resultCh <- result
+	}()
+
+	select {
+	case err := <-errCh:
+		t.Fatalf("processLlmFixStep() error = %v", err)
+	case result := <-resultCh:
+		if result.NextStep != StepReview {
+			t.Fatalf("NextStep = %s, want %s", result.NextStep, StepReview)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("processLlmFixStep() timed out, possible worker channel deadlock")
 	}
 }
