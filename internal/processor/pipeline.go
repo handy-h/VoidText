@@ -500,10 +500,15 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, record 
 		}
 	}
 	if cancelRequested {
+		// 同步将 status 标记为 cancelled，外层 RunAllSteps 可据此中止后续步骤，
+		// 避免取消后仍被推进到 review/finalizing
+		progress := CalculateProgress(StepLlmFix, completed*100/totalParagraphs)
+		database.UpdateFileStatus(fileMd5, "cancelled", StepLlmFix, progress,
+			fmt.Sprintf("用户取消（已完成 %d/%d 段落）", completed, totalParagraphs))
 		return &PipelineResult{
 			CurrentStep: StepLlmFix,
 			NextStep:    "",
-			Progress:    CalculateProgress(StepLlmFix, completed*100/totalParagraphs),
+			Progress:    progress,
 			Message:     fmt.Sprintf("LLM修复已取消 (%d/%d)", completed, totalParagraphs),
 		}, nil
 	}

@@ -157,6 +157,13 @@ func (mr *ModelRepairer) repairWithAPI(paragraph string) (string, []preprocess.C
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		resp, err := mr.api.GenerateChatCompletion(systemPrompt, userPrompt, 0, -1)
 		if err == nil && resp != nil && len(resp.Choices) > 0 {
+			// 输出被 max_tokens 截断时，模型只给出段落前半部分，整段对比会产生大量
+			// 虚假的"删除"建议；此处回退原文，不生成 change
+			if resp.Choices[0].FinishReason == "length" {
+				log.Printf("[LLM修复] 响应被 max_tokens 截断，回退原文: 段落长度=%d", len(paragraph))
+				return paragraph, []preprocess.Change{}
+			}
+
 			// 成功响应
 			repairedText := strings.TrimSpace(resp.Choices[0].Message.Content)
 			if repairedText == "" || repairedText == paragraph {
@@ -504,15 +511,18 @@ func (mr *ModelRepairer) smartChunk(content string, chunkSize, overlap int) []st
 		chunk := string(runes[start:end])
 		chunks = append(chunks, chunk)
 
-		// 下一块起点 = 当前结束 - 重叠
-		start = end - overlap
-		if start <= 0 || start >= totalLen {
+		// 已处理到末尾，退出循环（避免 end=totalLen 时下一轮 start=end-overlap 仍 < totalLen 导致无限循环）
+		if end >= totalLen {
 			break
 		}
-		// 防止无限循环
-		if start >= end {
-			start = end
+
+		// 下一块起点 = 当前结束 - 重叠
+		nextStart := end - overlap
+		// 防止 nextStart 倒退或不前进，至少前进 1 个 rune
+		if nextStart <= start {
+			nextStart = start + 1
 		}
+		start = nextStart
 	}
 
 	return chunks

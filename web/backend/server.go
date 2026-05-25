@@ -1,6 +1,9 @@
 package backend
 
 import (
+	"os"
+	"strings"
+
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 
@@ -13,14 +16,12 @@ func NewServer() *gin.Engine {
 	r := gin.Default()
 
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:8080", "http://127.0.0.1:8080"},
+		AllowOrigins:     resolveCORSAllowOrigins(),
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "X-API-Token"},
 		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
 	}))
-
-	r.Use(middleware.AuthMiddleware())
 
 	r.Static("/static", "./web/frontend/static")
 
@@ -28,7 +29,9 @@ func NewServer() *gin.Engine {
 		c.File("./web/frontend/index.html")
 	})
 
+	// AuthMiddleware 仅挂载到 /api 分组，静态资源和首页可匿名访问，避免浏览器首屏被拦
 	api := r.Group("/api")
+	api.Use(middleware.AuthMiddleware())
 	{
 		api.POST("/files/upload", handlers.UploadFile)
 		api.GET("/files", handlers.ListFiles)
@@ -58,4 +61,24 @@ func NewServer() *gin.Engine {
 	}
 
 	return r
+}
+
+// resolveCORSAllowOrigins 解析 CORS 允许的来源
+// 从 CORS_ALLOW_ORIGINS 环境变量读取，逗号分隔；未设置时回退到本机默认值
+func resolveCORSAllowOrigins() []string {
+	raw := strings.TrimSpace(os.Getenv("CORS_ALLOW_ORIGINS"))
+	if raw == "" {
+		return []string{"http://localhost:8080", "http://127.0.0.1:8080"}
+	}
+	parts := strings.Split(raw, ",")
+	origins := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if trimmed := strings.TrimSpace(p); trimmed != "" {
+			origins = append(origins, trimmed)
+		}
+	}
+	if len(origins) == 0 {
+		return []string{"http://localhost:8080", "http://127.0.0.1:8080"}
+	}
+	return origins
 }

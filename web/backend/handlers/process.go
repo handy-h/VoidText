@@ -31,8 +31,18 @@ func RunAllSteps(c *gin.Context) {
 		return
 	}
 
+	// 当前步骤已进入最终化阶段：应通过 /finalize 推进，避免落入错误的 review 分支
+	if record.CurrentStep == processor.StepFinalizing {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "文件已进入最终化阶段，请调用 /finalize 接口完成处理",
+		})
+		return
+	}
+
 	startStep := processor.StepCleaning
-	if record.CurrentStep != "" {
+	// review 不能作为起步状态：进入审核后应通过 /finalize 推进，重新点击运行时回退到 cleaning
+	if record.CurrentStep != "" && record.CurrentStep != processor.StepReview {
 		startStep = record.CurrentStep
 	}
 
@@ -47,6 +57,8 @@ func RunAllSteps(c *gin.Context) {
 		}
 	}
 
+	// 进入运行前清零取消标志，避免上一次残留的 cancel_flag 立刻终止本次执行
+	database.SetCancelFlag(fileMd5, 0)
 	database.UpdateFileStatus(fileMd5, "processing", startStep, processor.CalculateProgress(startStep, 0), "")
 
 	go func() {
@@ -57,23 +69,35 @@ func RunAllSteps(c *gin.Context) {
 		}()
 
 		for _, step := range stepsToRun {
-			// 在每步开始前检查取消标志
+			// 步前检查取消标志（针对 cleaning/indexing 这类无内部检查点的步骤）
 			cancelled, _ := database.IsFileCancelled(fileMd5)
 			if cancelled {
 				database.SetCancelFlag(fileMd5, 0)
-				database.UpdateFileStatus(fileMd5, "cancelled", "", 0, "用户取消")
+				database.UpdateFileStatus(fileMd5, "cancelled", step, 0, "用户取消")
 				return
 			}
-			_, err := processor.ProcessStep(fileMd5, step)
-			if err != nil {
+			if _, err := processor.ProcessStep(fileMd5, step); err != nil {
 				database.UpdateFileStatus(fileMd5, "failed", step, 0, err.Error())
+				return
+			}
+			// 步内若已被取消（如 LLM 检查点内部更新了 status），不要继续推进
+			cur, _ := database.GetFileByMd5(fileMd5)
+			if cur != nil && cur.Status == "cancelled" {
 				return
 			}
 		}
 
-		_, err := processor.ProcessStep(fileMd5, processor.StepReview)
+		// 进入审核阶段；若该步骤判定无需审核（total==0），它会把 nextStep 推到 finalizing，
+		// 这里必须主动完成 finalizing，否则前端无法自动收尾
+		reviewResult, err := processor.ProcessStep(fileMd5, processor.StepReview)
 		if err != nil {
 			database.UpdateFileStatus(fileMd5, "failed", processor.StepReview, 0, err.Error())
+			return
+		}
+		if reviewResult != nil && reviewResult.NextStep == processor.StepFinalizing {
+			if _, ferr := processor.ProcessStep(fileMd5, processor.StepFinalizing); ferr != nil {
+				database.UpdateFileStatus(fileMd5, "failed", processor.StepFinalizing, 0, ferr.Error())
+			}
 		}
 	}()
 
@@ -195,9 +219,13 @@ func GetReviewItems(c *gin.Context) {
 		return
 	}
 
+	// 全文按行切分一次，循环复用，避免每个审核项都重复 Split
+	contentStr := string(content)
+	lines := strings.Split(contentStr, "\n")
+
 	suggestions := make([]map[string]interface{}, 0, len(items))
 	for _, item := range items {
-		lineNum, fullLine, prevLine, nextLine := getLineContext(string(content), item.PositionStart, item.OriginalText)
+		lineNum, fullLine, prevLine, nextLine := getLineContext(contentStr, lines, item.PositionStart, item.OriginalText)
 
 		suggestions = append(suggestions, map[string]interface{}{
 			"id":         item.ID,
@@ -439,9 +467,9 @@ func updateReviewProgress(fileMd5 string) {
 }
 
 // getLineContext 获取指定位置的行号和上下文
-func getLineContext(content string, position int, original string) (lineNum int, fullLine, prevLine, nextLine string) {
-	lines := strings.Split(content, "\n")
-
+// getLineContext 获取指定位置的行号和上下文
+// lines 由调用方预先切分并复用，避免在大文件场景下每个审核项都重复 strings.Split
+func getLineContext(content string, lines []string, position int, original string) (lineNum int, fullLine, prevLine, nextLine string) {
 	if position >= 0 && position <= len(content) {
 		currentPos := 0
 		for i, line := range lines {

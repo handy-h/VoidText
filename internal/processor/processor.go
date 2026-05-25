@@ -129,62 +129,89 @@ func GetRuleManager() *rules.RuleManager {
 }
 
 // ApplySuggestion 应用单个修改建议
+//
+// 实现说明：远程审核项 review_items 中保存的 Position 是基于"产生该建议时的段落或步骤快照"
+// 计算的，与 finalize 阶段使用的最终内容并不对齐，因此不能完全依赖 Position 做精确切片。
+// 按 ModificationType 分流：
+//   - 段落级（duplicate_paragraph / advertisement）：按整段相似度匹配后移除/替换一次
+//   - 字符级（character_correction / typo_correction / text_*）：全文 ReplaceAll，
+//     因为同一错别字在不同段落都应该被修正，且不存在位置歧义
+//   - 其他类型：保守起见仅替换首个匹配
 func ApplySuggestion(content string, suggestion preprocess.Change) string {
 	if suggestion.Original == "" && suggestion.Replacement == "" {
 		return content
 	}
-
 	if suggestion.Original == "" {
 		return content
 	}
 
-	if suggestion.Position >= 0 && suggestion.Position < len(content) {
-		expectedEnd := suggestion.Position + len(suggestion.Original)
-		if expectedEnd <= len(content) && content[suggestion.Position:expectedEnd] == suggestion.Original {
-			return content[:suggestion.Position] + suggestion.Replacement + content[expectedEnd:]
-		}
+	switch suggestion.Type {
+	case "duplicate_paragraph", "advertisement":
+		return applyParagraphSuggestion(content, suggestion)
+	case "character_correction", "typo_correction", "text_deletion", "text_insertion":
+		return strings.ReplaceAll(content, suggestion.Original, suggestion.Replacement)
 	}
 
-	idx := strings.Index(content, suggestion.Original)
-	if idx >= 0 {
+	// 未知类型：保守起见仅替换首个匹配
+	if idx := strings.Index(content, suggestion.Original); idx >= 0 {
 		return content[:idx] + suggestion.Replacement + content[idx+len(suggestion.Original):]
 	}
-
-	if suggestion.Type == "duplicate_paragraph" || suggestion.Type == "advertisement" {
-		origTrimmed := strings.TrimSpace(suggestion.Original)
-		origRunes := []rune(origTrimmed)
-		origLen := len(origRunes)
-		threshold := float64(0.6)
-		paragraphs := strings.Split(content, "\n\n")
-		filtered := []string{}
-		for _, para := range paragraphs {
-			paraTrimmed := strings.TrimSpace(para)
-			paraRunes := []rune(paraTrimmed)
-			if origLen > 0 && len(paraRunes) > 0 {
-				minLen := origLen
-				if len(paraRunes) < minLen {
-					minLen = len(paraRunes)
-				}
-				matchCount := 0
-				minIdx := minLen
-				for i := 0; i < minIdx; i++ {
-					if origRunes[i] == paraRunes[i] {
-						matchCount++
-					}
-				}
-				similarity := float64(matchCount) / float64(origLen)
-				if len(paraRunes) > origLen {
-					similarity = float64(matchCount) / float64(len(paraRunes))
-				}
-				if similarity >= threshold {
-					continue
-				}
-			}
-			filtered = append(filtered, para)
-		}
-		return strings.Join(filtered, "\n\n")
-	}
 	return content
+}
+
+// applyParagraphSuggestion 按段落相似度移除/替换段落（仅作用于首个匹配段落，避免误删多个相似段落）
+func applyParagraphSuggestion(content string, suggestion preprocess.Change) string {
+	origTrimmed := strings.TrimSpace(suggestion.Original)
+	origRunes := []rune(origTrimmed)
+	origLen := len(origRunes)
+	if origLen == 0 {
+		return content
+	}
+
+	const threshold = 0.6
+	paragraphs := strings.Split(content, "\n\n")
+	filtered := make([]string, 0, len(paragraphs))
+	matched := false
+
+	for _, para := range paragraphs {
+		if matched {
+			filtered = append(filtered, para)
+			continue
+		}
+		paraTrimmed := strings.TrimSpace(para)
+		paraRunes := []rune(paraTrimmed)
+		if len(paraRunes) == 0 {
+			filtered = append(filtered, para)
+			continue
+		}
+
+		minLen := origLen
+		if len(paraRunes) < minLen {
+			minLen = len(paraRunes)
+		}
+		matchCount := 0
+		for i := 0; i < minLen; i++ {
+			if origRunes[i] == paraRunes[i] {
+				matchCount++
+			}
+		}
+		denom := origLen
+		if len(paraRunes) > origLen {
+			denom = len(paraRunes)
+		}
+		similarity := float64(matchCount) / float64(denom)
+
+		if similarity >= threshold {
+			matched = true
+			if strings.TrimSpace(suggestion.Replacement) != "" {
+				filtered = append(filtered, suggestion.Replacement)
+			}
+			continue
+		}
+		filtered = append(filtered, para)
+	}
+
+	return strings.Join(filtered, "\n\n")
 }
 
 // ApplyAllSuggestions 应用所有修改建议

@@ -10,6 +10,7 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -160,16 +161,11 @@ func isTimeoutError(err error) bool {
 // containsAny 检查字符串是否包含任意子串
 func containsAny(s string, substrs []string) bool {
 	for _, substr := range substrs {
-		if contains(s, substr) {
+		if strings.Contains(s, substr) {
 			return true
 		}
 	}
 	return false
-}
-
-// contains 检查字符串是否包含子串
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && (s[0:len(substr)] == substr || contains(s[1:], substr)))
 }
 
 // API 外部API客户端（重构版）
