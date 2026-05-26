@@ -119,6 +119,52 @@ func createTables() error {
 			status TEXT,
 			timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
+		`CREATE TABLE IF NOT EXISTS chunk_repair_cache (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			file_md5 TEXT NOT NULL,
+			chunk_id INTEGER NOT NULL,
+			chunk_hash TEXT NOT NULL,
+			original_text TEXT,
+			repaired_text TEXT,
+			prompt_version TEXT,
+			api_model TEXT,
+			token_usage INTEGER NOT NULL DEFAULT 0,
+			processing_time_ms INTEGER NOT NULL DEFAULT 0,
+			confidence REAL NOT NULL DEFAULT 0,
+			source TEXT,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(file_md5, chunk_hash)
+		)`,
+		`CREATE TABLE IF NOT EXISTS retry_queue (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			file_md5 TEXT NOT NULL,
+			chunk_id INTEGER NOT NULL,
+			original_text TEXT,
+			failure_reason TEXT,
+			error_type TEXT,
+			error_context TEXT,
+			prompt_version TEXT,
+			retry_count INTEGER NOT NULL DEFAULT 0,
+			max_retries INTEGER NOT NULL DEFAULT 3,
+			status TEXT NOT NULL DEFAULT 'pending',
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			next_retry_at TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS prompt_versions (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			prompt_name TEXT NOT NULL,
+			prompt_version TEXT NOT NULL,
+			prompt_content TEXT,
+			source TEXT,
+			error_pattern TEXT,
+			success_rate REAL NOT NULL DEFAULT 0,
+			total_uses INTEGER NOT NULL DEFAULT 0,
+			successful_uses INTEGER NOT NULL DEFAULT 0,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(prompt_name, prompt_version)
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_files_md5 ON files(md5)`,
 		`CREATE INDEX IF NOT EXISTS idx_files_original_md5 ON files(original_md5)`,
 		`CREATE INDEX IF NOT EXISTS idx_files_status ON files(status)`,
@@ -127,6 +173,9 @@ func createTables() error {
 		`CREATE INDEX IF NOT EXISTS idx_review_items_file_md5 ON review_items(file_md5)`,
 		`CREATE INDEX IF NOT EXISTS idx_review_items_status ON review_items(file_md5, status)`,
 		`CREATE INDEX IF NOT EXISTS idx_processing_logs_file_md5 ON processing_logs(file_md5)`,
+		`CREATE INDEX IF NOT EXISTS idx_chunk_cache_file_md5 ON chunk_repair_cache(file_md5)`,
+		`CREATE INDEX IF NOT EXISTS idx_retry_queue_file_md5 ON retry_queue(file_md5)`,
+		`CREATE INDEX IF NOT EXISTS idx_retry_queue_pending ON retry_queue(status, next_retry_at)`,
 	}
 
 	for _, stmt := range stmts {
