@@ -379,6 +379,11 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, record 
 	if concurrency < 1 {
 		concurrency = 1
 	}
+	// 本地 Ollama 启用时强制串行，避免单实例并发推理触发 OOM
+	if config.AppConfigInstance.EnableLocalModel && GetHealthManager().ShouldUseLocalModel() && concurrency > 1 {
+		log.Printf("[LLM修复] 本地模型启用且健康，并发数从 %d 降为 1 以避免 OOM", concurrency)
+		concurrency = 1
+	}
 	remaining := totalParagraphs - startIndex
 	if concurrency > remaining {
 		concurrency = remaining

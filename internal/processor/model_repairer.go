@@ -119,31 +119,47 @@ func (mr *ModelRepairer) RepairParagraph(paragraph string) (string, []preprocess
 	return mr.repairLocally(paragraph)
 }
 
-// repairWithOllama 使用本地 Ollama 模型修复文本，失败时降级到远程 API 或本地字典
+// repairWithOllama 使用本地 Ollama 模型修复文本
+// 重试 3 次仍失败（可重试错误指数退避）才降级到远程 API 或本地字典
 func (mr *ModelRepairer) repairWithOllama(paragraph string) (string, []preprocess.Change) {
 	systemPrompt := "你是一个专业的中文小说校对编辑。请修正以下段落中的错别字和语法错误，保持原文风格不变。只输出修正后的文本，无需解释。"
 	userPrompt := "输入：她高兴及了，跑过去抱住他。\n输出：她高兴极了，跑过去抱住他。\n\n当前任务：\n输入：" + paragraph + "\n输出："
 
-	repairedText, err := mr.ollamaClient.Generate(userPrompt, systemPrompt)
-	if err != nil {
-		log.Printf("[Ollama修复] 调用失败，降级处理: 段落长度=%d, 错误=%v", len(paragraph), err)
-		if mr.RepairModelType == "api" {
-			return mr.repairWithAPI(paragraph)
+	maxRetries := 3
+	baseDelay := 1 * time.Second
+	var lastErr error
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		repairedText, err := mr.ollamaClient.Generate(userPrompt, systemPrompt)
+		if err == nil {
+			repairedText = strings.TrimSpace(repairedText)
+			if repairedText == "" || repairedText == paragraph {
+				return paragraph, []preprocess.Change{}
+			}
+			if !mr.validateRepair(paragraph, repairedText) {
+				return paragraph, []preprocess.Change{}
+			}
+			changes := mr.compareTexts(paragraph, repairedText)
+			log.Printf("[Ollama修复] 成功: 输入长度=%d, 输出长度=%d, 修改数=%d (第%d次尝试)", len(paragraph), len(repairedText), len(changes), attempt+1)
+			return repairedText, changes
 		}
-		return mr.repairLocally(paragraph)
+
+		lastErr = err
+		// 不可重试错误（如 4xx 模型不存在）直接退出循环降级
+		if !isRetryableError(err) || attempt == maxRetries-1 {
+			break
+		}
+
+		delay := time.Duration(math.Pow(2, float64(attempt))) * baseDelay
+		log.Printf("[Ollama修复] 第%d次失败（可重试），等待%v后重试: 段落长度=%d, 错误=%v", attempt+1, delay, len(paragraph), err)
+		time.Sleep(delay)
 	}
 
-	repairedText = strings.TrimSpace(repairedText)
-	if repairedText == "" || repairedText == paragraph {
-		return paragraph, []preprocess.Change{}
+	log.Printf("[Ollama修复] %d次尝试全部失败，降级处理: 段落长度=%d, 最后错误=%v", maxRetries, len(paragraph), lastErr)
+	if mr.RepairModelType == "api" {
+		return mr.repairWithAPI(paragraph)
 	}
-	if !mr.validateRepair(paragraph, repairedText) {
-		return paragraph, []preprocess.Change{}
-	}
-
-	changes := mr.compareTexts(paragraph, repairedText)
-	log.Printf("[Ollama修复] 成功: 输入长度=%d, 输出长度=%d, 修改数=%d", len(paragraph), len(repairedText), len(changes))
-	return repairedText, changes
+	return mr.repairLocally(paragraph)
 }
 
 // repairWithAPI 使用外部API修复文本，带重试机制
@@ -433,6 +449,7 @@ func (mr *ModelRepairer) ReconstructParagraphs(content string) (string, error) {
 
 // ReconstructParagraphsWithCheckpoint 带断点保存的段落重组
 // fileMd5 用于断点恢复，checkpointFn 为进度回调（参数：已完成块数, 总块数）
+// chunk 间严格串行，避免本地模型并发推理触发 OOM
 func (mr *ModelRepairer) ReconstructParagraphsWithCheckpoint(content, fileMd5 string, checkpointFn func(done, total int)) (string, error) {
 	chunkSize := config.AppConfigInstance.ParagraphChunkSize
 	if chunkSize <= 0 {
@@ -442,28 +459,22 @@ func (mr *ModelRepairer) ReconstructParagraphsWithCheckpoint(content, fileMd5 st
 
 	chunks := mr.smartChunk(content, chunkSize, overlap)
 	totalChunks := len(chunks)
-	log.Printf("[段落重组] 分块完成: 总块数=%d, 分块大小=%d, 重叠=%d", totalChunks, chunkSize, overlap)
+	log.Printf("[段落重组] 分块完成: 总块数=%d, 分块大小=%d, 重叠=%d（统一使用远程 API）", totalChunks, chunkSize, overlap)
 
 	reconstructedChunks := make([]string, 0, totalChunks)
 
 	for i, chunk := range chunks {
 		log.Printf("[段落重组] 正在处理第 %d/%d 块 (长度=%d字符)", i+1, totalChunks, len([]rune(chunk)))
 
-		// 段落重组使用远程 API（避免本地模型加载导致 OOM）
-		resp, err := mr.api.GenerateChatCompletion(paragraphReconstructPrompt, chunk, 0, -1)
+		repaired, err := mr.reconstructChunk(chunk)
 		if err != nil {
-			// 保存当前进度
 			if len(reconstructedChunks) > 0 && fileMd5 != "" {
 				partial := mr.mergeChunks(reconstructedChunks, overlap)
 				log.Printf("[段落重组] 第%d块失败，已保存 %d/%d 块的部分结果（%d字符）", i+1, i, totalChunks, len([]rune(partial)))
 			}
-			return content, fmt.Errorf("第%d块LLM调用失败: %w", i+1, err)
-		}
-		if resp == nil || len(resp.Choices) == 0 {
-			return content, fmt.Errorf("第%d块LLM返回空结果", i+1)
+			return content, fmt.Errorf("第%d块处理失败: %w", i+1, err)
 		}
 
-		repaired := strings.TrimSpace(resp.Choices[0].Message.Content)
 		if repaired == "" {
 			repaired = chunk // 降级：使用原块
 		}
@@ -481,6 +492,19 @@ func (mr *ModelRepairer) ReconstructParagraphsWithCheckpoint(content, fileMd5 st
 		len([]rune(content)), len([]rune(result)))
 
 	return result, nil
+}
+
+// reconstructChunk 单块段落重组：直接调用远程 API
+// 本地模型推理段落重组（长上下文）容易 OOM，统一走远程 API；错别字修复仍由本地 LLM 处理
+func (mr *ModelRepairer) reconstructChunk(chunk string) (string, error) {
+	resp, err := mr.api.GenerateChatCompletion(paragraphReconstructPrompt, chunk, 0, -1)
+	if err != nil {
+		return "", fmt.Errorf("远程 API 调用失败: %w", err)
+	}
+	if resp == nil || len(resp.Choices) == 0 {
+		return "", fmt.Errorf("远程 API 返回空结果")
+	}
+	return strings.TrimSpace(resp.Choices[0].Message.Content), nil
 }
 
 // smartChunk 智能分块
