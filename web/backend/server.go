@@ -24,6 +24,7 @@ func NewServer() *gin.Engine {
 	}))
 
 	r.Static("/static", "./web/frontend/static")
+	r.StaticFile("/favicon.ico", "./web/frontend/static/favicon.svg")
 
 	r.GET("/", func(c *gin.Context) {
 		c.File("./web/frontend/index.html")
