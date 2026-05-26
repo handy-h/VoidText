@@ -477,7 +477,11 @@ func (api *API) GenerateEmbedding(texts []string) (*EmbeddingResponse, error) {
 		return api.generateEmbeddingBatches(texts, embeddingBatchSize)
 	}
 
+	// Ollama 的 embeddings 端点需要 /api 前缀
 	url := api.baseURL + "/embeddings"
+	if strings.Contains(api.baseURL, "11434") || strings.Contains(api.baseURL, "ollama") {
+		url = api.baseURL + "/api/embeddings"
+	}
 	startTime := time.Now()
 
 	req := EmbeddingRequest{

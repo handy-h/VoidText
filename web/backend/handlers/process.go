@@ -449,7 +449,7 @@ func GetProcessingReport(c *gin.Context) {
 
 	format := c.Query("format")
 	if format == "html" {
-		c.HTML(http.StatusOK, "", buildReportHTML(report))
+		c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(buildReportHTML(report)))
 		return
 	}
 
