@@ -70,3 +70,6 @@ voidtext
 .gitignore
 .gitignore
 code-text/code-context-mcp
+.codebuddy/mcp.json
+code-text/
+opencode.json
