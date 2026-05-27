@@ -58,12 +58,9 @@ func TestRepairParagraph_ShouldSkipShortParagraph(t *testing.T) {
 	initRepairerTestConfig()
 	mr := NewModelRepairer("local", "test-model")
 
-	result, changes := mr.RepairParagraph("短")
+	result := mr.RepairParagraph("短")
 	if result != "短" {
 		t.Errorf("RepairParagraph() should skip short paragraphs")
-	}
-	if len(changes) != 0 {
-		t.Errorf("RepairParagraph() should not produce changes for short paragraphs")
 	}
 }
 
@@ -150,35 +147,5 @@ func TestRepairText_ShouldReturnOriginalWhenDisabled(t *testing.T) {
 
 	if result.Content != content {
 		t.Errorf("RepairText() should return original when disabled")
-	}
-}
-
-func TestCompareTexts_ShouldDetectSingleCharDiff(t *testing.T) {
-	initRepairerTestConfig()
-	mr := NewModelRepairer("local", "test-model")
-
-	changes := mr.compareTexts("高兴及了", "高兴极了")
-	if len(changes) == 0 {
-		t.Errorf("compareTexts() should detect character difference")
-	}
-}
-
-func TestCompareTexts_ShouldReturnEmptyForSameText(t *testing.T) {
-	initRepairerTestConfig()
-	mr := NewModelRepairer("local", "test-model")
-
-	changes := mr.compareTexts("相同文本", "相同文本")
-	if len(changes) != 0 {
-		t.Errorf("compareTexts() should return empty for same text")
-	}
-}
-
-func TestCompareTexts_ShouldHandleLengthDifference(t *testing.T) {
-	initRepairerTestConfig()
-	mr := NewModelRepairer("local", "test-model")
-
-	changes := mr.compareTexts("短文本", "更长的文本")
-	if len(changes) == 0 {
-		t.Errorf("compareTexts() should detect length difference")
 	}
 }

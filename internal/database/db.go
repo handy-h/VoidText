@@ -96,19 +96,18 @@ func createTables() error {
 			step TEXT,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
-		`CREATE TABLE IF NOT EXISTS review_items (
+		`CREATE TABLE IF NOT EXISTS review_paragraphs (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			file_md5 TEXT NOT NULL,
-			original_text TEXT,
-			suggested_text TEXT,
-			modification_type TEXT,
-			confidence REAL,
-			position_start INTEGER,
-			position_end INTEGER,
+			paragraph_index INTEGER NOT NULL,
+			original_text TEXT NOT NULL,
+			suggested_text TEXT NOT NULL,
+			modification_type TEXT NOT NULL,
 			status TEXT NOT NULL DEFAULT 'pending',
-			edited_text TEXT,
+			edited_text TEXT NOT NULL DEFAULT '',
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			resolved_at TIMESTAMP
+			resolved_at TIMESTAMP,
+			UNIQUE(file_md5, paragraph_index)
 		)`,
 		`CREATE TABLE IF NOT EXISTS processing_logs (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -170,8 +169,8 @@ func createTables() error {
 		`CREATE INDEX IF NOT EXISTS idx_files_status ON files(status)`,
 		`CREATE INDEX IF NOT EXISTS idx_versions_version_md5 ON versions(version_md5)`,
 		`CREATE INDEX IF NOT EXISTS idx_versions_original_md5 ON versions(original_md5)`,
-		`CREATE INDEX IF NOT EXISTS idx_review_items_file_md5 ON review_items(file_md5)`,
-		`CREATE INDEX IF NOT EXISTS idx_review_items_status ON review_items(file_md5, status)`,
+		`CREATE INDEX IF NOT EXISTS idx_review_paragraphs_file_md5 ON review_paragraphs(file_md5)`,
+		`CREATE INDEX IF NOT EXISTS idx_review_paragraphs_status ON review_paragraphs(file_md5, status)`,
 		`CREATE INDEX IF NOT EXISTS idx_processing_logs_file_md5 ON processing_logs(file_md5)`,
 		`CREATE INDEX IF NOT EXISTS idx_chunk_cache_file_md5 ON chunk_repair_cache(file_md5)`,
 		`CREATE INDEX IF NOT EXISTS idx_retry_queue_file_md5 ON retry_queue(file_md5)`,

@@ -164,8 +164,8 @@ func UpdateFileStatusWithLog(fileMd5, status, currentStep string, progress int, 
 // DeleteFileWithRelatedData 删除文件及相关数据（原子操作）
 func DeleteFileWithRelatedData(fileMd5 string) error {
   return WithTransactionSimple(func(tx Transaction) error {
-    // 删除审核项
-    _, err := tx.Exec("DELETE FROM review_items WHERE file_md5 = ?", fileMd5)
+    // 删除段级审核记录
+    _, err := tx.Exec("DELETE FROM review_paragraphs WHERE file_md5 = ?", fileMd5)
     if err != nil {
       return fmt.Errorf("删除审核项失败: %w", err)
     }

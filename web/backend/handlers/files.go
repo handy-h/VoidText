@@ -308,8 +308,8 @@ func ResumeFile(c *gin.Context) {
 				return fmt.Errorf("重置文件状态失败: %w", err)
 			}
 			
-			// 删除审核项
-			_, err = tx.Exec("DELETE FROM review_items WHERE file_md5 = ?", md5)
+			// 删除段级审核记录
+			_, err = tx.Exec("DELETE FROM review_paragraphs WHERE file_md5 = ?", md5)
 			if err != nil {
 				return fmt.Errorf("清除审核记录失败: %w", err)
 			}

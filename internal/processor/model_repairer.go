@@ -70,15 +70,13 @@ func (mr *ModelRepairer) RepairText(content string) ModelRepairResult {
 	repairedParagraphs := []string{}
 
 	for _, paragraph := range paragraphs {
-		repaired, changes := mr.RepairParagraph(paragraph)
+		repaired := mr.RepairParagraph(paragraph)
 		repairedParagraphs = append(repairedParagraphs, repaired)
-		result.Changes = append(result.Changes, changes...)
 	}
 
 	// 重新组合文本
 	result.Content = strings.Join(repairedParagraphs, "\n")
 	result.Stats["paragraphs_repaired"] = len(paragraphs)
-	result.Stats["total_changes"] = len(result.Changes)
 
 	return result
 }
@@ -101,9 +99,9 @@ func (mr *ModelRepairer) SplitIntoParagraphs(content string) []string {
 }
 
 // RepairParagraph 修复单个段落
-func (mr *ModelRepairer) RepairParagraph(paragraph string) (string, []preprocess.Change) {
+func (mr *ModelRepairer) RepairParagraph(paragraph string) string {
 	if len(paragraph) < 10 {
-		return paragraph, []preprocess.Change{}
+		return paragraph
 	}
 
 	// 本地 Ollama 优先（若已配置且当前健康）
@@ -116,13 +114,14 @@ func (mr *ModelRepairer) RepairParagraph(paragraph string) (string, []preprocess
 		return mr.repairWithAPI(paragraph)
 	}
 
-	return mr.repairLocally(paragraph)
+	repaired, _ := mr.repairLocally(paragraph)
+	return repaired
 }
 
 // repairWithOllama 使用本地 Ollama 模型修复文本
 // 重试 3 次仍失败（可重试错误指数退避）才降级到远程 API 或本地字典
-func (mr *ModelRepairer) repairWithOllama(paragraph string) (string, []preprocess.Change) {
-	systemPrompt := "你是一个专业的中文小说校对编辑。请修正以下段落中的错别字和语法错误，保持原文风格不变。只输出修正后的文本，无需解释。"
+func (mr *ModelRepairer) repairWithOllama(paragraph string) string {
+	systemPrompt := "你是一个专业的中文小说校对编辑。请修正以下段落中的错别字和语法错误，保持原文风格不变。严格保持段落开头和结尾的标点符号位置不变——不要在段首添加原文没有的标点，不要把段尾的标点挪到段首。只输出修正后的文本，无需解释。"
 	userPrompt := "输入：她高兴及了，跑过去抱住他。\n输出：她高兴极了，跑过去抱住他。\n\n当前任务：\n输入：" + paragraph + "\n输出："
 
 	maxRetries := 3
@@ -134,14 +133,13 @@ func (mr *ModelRepairer) repairWithOllama(paragraph string) (string, []preproces
 		if err == nil {
 			repairedText = strings.TrimSpace(repairedText)
 			if repairedText == "" || repairedText == paragraph {
-				return paragraph, []preprocess.Change{}
+				return paragraph
 			}
 			if !mr.validateRepair(paragraph, repairedText) {
-				return paragraph, []preprocess.Change{}
+				return paragraph
 			}
-			changes := mr.compareTexts(paragraph, repairedText)
-			log.Printf("[Ollama修复] 成功: 输入长度=%d, 输出长度=%d, 修改数=%d (第%d次尝试)", len(paragraph), len(repairedText), len(changes), attempt+1)
-			return repairedText, changes
+			log.Printf("[Ollama修复] 成功: 输入长度=%d, 输出长度=%d (第%d次尝试)", len(paragraph), len(repairedText), attempt+1)
+			return repairedText
 		}
 
 		lastErr = err
@@ -159,12 +157,13 @@ func (mr *ModelRepairer) repairWithOllama(paragraph string) (string, []preproces
 	if mr.RepairModelType == "api" {
 		return mr.repairWithAPI(paragraph)
 	}
-	return mr.repairLocally(paragraph)
+	repaired, _ := mr.repairLocally(paragraph)
+	return repaired
 }
 
 // repairWithAPI 使用外部API修复文本，带重试机制
-func (mr *ModelRepairer) repairWithAPI(paragraph string) (string, []preprocess.Change) {
-	systemPrompt := "你是一个专业的中文小说校对编辑。请修正以下段落中的错别字和语法错误，保持原文风格不变。只输出修正后的文本，无需解释。"
+func (mr *ModelRepairer) repairWithAPI(paragraph string) string {
+	systemPrompt := "你是一个专业的中文小说校对编辑。请修正以下段落中的错别字和语法错误，保持原文风格不变。严格保持段落开头和结尾的标点符号位置不变——不要在段首添加原文没有的标点，不要把段尾的标点挪到段首。只输出修正后的文本，无需解释。"
 	userPrompt := "输入：她高兴及了，跑过去抱住他。\n输出：她高兴极了，跑过去抱住他。\n\n当前任务：\n输入：" + paragraph + "\n输出："
 
 	maxRetries := 3
@@ -177,26 +176,26 @@ func (mr *ModelRepairer) repairWithAPI(paragraph string) (string, []preprocess.C
 			// 虚假的"删除"建议；此处回退原文，不生成 change
 			if resp.Choices[0].FinishReason == "length" {
 				log.Printf("[LLM修复] 响应被 max_tokens 截断，回退原文: 段落长度=%d", len(paragraph))
-				return paragraph, []preprocess.Change{}
+				return paragraph
 			}
 
 			// 成功响应
 			repairedText := strings.TrimSpace(resp.Choices[0].Message.Content)
 			if repairedText == "" || repairedText == paragraph {
-				return paragraph, []preprocess.Change{}
+				return paragraph
 			}
 			if !mr.validateRepair(paragraph, repairedText) {
-				return paragraph, []preprocess.Change{}
+				return paragraph
 			}
-			changes := mr.compareTexts(paragraph, repairedText)
-			log.Printf("[LLM修复] 成功: 输入长度=%d, 输出长度=%d, 修改数=%d (第%d次尝试)", len(paragraph), len(repairedText), len(changes), attempt+1)
-			return repairedText, changes
+			log.Printf("[LLM修复] 成功: 输入长度=%d, 输出长度=%d (第%d次尝试)", len(paragraph), len(repairedText), attempt+1)
+			return repairedText
 		}
 
 		// 判断错误是否可重试
 		if !isRetryableError(err) || attempt == maxRetries-1 {
 			log.Printf("[LLM修复] API调用失败，回退到本地修复: 段落长度=%d, 错误=%v, 尝试=%d", len(paragraph), err, attempt+1)
-			return mr.repairLocally(paragraph)
+			repaired, _ := mr.repairLocally(paragraph)
+			return repaired
 		}
 
 		// 指数退避
@@ -207,7 +206,8 @@ func (mr *ModelRepairer) repairWithAPI(paragraph string) (string, []preprocess.C
 
 	// 所有重试均失败，回退本地修复
 	log.Printf("[LLM修复] %d次重试全部失败，回退到本地修复: 段落长度=%d", maxRetries, len(paragraph))
-	return mr.repairLocally(paragraph)
+	repaired, _ := mr.repairLocally(paragraph)
+	return repaired
 }
 
 // isRetryableError 判断API错误是否可重试
@@ -264,111 +264,6 @@ func (mr *ModelRepairer) repairLocally(paragraph string) (string, []preprocess.C
 	}
 
 	return repaired, changes
-}
-
-// compareTexts 比较两个文本，生成变更记录
-func (mr *ModelRepairer) compareTexts(original, repaired string) []preprocess.Change {
-	changes := []preprocess.Change{}
-
-	if original == repaired {
-		return changes
-	}
-
-	origRunes := []rune(original)
-	repRunes := []rune(repaired)
-
-	if len(origRunes) == len(repRunes) {
-		byteOffset := 0
-		for i := 0; i < len(origRunes); i++ {
-			if origRunes[i] != repRunes[i] {
-				origStr := string(origRunes[i])
-				repStr := string(repRunes[i])
-
-				j := i + 1
-				for j < len(origRunes) && origRunes[j] != repRunes[j] {
-					origStr += string(origRunes[j])
-					repStr += string(repRunes[j])
-					j++
-				}
-
-				changes = append(changes, preprocess.Change{
-					Type:        "character_correction",
-					Original:    origStr,
-					Replacement: repStr,
-					Position:    byteOffset,
-				})
-				i = j - 1
-			}
-			byteOffset += len(string(origRunes[i]))
-		}
-	} else {
-		minLen := len(origRunes)
-		if len(repRunes) < minLen {
-			minLen = len(repRunes)
-		}
-
-		byteOffset := 0
-		i := 0
-		for i < minLen {
-			if origRunes[i] != repRunes[i] {
-				origChunk := string(origRunes[i])
-				repChunk := string(repRunes[i])
-
-				j := i + 1
-				oob := j < len(origRunes)
-				rob := j < len(repRunes)
-				for oob && rob && origRunes[j] != repRunes[j] {
-					origChunk += string(origRunes[j])
-					repChunk += string(repRunes[j])
-					j++
-					oob = j < len(origRunes)
-					rob = j < len(repRunes)
-				}
-
-				changes = append(changes, preprocess.Change{
-					Type:        "character_correction",
-					Original:    origChunk,
-					Replacement: repChunk,
-					Position:    byteOffset,
-				})
-				byteOffset += len(string(origRunes[i]))
-				i = j
-			} else {
-				byteOffset += len(string(origRunes[i]))
-				i++
-			}
-		}
-
-		if len(origRunes) > minLen {
-			remaining := ""
-			for k := minLen; k < len(origRunes); k++ {
-				remaining += string(origRunes[k])
-			}
-			if remaining != "" {
-				changes = append(changes, preprocess.Change{
-					Type:        "text_deletion",
-					Original:    remaining,
-					Replacement: "",
-					Position:    byteOffset,
-				})
-			}
-		} else if len(repRunes) > minLen {
-			remaining := ""
-			for k := minLen; k < len(repRunes); k++ {
-				remaining += string(repRunes[k])
-			}
-			if remaining != "" {
-				changes = append(changes, preprocess.Change{
-					Type:        "text_insertion",
-					Original:    "",
-					Replacement: remaining,
-					Position:    byteOffset,
-				})
-			}
-		}
-	}
-
-	return changes
 }
 
 // paragraphReconstructPrompt 段落重组系统提示词（通用版，不包含任何特定书目例子）
@@ -673,10 +568,21 @@ func (mr *ModelRepairer) findMergePoint(curr, prev []rune) int {
 // 如果修复结果与原始文本差异过大，返回 false 表示拒绝该修复
 // 这可以防止LLM产生不合理的输出（如"他是。"→"他是是"）被误接受
 func (mr *ModelRepairer) validateRepair(original, repaired string) bool {
-	origLen := len([]rune(original))
-	repLen := len([]rune(repaired))
+	origRunes := []rune(original)
+	repRunes := []rune(repaired)
+	origLen := len(origRunes)
+	repLen := len(repRunes)
 
 	if origLen == 0 || repLen == 0 {
+		return false
+	}
+
+	// 标点搬家检测：LLM 常见幻觉是把段尾标点挪到段首
+	// 命中条件：原文末尾的句尾标点 == 修复结果开头的句尾标点，且原文开头不是该标点
+	if isSentenceEndPunct(repRunes[0]) &&
+		repRunes[0] == origRunes[origLen-1] &&
+		origRunes[0] != repRunes[0] {
+		log.Printf("[修复校验] 拒绝修复（标点搬家：段尾→段首）: 标点='%s'", string(repRunes[0]))
 		return false
 	}
 
@@ -699,8 +605,6 @@ func (mr *ModelRepairer) validateRepair(original, repaired string) bool {
 	// 编辑距离校验：仅对短段落（≤ 500 字符）计算编辑距离
 	// 长段落的内存和时间开销过大，只用长度差判断
 	if origLen <= 500 && repLen <= 500 {
-		origRunes := []rune(original)
-		repRunes := []rune(repaired)
 		editDist := levenshteinDistanceRunes(origRunes, repRunes)
 		if float64(editDist)/maxLen > 0.25 {
 			log.Printf("[修复校验] 拒绝修复（编辑距离过大）: 原文=%d字符 编辑距离=%d 比例=%.2f",
@@ -747,6 +651,15 @@ func levenshteinDistanceRunes(a, b []rune) int {
 	}
 
 	return prev[m]
+}
+
+// isSentenceEndPunct 是否为中文句尾标点（含逗号、分号等会被 LLM 跨段挪动的标点）
+func isSentenceEndPunct(r rune) bool {
+	switch r {
+	case '。', '！', '？', '，', '；', '：', '、':
+		return true
+	}
+	return false
 }
 
 // abs 返回整数的绝对值

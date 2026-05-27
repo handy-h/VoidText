@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -182,7 +181,7 @@ func GetFileStatus(c *gin.Context) {
 	}
 
 	if record.Status == "reviewing" || record.Status == "processing" || record.CurrentStep == "review" {
-		total, resolved, _ := database.GetReviewProgress(fileMd5)
+		total, resolved, _ := database.GetReviewParagraphProgress(fileMd5)
 		response["reviewTotal"] = total
 		response["reviewResolved"] = resolved
 	}
@@ -190,7 +189,7 @@ func GetFileStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
-// GetReviewItems 获取审核项
+// GetReviewItems 获取段级审核记录与基线全文
 func GetReviewItems(c *gin.Context) {
 	fileMd5 := c.Param("md5")
 	statusFilter := c.Query("status")
@@ -201,7 +200,7 @@ func GetReviewItems(c *gin.Context) {
 		return
 	}
 
-	// 审核阶段使用审核基线的文件内容来解析行号上下文
+	// 审核阶段使用审核基线作为全文展示底
 	filePath := record.FilePath
 	if record.Status == "reviewing" && record.ReviewBaselinePath != "" {
 		filePath = record.ReviewBaselinePath
@@ -213,37 +212,30 @@ func GetReviewItems(c *gin.Context) {
 		return
 	}
 
-	items, err := database.GetReviewItemsByFileMd5(fileMd5, statusFilter)
+	records, err := database.GetReviewParagraphsByFileMd5(fileMd5, statusFilter)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "查询审核项失败"})
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "查询段级审核记录失败"})
 		return
 	}
 
-	// 全文按行切分一次，循环复用，避免每个审核项都重复 Split
-	contentStr := string(content)
-	lines := strings.Split(contentStr, "\n")
-
-	suggestions := make([]map[string]interface{}, 0, len(items))
-	for _, item := range items {
-		lineNum, fullLine, prevLine, nextLine := getLineContext(contentStr, lines, item.PositionStart, item.OriginalText)
-
-		suggestions = append(suggestions, map[string]interface{}{
-			"id":         item.ID,
-			"type":       item.ModificationType,
-			"original":   item.OriginalText,
-			"suggested":  item.SuggestedText,
-			"position":   item.PositionStart,
-			"status":     item.Status,
-			"confidence": item.Confidence,
-			"editedText": item.EditedText,
-			"lineNum":    lineNum,
-			"fullLine":   fullLine,
-			"prevLine":   prevLine,
-			"nextLine":   nextLine,
+	paragraphs := make([]map[string]interface{}, 0, len(records))
+	for _, r := range records {
+		paragraphs = append(paragraphs, map[string]interface{}{
+			"id":             r.ID,
+			"paragraphIndex": r.ParagraphIndex,
+			"original":       r.OriginalText,
+			"suggested":      r.SuggestedText,
+			"type":           r.ModificationType,
+			"status":         r.Status,
+			"editedText":     r.EditedText,
 		})
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": true, "suggestions": suggestions})
+	c.JSON(http.StatusOK, gin.H{
+		"success":         true,
+		"baselineContent": string(content),
+		"paragraphs":      paragraphs,
+	})
 }
 
 // ApproveReviewItem 批准审核项
@@ -259,7 +251,7 @@ func ApproveReviewItem(c *gin.Context) {
 		return
 	}
 
-	if err := database.UpdateReviewItemStatus(req.ItemId, "approved", ""); err != nil {
+	if err := database.UpdateReviewParagraphStatus(req.ItemId, "approved", ""); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "更新审核状态失败"})
 		return
 	}
@@ -281,7 +273,7 @@ func RejectReviewItem(c *gin.Context) {
 		return
 	}
 
-	if err := database.UpdateReviewItemStatus(req.ItemId, "rejected", ""); err != nil {
+	if err := database.UpdateReviewParagraphStatus(req.ItemId, "rejected", ""); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "更新审核状态失败"})
 		return
 	}
@@ -304,7 +296,7 @@ func EditReviewItem(c *gin.Context) {
 		return
 	}
 
-	if err := database.UpdateReviewItemStatus(req.ItemId, "edited", req.EditedText); err != nil {
+	if err := database.UpdateReviewParagraphStatus(req.ItemId, "edited", req.EditedText); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "更新审核状态失败"})
 		return
 	}
@@ -326,7 +318,7 @@ func RestoreReviewItem(c *gin.Context) {
 		return
 	}
 
-	if err := database.UpdateReviewItemStatus(req.ItemId, "pending", ""); err != nil {
+	if err := database.UpdateReviewParagraphStatus(req.ItemId, "pending", ""); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "恢复失败"})
 		return
 	}
@@ -335,48 +327,30 @@ func RestoreReviewItem(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "建议已恢复为待审核"})
 }
 
-// BatchApproveReviewItems 批量批准审核项
+// BatchApproveReviewItems 批量批准当前文件所有 pending 段
 func BatchApproveReviewItems(c *gin.Context) {
 	fileMd5 := c.Param("md5")
 
-	var req struct {
-		ItemIds []int64 `json:"itemIds"`
-	}
-
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "无效的请求参数"})
-		return
-	}
-
-	if err := database.BatchUpdateReviewItemStatus(req.ItemIds, "approved"); err != nil {
+	if err := database.BatchUpdateReviewParagraphStatus(fileMd5, "approved"); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "批量批准失败"})
 		return
 	}
 
 	updateReviewProgress(fileMd5)
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": fmt.Sprintf("成功批准 %d 条建议", len(req.ItemIds))})
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "已批准全部待审段落"})
 }
 
-// BatchRejectReviewItems 批量拒绝审核项
+// BatchRejectReviewItems 批量拒绝当前文件所有 pending 段
 func BatchRejectReviewItems(c *gin.Context) {
 	fileMd5 := c.Param("md5")
 
-	var req struct {
-		ItemIds []int64 `json:"itemIds"`
-	}
-
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "无效的请求参数"})
-		return
-	}
-
-	if err := database.BatchUpdateReviewItemStatus(req.ItemIds, "rejected"); err != nil {
+	if err := database.BatchUpdateReviewParagraphStatus(fileMd5, "rejected"); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "批量拒绝失败"})
 		return
 	}
 
 	updateReviewProgress(fileMd5)
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": fmt.Sprintf("成功拒绝 %d 条建议", len(req.ItemIds))})
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "已拒绝全部待审段落"})
 }
 
 // FinalizeFile 完成审核并生成最终文件
@@ -421,7 +395,7 @@ func GetProcessingReport(c *gin.Context) {
 		return
 	}
 
-	total, resolved, _ := database.GetReviewProgress(fileMd5)
+	total, resolved, _ := database.GetReviewParagraphProgress(fileMd5)
 
 	versions, _ := database.GetVersionsByOriginalMd5(fileMd5)
 
@@ -458,108 +432,12 @@ func GetProcessingReport(c *gin.Context) {
 
 // updateReviewProgress 更新审核进度
 func updateReviewProgress(fileMd5 string) {
-	total, resolved, _ := database.GetReviewProgress(fileMd5)
+	total, resolved, _ := database.GetReviewParagraphProgress(fileMd5)
 	if total > 0 {
 		stepProgress := resolved * 100 / total
 		progress := processor.CalculateProgress(processor.StepReview, stepProgress)
 		database.UpdateFileStatus(fileMd5, "reviewing", processor.StepReview, progress, "")
 	}
-}
-
-// getLineContext 获取指定位置的行号和上下文
-// getLineContext 获取指定位置的行号和上下文
-// lines 由调用方预先切分并复用，避免在大文件场景下每个审核项都重复 strings.Split
-func getLineContext(content string, lines []string, position int, original string) (lineNum int, fullLine, prevLine, nextLine string) {
-	if position >= 0 && position <= len(content) {
-		currentPos := 0
-		for i, line := range lines {
-			lineEnd := currentPos + len(line)
-			if currentPos <= position && position <= lineEnd {
-				lineNum = i + 1
-				fullLine = line
-				if i > 0 {
-					prevLine = lines[i-1]
-				}
-				if i < len(lines)-1 {
-					nextLine = lines[i+1]
-				}
-				return lineNum, fullLine, prevLine, nextLine
-			}
-			currentPos = lineEnd + 1
-		}
-	}
-
-	if original != "" {
-		for i, line := range lines {
-			if strings.Contains(line, original) {
-				lineNum = i + 1
-				fullLine = line
-				if i > 0 {
-					prevLine = lines[i-1]
-				}
-				if i < len(lines)-1 {
-					nextLine = lines[i+1]
-				}
-				return lineNum, fullLine, prevLine, nextLine
-			}
-		}
-
-		trimmedOriginal := strings.TrimSpace(original)
-		for i, line := range lines {
-			if strings.Contains(strings.TrimSpace(line), trimmedOriginal) {
-				lineNum = i + 1
-				fullLine = line
-				if i > 0 {
-					prevLine = lines[i-1]
-				}
-				if i < len(lines)-1 {
-					nextLine = lines[i+1]
-				}
-				return lineNum, fullLine, prevLine, nextLine
-			}
-		}
-
-		if len(original) > 10 {
-			substr := original[:len(original)/2]
-			for i, line := range lines {
-				if strings.Contains(line, substr) {
-					lineNum = i + 1
-					fullLine = line
-					if i > 0 {
-						prevLine = lines[i-1]
-					}
-					if i < len(lines)-1 {
-						nextLine = lines[i+1]
-					}
-					return lineNum, fullLine, prevLine, nextLine
-				}
-			}
-		}
-	}
-
-	if position > 0 {
-		estimatedLine := 0
-		currentPos := 0
-		for i, line := range lines {
-			currentPos += len(line) + 1
-			if currentPos >= position {
-				estimatedLine = i
-				break
-			}
-		}
-		if estimatedLine < len(lines) {
-			lineNum = estimatedLine + 1
-			fullLine = lines[estimatedLine]
-			if estimatedLine > 0 {
-				prevLine = lines[estimatedLine-1]
-			}
-			if estimatedLine < len(lines)-1 {
-				nextLine = lines[estimatedLine+1]
-			}
-		}
-	}
-
-	return lineNum, fullLine, prevLine, nextLine
 }
 
 // buildReportHTML 构建HTML格式报告

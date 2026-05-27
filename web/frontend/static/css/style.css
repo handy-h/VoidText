@@ -2740,3 +2740,71 @@ section h2::after {
   font-style: normal;
   display: inline;
 }
+
+/* ===== 段级审核：每段一行，左原右改 ===== */
+.review-row {
+  display: grid;
+  grid-template-columns: 56px 1fr auto;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-color, #e5e5e5);
+  align-items: flex-start;
+  font-size: var(--review-font-size, 13px);
+  line-height: 1.6;
+}
+.review-row.selected {
+  background: var(--row-selected-bg, rgba(80, 130, 200, 0.08));
+}
+.review-row-meta {
+  color: var(--text-muted, #888);
+  font-family: monospace;
+  font-size: 12px;
+  padding-top: 2px;
+}
+.review-row-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.review-cell {
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 6px 8px;
+  border-radius: 4px;
+}
+.review-cell-original {
+  background: var(--cell-original-bg, rgba(220, 80, 80, 0.05));
+}
+.review-cell-suggested {
+  background: var(--cell-suggested-bg, rgba(80, 180, 80, 0.05));
+}
+.review-cell.is-duplicate {
+  font-style: italic;
+  color: var(--text-muted, #888);
+}
+.review-cell-edited {
+  grid-column: 1 / -1;
+  background: var(--cell-edited-bg, rgba(120, 120, 200, 0.08));
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 0.95em;
+}
+.review-row-actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.review-row-actions .status-tag {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  background: var(--tag-bg, rgba(0,0,0,0.06));
+}
+.review-row-actions .status-approved { color: #2c8a3a; }
+.review-row-actions .status-rejected { color: #b94a4a; }
+.review-row-actions .status-edited { color: #5a4ab9; }
+.review-empty {
+  padding: 40px;
+  text-align: center;
+  color: var(--text-muted, #888);
+}
