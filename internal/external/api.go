@@ -171,10 +171,11 @@ func containsAny(s string, substrs []string) bool {
 // API 外部API客户端（重构版）
 type API struct {
 	client                *http.Client
-	baseURL               string
-	apiKey                string
+	endpoints             []config.ModelEndpoint // 多模型端点列表（用于 chat completion 切换）
+	baseURL               string                 // 保留向后兼容（embedding / legacy completion）
+	apiKey                string                 // 保留向后兼容
 	embeddingModelName    string
-	completionModelName   string
+	completionModelName   string // 默认模型名（向后兼容）
 	completionTemperature float64
 	completionMaxTokens   int
 	retryConfig           *RetryConfig
@@ -186,6 +187,7 @@ type API struct {
 func NewAPI() *API {
 	return &API{
 		client:                getGlobalHTTPClient(),
+		endpoints:             config.AppConfigInstance.ModelEndpoints,
 		baseURL:               config.AppConfigInstance.LLMApiURL,
 		apiKey:                config.AppConfigInstance.LLMApiKey,
 		embeddingModelName:    config.AppConfigInstance.VectorModelName,
@@ -432,8 +434,13 @@ func (api *API) doRequestWithRetry(req *http.Request) (*http.Response, error) {
 	return nil, lastErr
 }
 
-// doJSONRequestWithRetry 执行JSON请求并自动重试（高级封装）
+// doJSONRequestWithRetry 执行JSON请求并自动重试（高级封装，使用 API 实例的 apiKey）
 func (api *API) doJSONRequestWithRetry(url string, requestData interface{}) (*http.Response, error) {
+	return api.doJSONRequestWithRetryKeyed(url, requestData, api.apiKey)
+}
+
+// doJSONRequestWithRetryKeyed 执行JSON请求并自动重试（支持指定 API 密钥，用于多端点切换）
+func (api *API) doJSONRequestWithRetryKeyed(url string, requestData interface{}, apiKey string) (*http.Response, error) {
 	data, err := json.Marshal(requestData)
 	if err != nil {
 		return nil, fmt.Errorf("序列化请求数据失败: %w", err)
@@ -445,7 +452,7 @@ func (api *API) doJSONRequestWithRetry(url string, requestData interface{}) (*ht
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+api.apiKey)
+	req.Header.Set("Authorization", "Bearer "+apiKey)
 
 	return api.doRequestWithRetry(req)
 }
@@ -649,10 +656,21 @@ func (api *API) GenerateCompletion(prompt string, maxTokens int, temperature flo
 	return &completionResp, nil
 }
 
-// GenerateChatCompletion 生成聊天完成（Chat API，推荐，带重试机制）
+// GenerateChatCompletion 生成聊天完成（Chat API，支持多端点自动切换）
+// 按端点列表顺序依次尝试，每个端点内部自带 HTTP 级重试；
+// 一个端点完全失败后自动切换到下一个，直到成功或所有端点均失败。
 func (api *API) GenerateChatCompletion(systemPrompt, userPrompt string, maxTokens int, temperature float64) (*ChatCompletionResponse, error) {
-	if api.baseURL == "" || api.apiKey == "" {
-		return nil, fmt.Errorf("API未配置")
+	// 兼容旧逻辑：如果多端点列表为空，回退到单端点模式
+	endpointList := api.endpoints
+	if len(endpointList) == 0 {
+		if api.baseURL == "" || api.apiKey == "" {
+			return nil, fmt.Errorf("API未配置：请设置 LLM_API_URL 和 LLM_API_KEY")
+		}
+		endpointList = []config.ModelEndpoint{{
+			URL:       api.baseURL,
+			APIKey:    api.apiKey,
+			ModelName: api.completionModelName,
+		}}
 	}
 
 	if maxTokens <= 0 {
@@ -662,81 +680,131 @@ func (api *API) GenerateChatCompletion(systemPrompt, userPrompt string, maxToken
 		temperature = api.completionTemperature
 	}
 
-	url := api.baseURL + "/chat/completions"
-	startTime := time.Now()
-
 	messages := []ChatMessage{}
 	if systemPrompt != "" {
 		messages = append(messages, ChatMessage{Role: "system", Content: systemPrompt})
 	}
 	messages = append(messages, ChatMessage{Role: "user", Content: userPrompt})
 
-	req := ChatCompletionRequest{
-		Model:       api.completionModelName,
-		Messages:    messages,
-		MaxTokens:   maxTokens,
-		Temperature: temperature,
-	}
+	var lastErr error
+	totalEndpoints := len(endpointList)
 
-	resp, err := api.doJSONRequestWithRetry(url, req)
-	if err != nil {
-		logging.Error("chat_completion_api_failed", nil, map[string]interface{}{
-			"url":         url,
-			"model":       api.completionModelName,
-			"input_len":   len(userPrompt),
-			"duration":    time.Since(startTime).Milliseconds(),
-			"error":       err.Error(),
-			"retry_count": 0,
-		})
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		var apiErrResp APIErrorResponse
-		json.NewDecoder(resp.Body).Decode(&apiErrResp)
-		err := &APIError{
-			StatusCode: resp.StatusCode,
-			Message:    apiErrResp.Error.Message,
+	for idx, endpoint := range endpointList {
+		if endpoint.URL == "" || endpoint.APIKey == "" {
+			continue
 		}
 
-		// 记录API拒绝错误（用于Evolver分析）
-		if resp.StatusCode == 400 || resp.StatusCode == 429 {
-			logging.APIRefusal(0, "v1", userPrompt[:min(100, len(userPrompt))], apiErrResp.Error.Message)
+		url := endpoint.URL + "/chat/completions"
+		startTime := time.Now()
+		endpointNum := idx + 1
+
+		req := ChatCompletionRequest{
+			Model:       endpoint.ModelName,
+			Messages:    messages,
+			MaxTokens:   maxTokens,
+			Temperature: temperature,
 		}
 
-		logging.Error("chat_completion_api_error", nil, map[string]interface{}{
-			"url":        url,
-			"model":      api.completionModelName,
-			"status":     resp.StatusCode,
-			"duration":   time.Since(startTime).Milliseconds(),
-			"error":      apiErrResp.Error.Message,
-			"error_type": "api_error",
+		resp, err := api.doJSONRequestWithRetryKeyed(url, req, endpoint.APIKey)
+		if err != nil {
+			// HTTP 级重试已用尽，记录并尝试下一个端点
+			logging.Error("chat_completion_api_failed", nil, map[string]interface{}{
+				"url":          url,
+				"model":        endpoint.ModelName,
+				"endpoint_num": endpointNum,
+				"input_len":    len(userPrompt),
+				"duration":     time.Since(startTime).Milliseconds(),
+				"error":        err.Error(),
+			})
+			lastErr = err
+			api.tryFallback(idx, totalEndpoints, endpointNum, err.Error())
+			continue
+		}
+
+		// resp 非 nil 说明 HTTP 200，解析响应
+		if resp.StatusCode != http.StatusOK {
+			var apiErrResp APIErrorResponse
+			json.NewDecoder(resp.Body).Decode(&apiErrResp)
+			resp.Body.Close()
+
+			err := &APIError{
+				StatusCode: resp.StatusCode,
+				Message:    apiErrResp.Error.Message,
+			}
+
+			// 记录API拒绝错误（用于Evolver分析）
+			if resp.StatusCode == 400 || resp.StatusCode == 429 {
+				logging.APIRefusal(0, "v1", userPrompt[:min(100, len(userPrompt))], apiErrResp.Error.Message)
+			}
+
+			logging.Error("chat_completion_api_error_status", nil, map[string]interface{}{
+				"url":          url,
+				"model":        endpoint.ModelName,
+				"endpoint_num": endpointNum,
+				"status":       resp.StatusCode,
+				"duration":     time.Since(startTime).Milliseconds(),
+				"error":        apiErrResp.Error.Message,
+			})
+			lastErr = err
+			api.tryFallback(idx, totalEndpoints, endpointNum, fmt.Sprintf("状态码 %d: %s", resp.StatusCode, apiErrResp.Error.Message))
+			continue
+		}
+
+		var chatResp ChatCompletionResponse
+		decodeErr := json.NewDecoder(resp.Body).Decode(&chatResp)
+		resp.Body.Close()
+
+		if decodeErr != nil {
+			logging.Error("chat_completion_decode_failed", nil, map[string]interface{}{
+				"url":          url,
+				"model":        endpoint.ModelName,
+				"endpoint_num": endpointNum,
+				"duration":     time.Since(startTime).Milliseconds(),
+				"error":        decodeErr.Error(),
+			})
+			lastErr = fmt.Errorf("解析响应失败: %w", decodeErr)
+			api.tryFallback(idx, totalEndpoints, endpointNum, decodeErr.Error())
+			continue
+		}
+
+		// 响应为空或无效
+		if len(chatResp.Choices) == 0 {
+			logging.Warn("chat_completion_empty_choices", map[string]interface{}{
+				"url":          url,
+				"model":        endpoint.ModelName,
+				"endpoint_num": endpointNum,
+				"duration":     time.Since(startTime).Milliseconds(),
+			})
+			lastErr = fmt.Errorf("模型 %s 返回空结果", endpoint.ModelName)
+			api.tryFallback(idx, totalEndpoints, endpointNum, "空结果")
+			continue
+		}
+
+		logging.Info("chat_completion_api_success", map[string]interface{}{
+			"url":          url,
+			"model":        endpoint.ModelName,
+			"endpoint_num": endpointNum,
+			"input_len":    len(userPrompt),
+			"output_len":   len(chatResp.Choices[0].Message.Content),
+			"tokens":       chatResp.Usage.TotalTokens,
+			"duration":     time.Since(startTime).Milliseconds(),
 		})
-		return nil, err
+
+		return &chatResp, nil
 	}
 
-	var chatResp ChatCompletionResponse
-	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
-		logging.Error("chat_completion_decode_failed", nil, map[string]interface{}{
-			"url":      url,
-			"model":    api.completionModelName,
-			"duration": time.Since(startTime).Milliseconds(),
-			"error":    err.Error(),
+	return nil, fmt.Errorf("所有%d个模型端点均已尝试失败，最后错误: %w", totalEndpoints, lastErr)
+}
+
+// tryFallback 记录从当前端点切换到下一个端点的日志
+func (api *API) tryFallback(currentIdx, totalEndpoints, endpointNum int, reason string) {
+	if currentIdx < totalEndpoints-1 {
+		logging.Info("chat_completion_fallback", map[string]interface{}{
+			"from_endpoint": endpointNum,
+			"to_endpoint":   endpointNum + 1,
+			"reason":        reason,
 		})
-		return nil, fmt.Errorf("解析响应失败: %w", err)
 	}
-
-	logging.Info("chat_completion_api_success", map[string]interface{}{
-		"url":        url,
-		"model":      api.completionModelName,
-		"input_len":  len(userPrompt),
-		"output_len": len(chatResp.Choices[0].Message.Content),
-		"tokens":     chatResp.Usage.TotalTokens,
-		"duration":   time.Since(startTime).Milliseconds(),
-	})
-
-	return &chatResp, nil
 }
 
 // CorrectText 使用外部模型纠正文本（带重试和缓存）

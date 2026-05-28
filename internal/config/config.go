@@ -11,6 +11,13 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// ModelEndpoint 模型端点配置（URL + 密钥 + 模型名）
+type ModelEndpoint struct {
+	URL       string
+	APIKey    string
+	ModelName string
+}
+
 // AppConfig 应用配置
 type AppConfig struct {
 	Port           int
@@ -36,6 +43,7 @@ type AppConfig struct {
 	LLMApiURL             string
 	LLMApiKey             string
 	CompletionModelName   string
+	ModelEndpoints        []ModelEndpoint // 多模型端点列表（含主模型 + 备用模型）
 	CompletionTemperature float64
 	CompletionMaxTokens   int
 	LLMConcurrency        int
@@ -134,6 +142,9 @@ func Load() error {
 		cfg.CompletionModelName = getEnvStr("EMBEDDING_MODEL_NAME", "gpt-3.5-turbo-instruct")
 	}
 
+	// 构建多模型端点列表（主模型 + 最多2个备用模型）
+	cfg.ModelEndpoints = buildModelEndpoints(cfg)
+
 	AppConfigInstance = cfg
 
 	ensureDir(cfg.DataDir)
@@ -223,4 +234,48 @@ func Validate() error {
 		return fmt.Errorf("无效生成温度: %f", cfg.CompletionTemperature)
 	}
 	return nil
+}
+
+// buildModelEndpoints 从环境变量构建多模型端点列表
+// 模型1 使用原有的 LLM_API_URL/LLM_API_KEY/COMPLETION_MODEL_NAME 配置（向后兼容）
+// 模型2 使用 LLM_API_URL_2/LLM_API_KEY_2/COMPLETION_MODEL_NAME_2
+// 模型3 使用 LLM_API_URL_3/LLM_API_KEY_3/COMPLETION_MODEL_NAME_3
+// URL 和 APIKey 必须同时非空才算有效端点
+func buildModelEndpoints(cfg AppConfig) []ModelEndpoint {
+	var endpoints []ModelEndpoint
+
+	// 模型1：主配置（向后兼容）
+	if cfg.LLMApiURL != "" && cfg.LLMApiKey != "" {
+		endpoints = append(endpoints, ModelEndpoint{
+			URL:       cfg.LLMApiURL,
+			APIKey:    cfg.LLMApiKey,
+			ModelName: cfg.CompletionModelName,
+		})
+	}
+
+	// 模型2：备用模型
+	model2URL := getEnvStr("LLM_API_URL_2", "")
+	model2Key := getEnvStr("LLM_API_KEY_2", "")
+	model2Name := getEnvStr("COMPLETION_MODEL_NAME_2", cfg.CompletionModelName)
+	if model2URL != "" && model2Key != "" {
+		endpoints = append(endpoints, ModelEndpoint{
+			URL:       model2URL,
+			APIKey:    model2Key,
+			ModelName: model2Name,
+		})
+	}
+
+	// 模型3：备用模型
+	model3URL := getEnvStr("LLM_API_URL_3", "")
+	model3Key := getEnvStr("LLM_API_KEY_3", "")
+	model3Name := getEnvStr("COMPLETION_MODEL_NAME_3", cfg.CompletionModelName)
+	if model3URL != "" && model3Key != "" {
+		endpoints = append(endpoints, ModelEndpoint{
+			URL:       model3URL,
+			APIKey:    model3Key,
+			ModelName: model3Name,
+		})
+	}
+
+	return endpoints
 }

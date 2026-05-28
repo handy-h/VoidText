@@ -13,7 +13,7 @@
 - **版本链管理**：自动维护原始文件与中间版本的父子关系，任何版本可追溯
 - **基础文本清洗**：编码检测与转换（GBK/UTF-8）、广告移除、特殊字符处理、繁体转简体
 - **向量检测去重**：基于向量相似度的重复段落检测与移除
-- **LLM修复**：调用外部 LLM 纠正错别字和语法错误，支持本地字典兜底
+- **LLM修复**：调用外部 LLM 纠正错别字和语法错误，支持多模型自动切换（最多3个），本地字典兜底
 - **人工审核**：逐条审核修改建议，支持通过/拒绝/编辑/恢复/批量操作
 - **自定义规则**：每个文件可独立配置规则（错别字映射、广告黑名单等）
 - **处理报告**：生成包含审核统计、版本历史、处理日志的完整报告
@@ -164,6 +164,15 @@ LLM_API_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 LLM_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 COMPLETION_MODEL_NAME=qwen-max
 
+# 备用模型（可选，主模型失败时自动切换）
+# LLM_API_URL_2=https://api.deepseek.com/v1
+# LLM_API_KEY_2=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+# COMPLETION_MODEL_NAME_2=deepseek-chat
+
+# LLM_API_URL_3=http://localhost:11434/v1
+# LLM_API_KEY_3=ollama
+# COMPLETION_MODEL_NAME_3=qwen2.5:3b
+
 # 本地模型配置（可选，启用后优先使用本地模型）
 ENABLE_LOCAL_MODEL=false
 LOCAL_MODEL_URL=http://localhost:11434
@@ -251,7 +260,7 @@ make run
 | 文件名解析 | 作者/标题分隔符自定义                          |
 | 基础清洗   | 启用/禁用、繁体转简体                          |
 | 向量检测   | 模型选择、相似度阈值、API配置                  |
-| LLM修复    | 启用/禁用、自进化监控、API配置、生成参数       |
+| LLM修复    | 启用/禁用、多模型自动切换（最多3个）、自进化监控、API配置、生成参数       |
 | 本地模型   | 混合架构：Ollama配置、置信度阈值、降级策略     |
 
 ## 常见问题
@@ -274,7 +283,8 @@ make run
 
 - 检查 API URL 和 API Key 是否正确
 - 检查网络连接是否正常
-- 模型修复阶段会自动降级：本地模型失败 → 远程API → 本地字典
+- **支持多模型自动切换**：可配置最多 3 个 LLM 端点，当前模型连接失败（超时、5xx、限流等）时自动切换到下一个，全部失败再降级
+- 模型修复阶段完整降级链路：主模型 → 备用模型2 → 备用模型3 → 本地模型 → 远程API → 本地字典
 
 ### 4. 如何使用本地模型
 
