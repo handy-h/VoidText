@@ -33,7 +33,7 @@ func CreateReviewParagraphs(records []ReviewParagraphRecord) error {
 	}
 
 	stmt, err := tx.Prepare(`
-		INSERT INTO review_paragraphs
+		INSERT OR REPLACE INTO review_paragraphs
 		(file_md5, paragraph_index, original_text, suggested_text, modification_type, status, edited_text, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {

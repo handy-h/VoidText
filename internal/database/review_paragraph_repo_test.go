@@ -33,7 +33,7 @@ func TestCreateReviewParagraphs_ShouldInsertAndQuery(t *testing.T) {
 	}
 }
 
-func TestCreateReviewParagraphs_ShouldRejectDuplicateIndex(t *testing.T) {
+func TestCreateReviewParagraphs_ShouldReplaceDuplicateIndex(t *testing.T) {
 	setupTestDB(t)
 	defer teardownTestDB(t)
 
@@ -41,8 +41,18 @@ func TestCreateReviewParagraphs_ShouldRejectDuplicateIndex(t *testing.T) {
 		{FileMd5: "abc", ParagraphIndex: 0, OriginalText: "x", SuggestedText: "y", ModificationType: "llm_repair"},
 		{FileMd5: "abc", ParagraphIndex: 0, OriginalText: "x", SuggestedText: "z", ModificationType: "llm_repair"},
 	}
-	if err := CreateReviewParagraphs(records); err == nil {
-		t.Errorf("expected UNIQUE constraint violation")
+	if err := CreateReviewParagraphs(records); err != nil {
+		t.Fatalf("CreateReviewParagraphs() should replace on conflict, got error: %v", err)
+	}
+	got, err := GetReviewParagraphsByFileMd5("abc", "")
+	if err != nil {
+		t.Fatalf("GetReviewParagraphsByFileMd5() error = %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 record after replace, got %d", len(got))
+	}
+	if got[0].SuggestedText != "z" {
+		t.Errorf("expected replaced record to have SuggestedText='z', got %q", got[0].SuggestedText)
 	}
 }
 
