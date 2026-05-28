@@ -2778,6 +2778,23 @@ section h2::after {
 .review-cell-suggested {
   background: var(--cell-suggested-bg, rgba(80, 180, 80, 0.05));
 }
+/* 段级审核：变动文字加深高亮（左红右绿） */
+.review-cell-original del.diff-del {
+  background: rgba(220, 50, 50, 0.45) !important;
+  color: #7a0000 !important;
+  text-decoration: line-through !important;
+  font-weight: 700 !important;
+  border-radius: 3px;
+  padding: 0 3px;
+}
+.review-cell-suggested ins.diff-ins {
+  background: rgba(40, 160, 80, 0.45) !important;
+  color: #0a4d20 !important;
+  text-decoration: none !important;
+  font-weight: 700 !important;
+  border-radius: 3px;
+  padding: 0 3px;
+}
 .review-cell.is-duplicate {
   font-style: italic;
   color: var(--text-muted, #888);

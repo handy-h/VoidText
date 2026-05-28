@@ -118,8 +118,8 @@
   --text-muted: #9a9080;
 
   --glow-cyan: 0 0 20px rgba(139, 105, 20, 0.2);
-  --glow-purple: 0 0 30px rgba(122, 92, 181, 0.15);
-  --loading-overlay-bg: rgba(245, 240, 232, 0.85);
+  --glow-purple: 0 0 30px rgba(122, 92, 181, 0.15);
+  --loading-overlay-bg: rgba(245, 240, 232, 0.85);
 }
 
 /* ==================== 绿豆沙（green） ==================== */
@@ -152,8 +152,8 @@
   --text-muted: #5a8a5e;
 
   --glow-cyan: 0 0 20px rgba(45, 138, 66, 0.2);
-  --glow-purple: 0 0 30px rgba(90, 74, 154, 0.15);
-  --loading-overlay-bg: rgba(199, 237, 204, 0.85);
+  --glow-purple: 0 0 30px rgba(90, 74, 154, 0.15);
+  --loading-overlay-bg: rgba(199, 237, 204, 0.85);
 }
 
 /* ==================== 深夜蓝（night-blue） ==================== */
@@ -186,8 +186,8 @@
   --text-muted: #708090;
 
   --glow-cyan: 0 0 20px rgba(74, 158, 255, 0.25);
-  --glow-purple: 0 0 30px rgba(122, 92, 231, 0.2);
-  --loading-overlay-bg: rgba(13, 27, 42, 0.85);
+  --glow-purple: 0 0 30px rgba(122, 92, 231, 0.2);
+  --loading-overlay-bg: rgba(13, 27, 42, 0.85);
 }
 
 /* ==================== 暖黄灯（warm） ==================== */
@@ -220,8 +220,8 @@
   --text-muted: #9a8a7a;
 
   --glow-cyan: 0 0 20px rgba(192, 120, 48, 0.2);
-  --glow-purple: 0 0 30px rgba(122, 92, 181, 0.15);
-  --loading-overlay-bg: rgba(250, 240, 224, 0.85);
+  --glow-purple: 0 0 30px rgba(122, 92, 181, 0.15);
+  --loading-overlay-bg: rgba(250, 240, 224, 0.85);
 }
 
 /* ==================== 自定义主题 ==================== */
@@ -324,6 +324,18 @@
 #review-section[data-theme="night-blue"] .line-suggested ins.diff-ins,
 #batch-review-section[data-theme="night-blue"] .line-suggested ins.diff-ins {
   color: #40c870;
+}
+
+/* 段级审核单元格在夜间蓝下的高亮微调 */
+#review-section[data-theme="night-blue"] .review-cell-original del.diff-del,
+#batch-review-section[data-theme="night-blue"] .review-cell-original del.diff-del {
+  background: rgba(255, 90, 90, 0.32);
+  color: #ffb0b0;
+}
+#review-section[data-theme="night-blue"] .review-cell-suggested ins.diff-ins,
+#batch-review-section[data-theme="night-blue"] .review-cell-suggested ins.diff-ins {
+  background: rgba(70, 220, 130, 0.30);
+  color: #aef0c4;
 }
 
 /* 浅色主题下审核行分隔线 */

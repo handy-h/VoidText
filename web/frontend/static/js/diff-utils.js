@@ -98,3 +98,7 @@ const DiffUtils = (function() {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = DiffUtils;
 }
+
+if (typeof window !== 'undefined') {
+  window.DiffUtils = DiffUtils;
+}
