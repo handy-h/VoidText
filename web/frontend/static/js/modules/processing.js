@@ -82,39 +82,28 @@ const ProcessingModule = (function () {
         previousStatus = data.status;
 
         if (data.status === 'completed' || data.status === 'failed' || data.status === 'reviewing') {
-          if (statusChanged) {
-            stopPolling();
-            if (data.status === 'reviewing') {
-              if (isAutoNavEnabled()) {
-                FileManager.showSection('review');
-                ReviewModule.setCurrentFileMd5(currentFileMd5);
-                ReviewModule.loadReviewItems();
-              } else {
-                DomUtils.showFeedback('处理完成，正在等待审核', 'success');
-                FileManager.refreshFileList();
-                FileManager.showSection('file-list');
-              }
-            } else if (data.status === 'completed') {
-              FileManager.showSection('completed');
-              updateCompletedInfo();
-            } else if (data.status === 'failed') {
-              DomUtils.showFeedback('处理失败: ' + (data.error || '未知错误'), 'error');
-              FileManager.refreshFileList();
-              FileManager.showSection('file-list');
-            }
-          } else {
-            stopPolling();
-            if (data.status === 'reviewing') {
+          stopPolling();
+          if (data.status === 'reviewing') {
+            if (statusChanged && isAutoNavEnabled()) {
               FileManager.showSection('review');
               ReviewModule.setCurrentFileMd5(currentFileMd5);
               ReviewModule.loadReviewItems();
-            } else if (data.status === 'completed') {
-              FileManager.showSection('completed');
-              updateCompletedInfo();
-            } else if (data.status === 'failed') {
-              DomUtils.showFeedback('处理失败: ' + (data.error || '未知错误'), 'error');
+            } else if (statusChanged) {
+              DomUtils.showFeedback('处理完成，正在等待审核', 'success');
+              FileManager.refreshFileList();
               FileManager.showSection('file-list');
+            } else {
+              FileManager.showSection('review');
+              ReviewModule.setCurrentFileMd5(currentFileMd5);
+              ReviewModule.loadReviewItems();
             }
+          } else if (data.status === 'completed') {
+            FileManager.showSection('completed');
+            updateCompletedInfo();
+          } else if (data.status === 'failed') {
+            DomUtils.showFeedback('处理失败: ' + (data.error || '未知错误'), 'error');
+            FileManager.refreshFileList();
+            FileManager.showSection('file-list');
           }
         }
       })

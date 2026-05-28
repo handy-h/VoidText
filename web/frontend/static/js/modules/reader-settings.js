@@ -279,7 +279,7 @@ const ReaderSettingsModule = (function() {
 
   function registerFontFace(name, url) {
     try {
-      var font = new FontFace(name, 'url(' + url + ')');
+      var font = new FontFace(name, 'url(' + encodeURI(url) + ')');
       var FONT_TIMEOUT_MS = 30000;
       var timeoutPromise = new Promise(function(_, reject) {
         setTimeout(function() { reject(new Error('字体加载超时 (' + FONT_TIMEOUT_MS + 'ms)')); }, FONT_TIMEOUT_MS);

@@ -240,9 +240,7 @@ func (mr *ModelRepairer) repairLocally(paragraph string) (string, []preprocess.C
 		"以经":  "已经",
 		"好象":  "好像",
 		"做车":  "坐车",
-		"的士":  "的士", // 保留
-		"他":   "他",  // 保留
-		"她":   "她",  // 保留
+
 	}
 
 	// 应用错别字修正

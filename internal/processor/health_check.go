@@ -80,11 +80,14 @@ func (hcm *HealthCheckManager) RegisterService(service string, enabled bool) {
 
 // Start 启动健康检查
 func (hcm *HealthCheckManager) Start() error {
+	hcm.mu.Lock()
 	if hcm.running {
+		hcm.mu.Unlock()
 		return fmt.Errorf("健康检查已在运行")
 	}
 
 	hcm.running = true
+	hcm.mu.Unlock()
 
 	// 同步执行第一次健康检查，确保初始状态正确
 	// 避免goroutine调度延迟导致processChunk在健康检查完成前运行
@@ -103,12 +106,15 @@ func (hcm *HealthCheckManager) Start() error {
 
 // Stop 停止健康检查
 func (hcm *HealthCheckManager) Stop() {
+	hcm.mu.Lock()
 	if !hcm.running {
+		hcm.mu.Unlock()
 		return
 	}
+	hcm.running = false
+	hcm.mu.Unlock()
 	
 	hcm.stopChan <- true
-	hcm.running = false
 	
 	logging.Info("health_check_stopped", nil)
 }

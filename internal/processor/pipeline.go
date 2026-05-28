@@ -473,9 +473,17 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, record 
 	pendingResults := make(map[int]llmParagraphResult)
 	completed := startIndex
 	cancelRequested := false
+	var firstErr error
 	for result := range results {
 		if result.Err != nil {
-			return nil, result.Err
+			if firstErr == nil {
+				firstErr = result.Err
+				cancel()
+			}
+			continue
+		}
+		if firstErr != nil {
+			continue
 		}
 
 		pendingResults[result.Index] = result
@@ -535,6 +543,9 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, record 
 			Progress:    progress,
 			Message:     fmt.Sprintf("LLM修复已取消 (%d/%d)", completed, totalParagraphs),
 		}, nil
+	}
+	if firstErr != nil {
+		return nil, firstErr
 	}
 	// 审核基线为原段拼接（LLM 修复前），与 review_paragraphs.paragraph_index 一一对应
 	baselineContent := strings.Join(paragraphs, "\n")

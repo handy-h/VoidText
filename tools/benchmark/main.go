@@ -39,11 +39,11 @@ func main() {
 	)
 
 	startLocal := time.Now()
-	localResult, err := ollamaClient.CorrectText(sampleText)
+	localResult, localErr := ollamaClient.CorrectText(sampleText)
 	localDuration := time.Since(startLocal)
 
-	if err != nil {
-		fmt.Printf("❌ 本地模型失败: %v\n", err)
+	if localErr != nil {
+		fmt.Printf("❌ 本地模型失败: %v\n", localErr)
 	} else {
 		localRunes := len([]rune(localResult))
 		ratio := float64(localRunes) / float64(len([]rune(sampleText))) * 100
@@ -62,11 +62,11 @@ func main() {
 	apiClient := external.NewAPI()
 
 	startRemote := time.Now()
-	remoteResult, err := apiClient.CorrectText(sampleText)
+	remoteResult, remoteErr := apiClient.CorrectText(sampleText)
 	remoteDuration := time.Since(startRemote)
 
-	if err != nil {
-		fmt.Printf("❌ 远程API失败: %v\n", err)
+	if remoteErr != nil {
+		fmt.Printf("❌ 远程API失败: %v\n", remoteErr)
 	} else {
 		remoteRunes := len([]rune(remoteResult))
 		ratio := float64(remoteRunes) / float64(len([]rune(sampleText))) * 100
@@ -84,16 +84,17 @@ func main() {
 	fmt.Println("============================================")
 	fmt.Println("  对比汇总")
 	fmt.Println("============================================")
-	localOk := err == nil
+	localOk := localErr == nil
 	if localOk {
 		fmt.Printf("  本地模型:  %v (%.1f 秒)\n", localDuration, localDuration.Seconds())
 	} else {
-		fmt.Printf("  本地模型:  失败 (%v)\n", err)
+		fmt.Printf("  本地模型:  失败 (%v)\n", localErr)
 	}
-	if remoteResult != "" {
+	remoteOk := remoteErr == nil
+	if remoteOk {
 		fmt.Printf("  远程API:   %v (%.1f 秒)\n", remoteDuration, remoteDuration.Seconds())
 	} else {
-		fmt.Printf("  远程API:   失败 (%v)\n", err)
+		fmt.Printf("  远程API:   失败 (%v)\n", remoteErr)
 	}
 	if localOk {
 		speedup := remoteDuration.Seconds() / localDuration.Seconds()

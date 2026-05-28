@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"crypto/subtle"
 	"net/http"
 	"os"
 
@@ -17,7 +18,7 @@ func AuthMiddleware() gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		if c.GetHeader("X-API-Token") != token {
+		if subtle.ConstantTimeCompare([]byte(c.GetHeader("X-API-Token")), []byte(token)) != 1 {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"success": false,
 				"message": "未授权：缺少或无效的 API Token",

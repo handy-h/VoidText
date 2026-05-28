@@ -13,7 +13,13 @@ import (
 
 // NewServer 创建新的Web服务器
 func NewServer() *gin.Engine {
-	r := gin.Default()
+	r := gin.New()
+
+	// 挂载核心中间件（CORS 之前）
+	r.Use(middleware.ErrorHandler())
+	r.Use(middleware.Recovery())
+	r.Use(middleware.LoggingMiddleware())
+	r.Use(middleware.RateLimitMiddleware())
 
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     resolveCORSAllowOrigins(),
@@ -32,6 +38,7 @@ func NewServer() *gin.Engine {
 
 	// AuthMiddleware 仅挂载到 /api 分组，静态资源和首页可匿名访问，避免浏览器首屏被拦
 	api := r.Group("/api")
+	api.Use(middleware.NoCache())
 	api.Use(middleware.AuthMiddleware())
 	{
 		api.POST("/files/upload", handlers.UploadFile)

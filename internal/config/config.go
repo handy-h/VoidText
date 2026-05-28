@@ -174,7 +174,9 @@ func (c *AppConfig) GetNameSeparators() []string {
 
 func ensureDir(dir string) {
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		os.MkdirAll(dir, 0755)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			log.Printf("创建目录失败: %s, 错误: %v", dir, err)
+		}
 	}
 }
 

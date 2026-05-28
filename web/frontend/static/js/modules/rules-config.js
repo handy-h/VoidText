@@ -196,15 +196,24 @@ const RulesConfigModule = (function() {
     if (!currentFileMd5) currentFileMd5 = window.currentFileMd5 || null;
     if (!currentFileMd5) return;
 
+    var elBasicCleaning = document.getElementById('rule-basic-cleaning');
+    var elTraditionalSimple = document.getElementById('rule-traditional-simple');
+    var elVectorDetection = document.getElementById('rule-vector-detection');
+    var elSimilarity = document.getElementById('rule-similarity');
+    var elModelRepair = document.getElementById('rule-model-repair');
+    var elNewlineFix = document.getElementById('rule-newline-fix');
+    var elTypoMap = document.getElementById('rule-typo-map');
+    var elAdBlacklist = document.getElementById('rule-ad-blacklist');
+
     const rulesConfig = {
-      enableBasicCleaning: document.getElementById('rule-basic-cleaning').checked,
-      traditionalToSimple: document.getElementById('rule-traditional-simple').checked,
-      enableVectorDetection: document.getElementById('rule-vector-detection').checked,
-      vectorSimilarityThreshold: parseFloat(document.getElementById('rule-similarity').value) || 0.95,
-      enableModelRepair: document.getElementById('rule-model-repair').checked,
-      enableNewlineFix: document.getElementById('rule-newline-fix').checked,
-      typoMap: document.getElementById('rule-typo-map').value,
-      adBlacklist: document.getElementById('rule-ad-blacklist').value
+      enableBasicCleaning: elBasicCleaning ? elBasicCleaning.checked : true,
+      traditionalToSimple: elTraditionalSimple ? elTraditionalSimple.checked : false,
+      enableVectorDetection: elVectorDetection ? elVectorDetection.checked : true,
+      vectorSimilarityThreshold: (elSimilarity ? parseFloat(elSimilarity.value) : 0) || 0.95,
+      enableModelRepair: elModelRepair ? elModelRepair.checked : true,
+      enableNewlineFix: elNewlineFix ? elNewlineFix.checked : true,
+      typoMap: elTypoMap ? elTypoMap.value : '',
+      adBlacklist: elAdBlacklist ? elAdBlacklist.value : ''
     };
 
     AppConfig.apiRequest(`/files/${currentFileMd5}/rules`, {

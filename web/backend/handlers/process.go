@@ -2,14 +2,23 @@ package handlers
 
 import (
 	"fmt"
+	"html"
 	"net/http"
 	"os"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 
 	"voidtext/internal/database"
 	"voidtext/internal/processor"
 )
+
+// processSemaphore 并发控制：最多同时处理 4 个文件
+var processSemaphore = make(chan struct{}, 4)
+
+// fileProcessingMu 保护 processingFiles 映射，防止同一文件竞态
+var fileProcessingMu sync.Mutex
+var processingFiles = make(map[string]bool)
 
 // RunAllSteps 异步执行所有步骤直到审核或完成
 func RunAllSteps(c *gin.Context) {
@@ -56,54 +65,81 @@ func RunAllSteps(c *gin.Context) {
 		}
 	}
 
-	// 进入运行前清零取消标志，避免上一次残留的 cancel_flag 立刻终止本次执行
-	database.SetCancelFlag(fileMd5, 0)
-	database.UpdateFileStatus(fileMd5, "processing", startStep, processor.CalculateProgress(startStep, 0), "")
+	// 竞态保护：加锁确保状态检查和更新的原子性
+	fileProcessingMu.Lock()
+	if processingFiles[fileMd5] {
+		fileProcessingMu.Unlock()
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "文件正在处理中"})
+		return
+	}
+	processingFiles[fileMd5] = true
+	fileProcessingMu.Unlock()
 
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				database.UpdateFileStatus(fileMd5, "failed", "", 0, fmt.Sprintf("处理异常: %v", r))
+	// 并发控制：限制同时处理的文件数
+	select {
+	case processSemaphore <- struct{}{}:
+		// 进入运行前清零取消标志，避免上一次残留的 cancel_flag 立刻终止本次执行
+		database.SetCancelFlag(fileMd5, 0)
+		database.UpdateFileStatus(fileMd5, "processing", startStep, processor.CalculateProgress(startStep, 0), "")
+
+		go func() {
+			defer func() { <-processSemaphore }()
+			defer func() {
+				fileProcessingMu.Lock()
+				delete(processingFiles, fileMd5)
+				fileProcessingMu.Unlock()
+			}()
+			defer func() {
+				if r := recover(); r != nil {
+					database.UpdateFileStatus(fileMd5, "failed", "", 0, fmt.Sprintf("处理异常: %v", r))
+				}
+			}()
+
+			for _, step := range stepsToRun {
+				// 步前检查取消标志（针对 cleaning/indexing 这类无内部检查点的步骤）
+				cancelled, _ := database.IsFileCancelled(fileMd5)
+				if cancelled {
+					database.SetCancelFlag(fileMd5, 0)
+					database.UpdateFileStatus(fileMd5, "cancelled", step, 0, "用户取消")
+					return
+				}
+				if _, err := processor.ProcessStep(fileMd5, step); err != nil {
+					database.UpdateFileStatus(fileMd5, "failed", step, 0, err.Error())
+					return
+				}
+				// 步内若已经被取消（如 LLM 检查点内部更新了 status），不要继续推进
+				cur, _ := database.GetFileByMd5(fileMd5)
+				if cur != nil && cur.Status == "cancelled" {
+					return
+				}
+			}
+
+			// 进入审核阶段；若该步骤判定无需审核（total==0），它会把 nextStep 推到 finalizing，
+			// 这里必须主动完成 finalizing，否则前端无法自动收尾
+			reviewResult, err := processor.ProcessStep(fileMd5, processor.StepReview)
+			if err != nil {
+				database.UpdateFileStatus(fileMd5, "failed", processor.StepReview, 0, err.Error())
+				return
+			}
+			if reviewResult != nil && reviewResult.NextStep == processor.StepFinalizing {
+				if _, ferr := processor.ProcessStep(fileMd5, processor.StepFinalizing); ferr != nil {
+					database.UpdateFileStatus(fileMd5, "failed", processor.StepFinalizing, 0, ferr.Error())
+				}
 			}
 		}()
 
-		for _, step := range stepsToRun {
-			// 步前检查取消标志（针对 cleaning/indexing 这类无内部检查点的步骤）
-			cancelled, _ := database.IsFileCancelled(fileMd5)
-			if cancelled {
-				database.SetCancelFlag(fileMd5, 0)
-				database.UpdateFileStatus(fileMd5, "cancelled", step, 0, "用户取消")
-				return
-			}
-			if _, err := processor.ProcessStep(fileMd5, step); err != nil {
-				database.UpdateFileStatus(fileMd5, "failed", step, 0, err.Error())
-				return
-			}
-			// 步内若已被取消（如 LLM 检查点内部更新了 status），不要继续推进
-			cur, _ := database.GetFileByMd5(fileMd5)
-			if cur != nil && cur.Status == "cancelled" {
-				return
-			}
-		}
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "处理已启动",
+		})
 
-		// 进入审核阶段；若该步骤判定无需审核（total==0），它会把 nextStep 推到 finalizing，
-		// 这里必须主动完成 finalizing，否则前端无法自动收尾
-		reviewResult, err := processor.ProcessStep(fileMd5, processor.StepReview)
-		if err != nil {
-			database.UpdateFileStatus(fileMd5, "failed", processor.StepReview, 0, err.Error())
-			return
-		}
-		if reviewResult != nil && reviewResult.NextStep == processor.StepFinalizing {
-			if _, ferr := processor.ProcessStep(fileMd5, processor.StepFinalizing); ferr != nil {
-				database.UpdateFileStatus(fileMd5, "failed", processor.StepFinalizing, 0, ferr.Error())
-			}
-		}
-	}()
-
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "处理已启动",
-	})
+	default:
+		fileProcessingMu.Lock()
+		delete(processingFiles, fileMd5)
+		fileProcessingMu.Unlock()
+		c.JSON(http.StatusTooManyRequests, gin.H{"success": false, "message": "服务器繁忙，请稍后重试"})
+		return
+	}
 }
 
 // CancelProcessing 取消处理中的任务
@@ -445,7 +481,13 @@ func buildReportHTML(data gin.H) string {
 	file := data["file"].(gin.H)
 	review := data["review"].(gin.H)
 
-	html := fmt.Sprintf(`<!DOCTYPE html>
+	// 对用户输入进行 HTML 转义，防止 XSS 攻击
+	title := html.EscapeString(fmt.Sprintf("%v", file["title"]))
+	author := html.EscapeString(fmt.Sprintf("%v", file["author"]))
+	fileName := html.EscapeString(fmt.Sprintf("%v", file["fileName"]))
+	status := html.EscapeString(fmt.Sprintf("%v", file["status"]))
+
+	reportHTML := fmt.Sprintf(`<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>处理报告 - %s</title>
 <style>body{font-family:sans-serif;margin:20px}table{border-collapse:collapse;width:100%%}td,th{border:1px solid #ddd;padding:8px;text-align:left}</style>
 </head><body>
@@ -461,8 +503,8 @@ func buildReportHTML(data gin.H) string {
 <h2>审核统计</h2>
 <p>总条目: %d, 已处理: %d</p>
 </body></html>`,
-		file["title"], file["title"], file["author"], file["fileName"],
-		file["status"], file["progress"], review["total"], review["resolved"])
+		title, title, author, fileName,
+		status, file["progress"], review["total"], review["resolved"])
 
-	return html
+	return reportHTML
 }

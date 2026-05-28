@@ -7,8 +7,10 @@ const DomUtils = {
     // 设置属性
     for (const [key, value] of Object.entries(attributes)) {
       if (key.startsWith('on')) {
-        // 事件处理器
-        element[key] = value;
+        // 事件处理器：确保是函数再赋值
+        if (typeof value === 'function') {
+          element[key] = value;
+        }
       } else if (key === 'className') {
         // class属性
         element.className = value;

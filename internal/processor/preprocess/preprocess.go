@@ -205,99 +205,6 @@ func fixMixedEncoding(content string) string {
 	return strings.Join(fixedLines, "\n")
 }
 
-// isLikelyGBK 判断字节序列是否可能是GBK编码
-func isLikelyGBK(data []byte) bool {
-	// GBK编码的中文通常包含0x80-0xFF范围的字节
-	// 而UTF-8的多字节序列有特定的格式
-	gbkScore := 0
-	utf8Score := 0
-
-	i := 0
-	for i < len(data) {
-		b := data[i]
-
-		if b < 0x80 {
-			// ASCII字符，两种编码都支持
-			utf8Score++
-			gbkScore++
-			i++
-		} else if b >= 0x80 && b <= 0xBF {
-			// 可能是UTF-8的 continuation byte，也可能是GBK的第二字节
-			if i > 0 && data[i-1] >= 0x81 && data[i-1] <= 0xFE {
-				// 前一个字节是GBK的首字节范围
-				gbkScore += 2
-				i++
-			} else {
-				// 检查是否是UTF-8多字节序列
-				utf8Len := utf8CharLen(b)
-				if utf8Len > 0 && i+utf8Len <= len(data) {
-					valid := true
-					for j := 1; j < utf8Len; j++ {
-						if data[i+j]&0xC0 != 0x80 {
-							valid = false
-							break
-						}
-					}
-					if valid {
-						utf8Score += utf8Len
-						i += utf8Len
-					} else {
-						gbkScore += 2
-						i += 2
-					}
-				} else {
-					gbkScore += 2
-					i += 2
-				}
-			}
-		} else if b >= 0xC0 && b <= 0xFD {
-			// 可能是UTF-8的首字节
-			utf8Len := utf8CharLen(b)
-			if utf8Len > 0 && i+utf8Len <= len(data) {
-				valid := true
-				for j := 1; j < utf8Len; j++ {
-					if data[i+j]&0xC0 != 0x80 {
-						valid = false
-						break
-					}
-				}
-				if valid {
-					utf8Score += utf8Len
-					i += utf8Len
-					continue
-				}
-			}
-			// 可能是GBK
-			if i+1 < len(data) {
-				gbkScore += 2
-				i += 2
-			} else {
-				i++
-			}
-		} else {
-			i++
-		}
-	}
-
-	return gbkScore > utf8Score
-}
-
-// utf8CharLen 返回UTF-8字符的字节长度
-func utf8CharLen(firstByte byte) int {
-	if firstByte&0x80 == 0 {
-		return 1
-	}
-	if firstByte&0xE0 == 0xC0 {
-		return 2
-	}
-	if firstByte&0xF0 == 0xE0 {
-		return 3
-	}
-	if firstByte&0xF8 == 0xF0 {
-		return 4
-	}
-	return 0
-}
 
 // removeAdvertisements 移除广告内容
 func removeAdvertisements(result PreprocessResult) PreprocessResult {
@@ -307,7 +214,7 @@ func removeAdvertisements(result PreprocessResult) PreprocessResult {
 		`更多精彩内容请访问.*`,
 		`下载APP.*`,
 		`www\.[a-zA-Z0-9]+\.[a-zA-Z]{2,}`,
-		`http[s]?://[^\s]+`,
+		`http[s]?://\S+`,
 	}
 
 	for _, pattern := range adPatterns {
@@ -443,47 +350,3 @@ func cleanupGarbledText(result PreprocessResult) PreprocessResult {
 	return result
 }
 
-// isLikelyGarbled 判断文本是否可能是乱码
-func isLikelyGarbled(text string) bool {
-	// 如果文本很短，可能不是乱码
-	if utf8.RuneCountInString(text) < 3 {
-		return false
-	}
-	
-	// 检查是否包含常见的乱码模式
-	commonGarbledPatterns := []string{
-		"锟斤拷", "烫烫烫", "屯屯屯", "����������������",
-	}
-	
-	for _, pattern := range commonGarbledPatterns {
-		if strings.Contains(text, pattern) {
-			return true
-		}
-	}
-	
-	// 检查是否包含大量替换字符
-	replacementCount := strings.Count(text, "�")
-	if replacementCount >= utf8.RuneCountInString(text)/2 {
-		// 如果超过一半的字符是替换字符，认为是乱码
-		return true
-	}
-	
-	// 检查是否包含大量不可打印字符
-	unprintableCount := 0
-	totalRunes := 0
-	for _, r := range text {
-		totalRunes++
-		if r < 32 && r != '\n' && r != '\r' && r != '\t' {
-			unprintableCount++
-		}
-	}
-	
-	if totalRunes == 0 {
-		return false
-	}
-	
-	unprintableRatio := float64(unprintableCount) / float64(totalRunes)
-	
-	// 如果不可打印字符比例高于50%，认为是乱码
-	return unprintableRatio > 0.5
-}

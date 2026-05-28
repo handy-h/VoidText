@@ -78,7 +78,19 @@ func UploadFile(c *gin.Context) {
 		return
 	}
 
-	tempPath := filepath.Join(config.AppConfigInstance.DataDir, "temp", fmt.Sprintf("%d_%s", time.Now().UnixNano(), safeFileName))
+	// 确保临时目录存在
+	tempDir := filepath.Join(config.AppConfigInstance.DataDir, "temp")
+	if err := os.MkdirAll(tempDir, 0755); err != nil {
+		logging.Error("创建临时目录失败", err, map[string]interface{}{
+			"temp_dir": tempDir,
+		})
+		c.JSON(http.StatusInternalServerError, errors.NewErrorResponse(
+			errors.Wrap(err, errors.ErrInternalServer, "创建临时目录失败"),
+		))
+		return
+	}
+
+	tempPath := filepath.Join(tempDir, fmt.Sprintf("%d_%s", time.Now().UnixNano(), safeFileName))
 	err = c.SaveUploadedFile(f, tempPath)
 	if err != nil {
 		logging.Error("保存上传文件失败", err, map[string]interface{}{
@@ -176,7 +188,13 @@ func handleExistingFile(c *gin.Context, existing *database.FileRecord, tempPath,
 
 // handleIntermediateVersion 处理中间版本文件
 func handleIntermediateVersion(c *gin.Context, version *database.VersionRecord, tempPath, fileMd5, fileName string) {
-	originalFile, _ := database.GetFileByMd5(version.OriginalMd5)
+	originalFile, err := database.GetFileByMd5(version.OriginalMd5)
+	if err != nil {
+		logging.Warn("查询原始文件记录失败", map[string]interface{}{
+			"original_md5": version.OriginalMd5,
+			"error":        err.Error(),
+		})
+	}
 
 	finalPath := filepath.Join(config.AppConfigInstance.DataDir, "uploads", fileMd5+"_"+fileName)
 	if err := os.Rename(tempPath, finalPath); err != nil {
@@ -341,10 +359,10 @@ func ResumeFile(c *gin.Context) {
 		record.Status = "pending"
 		record.ErrorMsg = ""
 	case "processing":
-		// 使用事务重置文件状态
+		// 使用事务重置文件状态并清空当前步骤
 		err = database.WithTransactionSimple(func(tx database.Transaction) error {
-			_, err := tx.Exec("UPDATE files SET status = ?, updated_at = ? WHERE md5 = ?",
-				"pending", time.Now().Format(time.RFC3339), md5)
+			_, err := tx.Exec("UPDATE files SET status = ?, current_step = ?, error_msg = ?, updated_at = ? WHERE md5 = ?",
+				"pending", "", "", time.Now().Format(time.RFC3339), md5)
 			return err
 		})
 		
@@ -353,6 +371,7 @@ func ResumeFile(c *gin.Context) {
 			return
 		}
 		record.Status = "pending"
+		record.CurrentStep = ""
 		record.ErrorMsg = ""
 	}
 
@@ -536,7 +555,12 @@ func DeleteFile(c *gin.Context) {
 	}
 
 	if !keepFile {
-		os.Remove(record.FilePath)
+		if err := os.Remove(record.FilePath); err != nil && !os.IsNotExist(err) {
+			logging.Warn("删除文件失败", map[string]interface{}{
+				"file_path": record.FilePath,
+				"error":     err.Error(),
+			})
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "文件删除成功"})

@@ -25,10 +25,11 @@ func Init(dataDir string) error {
 		return fmt.Errorf("打开数据库失败: %w", err)
 	}
 
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
+	db.SetMaxOpenConns(4)
+	db.SetMaxIdleConns(4)
 
 	// 启用 WAL 模式，允许并发读写，改善 LLM 修复期间的 HTTP 响应速度
+	// 配合 MaxOpenConns(4) 支持并发读取，充分发挥 WAL 优势
 	if _, err := db.Exec(`PRAGMA journal_mode=WAL`); err != nil {
 		return fmt.Errorf("启用WAL模式失败: %w", err)
 	}
@@ -179,7 +180,11 @@ func createTables() error {
 
 	for _, stmt := range stmts {
 		if _, err := db.Exec(stmt); err != nil {
-			return fmt.Errorf("执行建表语句失败 [%s]: %w", stmt[:50], err)
+			preview := stmt
+			if len(stmt) > 50 {
+				preview = stmt[:50] + "..."
+			}
+			return fmt.Errorf("执行建表语句失败 [%s]: %w", preview, err)
 		}
 	}
 

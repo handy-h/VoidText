@@ -166,6 +166,7 @@ func GetRateLimiter() *RateLimiter {
 // RateLimitMiddleware 限流中间件
 func RateLimitMiddleware() gin.HandlerFunc {
 	limiter := GetRateLimiter()
+	limitStr := strconv.Itoa(limiter.maxRequests)
 
 	return func(c *gin.Context) {
 		// 获取客户端IP
@@ -187,7 +188,7 @@ func RateLimitMiddleware() gin.HandlerFunc {
 				"reset_in":  time.Until(resetTime).String(),
 			})
 
-			c.Header("X-RateLimit-Limit", "100")
+			c.Header("X-RateLimit-Limit", limitStr)
 			c.Header("X-RateLimit-Remaining", "0")
 			c.Header("X-RateLimit-Reset", resetTime.Format(time.RFC1123))
 			c.Header("Retry-After", resetTime.Format(time.RFC1123))
@@ -205,7 +206,7 @@ func RateLimitMiddleware() gin.HandlerFunc {
 		remaining := limiter.GetRemaining(ip)
 		resetTime := limiter.GetResetTime(ip)
 
-		c.Header("X-RateLimit-Limit", "100")
+		c.Header("X-RateLimit-Limit", limitStr)
 		c.Header("X-RateLimit-Remaining", strconv.Itoa(remaining))
 		c.Header("X-RateLimit-Reset", resetTime.Format(time.RFC1123))
 
@@ -213,9 +214,28 @@ func RateLimitMiddleware() gin.HandlerFunc {
 	}
 }
 
+// sharedLimiters 缓存共享限流器实例，避免每次调用创建新实例导致 goroutine 泄漏
+var (
+	sharedLimiters   = make(map[string]*RateLimiter)
+	sharedLimitersMu sync.Mutex
+)
+
+// getSharedLimiter 获取或创建共享限流器
+func getSharedLimiter(maxRequests int, window, cleanup time.Duration) *RateLimiter {
+	key := strconv.Itoa(maxRequests) + ":" + window.String() + ":" + cleanup.String()
+	sharedLimitersMu.Lock()
+	defer sharedLimitersMu.Unlock()
+	if l, ok := sharedLimiters[key]; ok {
+		return l
+	}
+	l := NewRateLimiter(maxRequests, window, cleanup)
+	sharedLimiters[key] = l
+	return l
+}
+
 // IPBasedRateLimit IP基础限流中间件
 func IPBasedRateLimit(maxRequests int, window time.Duration) gin.HandlerFunc {
-	limiter := NewRateLimiter(maxRequests, window, window*2)
+	limiter := getSharedLimiter(maxRequests, window, window*2)
 
 	return func(c *gin.Context) {
 		ip := c.ClientIP()
@@ -252,8 +272,8 @@ func IPBasedRateLimit(maxRequests int, window time.Duration) gin.HandlerFunc {
 
 // EndpointBasedRateLimit 端点基础限流中间件
 func EndpointBasedRateLimit(maxRequests int, window time.Duration) gin.HandlerFunc {
-	limiters := make(map[string]*RateLimiter)
-	var mu sync.RWMutex
+	// 所有端点共享同一个限流器实例，以 endpoint 键区分
+	limiter := getSharedLimiter(maxRequests, window, window*2)
 
 	return func(c *gin.Context) {
 		// 使用路径和方法作为键
@@ -263,23 +283,9 @@ func EndpointBasedRateLimit(maxRequests int, window time.Duration) gin.HandlerFu
 			ip = "unknown"
 		}
 
-		mu.RLock()
-		limiter, exists := limiters[key]
-		mu.RUnlock()
-
-		if !exists {
-			mu.Lock()
-			// double-check：避免两个 goroutine 同时进入写锁时重复创建
-			if limiter, exists = limiters[key]; !exists {
-				limiter = NewRateLimiter(maxRequests, window, window*2)
-				limiters[key] = limiter
-			}
-			mu.Unlock()
-		}
-
-		if !limiter.Allow(ip) {
-			remaining := limiter.GetRemaining(ip)
-			resetTime := limiter.GetResetTime(ip)
+		if !limiter.Allow(ip + "|" + key) {
+			remaining := limiter.GetRemaining(ip + "|" + key)
+			resetTime := limiter.GetResetTime(ip + "|" + key)
 
 			logging.Warn("端点请求频率超限", map[string]interface{}{
 				"client_ip":    ip,

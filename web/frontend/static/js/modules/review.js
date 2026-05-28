@@ -222,7 +222,7 @@ const ReviewModule = (function() {
       : '';
 
     return '' +
-      '<div class="review-row review-row-' + status + '" data-index="' + index + '" data-id="' + p.id + '">' +
+      '<div class="review-row review-row-' + status + '" data-index="' + index + '" data-id="' + escapeHtml(String(p.id)) + '">' +
         '<div class="review-row-meta">#' + (p.paragraphIndex + 1) + '</div>' +
         '<div class="review-row-body">' +
           leftHtml + rightHtml + editedHtml +
@@ -251,21 +251,25 @@ const ReviewModule = (function() {
   }
 
   function bindRowEvents() {
-    document.querySelectorAll('.review-row').forEach(function(row) {
-      row.addEventListener('click', function(e) {
-        const idx = parseInt(row.getAttribute('data-index'), 10);
-        selectedIndex = idx;
-        renderSelection();
+    // 事件委托：在容器上统一监听，避免逐行绑定
+    var container = document.getElementById('review-page-container');
+    if (!container || container._reviewDelegated) return;
+    container._reviewDelegated = true;
+    container.addEventListener('click', function(e) {
+      var row = e.target.closest('.review-row');
+      if (!row) return;
+      var idx = parseInt(row.getAttribute('data-index'), 10);
+      selectedIndex = idx;
+      renderSelection();
 
-        const btn = e.target.closest('button[data-action]');
-        if (!btn) return;
-        const id = parseInt(row.getAttribute('data-id'), 10);
-        const action = btn.getAttribute('data-action');
-        if (action === 'approve') approveParagraph(id);
-        else if (action === 'reject') rejectParagraph(id);
-        else if (action === 'restore') restoreParagraph(id);
-        else if (action === 'edit') editParagraph(id);
-      });
+      var btn = e.target.closest('button[data-action]');
+      if (!btn) return;
+      var id = parseInt(row.getAttribute('data-id'), 10);
+      var action = btn.getAttribute('data-action');
+      if (action === 'approve') approveParagraph(id);
+      else if (action === 'reject') rejectParagraph(id);
+      else if (action === 'restore') restoreParagraph(id);
+      else if (action === 'edit') editParagraph(id);
     });
   }
 
@@ -382,8 +386,8 @@ const ReviewModule = (function() {
   }
 
   function showFeedback(msg, type) {
-    if (window.AppConfig && AppConfig.showFeedback) {
-      AppConfig.showFeedback(msg, type);
+    if (window.DomUtils && typeof DomUtils.showFeedback === 'function') {
+      DomUtils.showFeedback(msg, type);
     } else {
       console.log('[' + type + '] ' + msg);
     }

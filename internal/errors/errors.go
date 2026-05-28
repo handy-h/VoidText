@@ -1,6 +1,7 @@
 package errors
 
 import (
+  "errors"
   "fmt"
   "net/http"
   "strings"
@@ -104,13 +105,14 @@ func WrapWithDetails(err error, code ErrorCode, message, details string) *AppErr
 
 // IsAppError 检查是否为应用错误
 func IsAppError(err error) bool {
-  _, ok := err.(*AppError)
-  return ok
+  var appErr *AppError
+  return errors.As(err, &appErr)
 }
 
 // ToAppError 转换为应用错误
 func ToAppError(err error) *AppError {
-  if appErr, ok := err.(*AppError); ok {
+  var appErr *AppError
+  if errors.As(err, &appErr) {
     return appErr
   }
   

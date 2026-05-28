@@ -222,9 +222,9 @@ func (nf *NewlineFixer) isChapterTitle(runes []rune, pos int) bool {
 	}
 
 	// 格式3：数字+顿号（如 一、二、）
-	if pos+1 < len(runes) && runes[pos] == '一' || runes[pos] == '二' || runes[pos] == '三' ||
+	if pos+1 < len(runes) && (runes[pos] == '一' || runes[pos] == '二' || runes[pos] == '三' ||
 		runes[pos] == '四' || runes[pos] == '五' || runes[pos] == '六' ||
-		runes[pos] == '七' || runes[pos] == '八' || runes[pos] == '九' || runes[pos] == '十' {
+		runes[pos] == '七' || runes[pos] == '八' || runes[pos] == '九' || runes[pos] == '十') {
 		if pos+1 < len(runes) && runes[pos+1] == '、' {
 			return true
 		}
@@ -402,9 +402,10 @@ func (nf *NewlineFixer) isChapterTitleText(text string) bool {
 	}
 
 	// 检查数字+顿号格式
-	if len(text) >= 2 {
-		firstChar := rune(text[0])
-		secondChar := rune(text[1])
+	runes := []rune(text)
+	if len(runes) >= 2 {
+		firstChar := runes[0]
+		secondChar := runes[1]
 		if (firstChar == '一' || firstChar == '二' || firstChar == '三' ||
 			firstChar == '四' || firstChar == '五' || firstChar == '六' ||
 			firstChar == '七' || firstChar == '八' || firstChar == '九' || firstChar == '十') &&

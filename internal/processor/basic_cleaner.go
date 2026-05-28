@@ -8,6 +8,13 @@ import (
 	"voidtext/internal/processor/preprocess"
 )
 
+// 预编译正则表达式，避免每次调用时重复编译
+var (
+	controlRegex      = regexp.MustCompile(`[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]`)
+	multiNewlineRegex = regexp.MustCompile(`\n{3,}`)
+	spaceRegex        = regexp.MustCompile(`[ \t]{2,}`)
+)
+
 // BasicCleanResult 基础清洗结果
 type BasicCleanResult struct {
 	Content     string   `json:"content"`
@@ -92,19 +99,19 @@ func (bc *BasicCleaner) normalizePunctuation(result BasicCleanResult) BasicClean
 		']': '】',
 	}
 
+	runes := []rune(result.Content)
 	var builder strings.Builder
 	changes := []preprocess.Change{}
-	position := 0
 
-	for _, char := range result.Content {
+	for i, char := range runes {
 		if replacement, exists := halfToFull[char]; exists {
-			if bc.isInChineseContext(result.Content, position) {
+			if bc.isInChineseContext(runes, i) {
 				builder.WriteRune(replacement)
 				changes = append(changes, preprocess.Change{
 					Type:        "punctuation",
 					Original:    string(char),
 					Replacement: string(replacement),
-					Position:    position,
+					Position:    i,
 				})
 				result.Stats["punctuation_normalized"]++
 			} else {
@@ -113,7 +120,6 @@ func (bc *BasicCleaner) normalizePunctuation(result BasicCleanResult) BasicClean
 		} else {
 			builder.WriteRune(char)
 		}
-		position++
 	}
 
 	if len(changes) > 0 {
@@ -124,24 +130,14 @@ func (bc *BasicCleaner) normalizePunctuation(result BasicCleanResult) BasicClean
 	return result
 }
 
-// isInChineseContext 判断指定位置是否处于中文上下文中
-func (bc *BasicCleaner) isInChineseContext(content string, position int) bool {
-	runes := []rune(content)
-	runePos := 0
-
-	for _, r := range runes {
-		if runePos >= position {
-			break
-		}
-		runePos += len(string(r))
-	}
-
+// isInChineseContext 判断指定rune位置是否处于中文上下文中
+func (bc *BasicCleaner) isInChineseContext(runes []rune, position int) bool {
 	checkRange := 3
-	start := runePos - checkRange
+	start := position - checkRange
 	if start < 0 {
 		start = 0
 	}
-	end := runePos + checkRange
+	end := position + checkRange
 	if end > len(runes) {
 		end = len(runes)
 	}
@@ -157,7 +153,6 @@ func (bc *BasicCleaner) isInChineseContext(content string, position int) bool {
 
 // normalizeWhitespace 规范化空白字符（保留段落结构）
 func (bc *BasicCleaner) normalizeWhitespace(result BasicCleanResult) BasicCleanResult {
-	controlRegex := regexp.MustCompile(`[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]`)
 	result.Content = controlRegex.ReplaceAllString(result.Content, "")
 
 	// 将Windows换行符统一为Unix换行符
@@ -165,7 +160,6 @@ func (bc *BasicCleaner) normalizeWhitespace(result BasicCleanResult) BasicCleanR
 	result.Content = strings.ReplaceAll(result.Content, "\r", "\n")
 
 	// 将3个及以上连续换行压缩为2个（保留段落分隔）
-	multiNewlineRegex := regexp.MustCompile(`\n{3,}`)
 	if multiNewlineRegex.MatchString(result.Content) {
 		result.Content = multiNewlineRegex.ReplaceAllString(result.Content, "\n\n")
 		bc.addChange(&result, "whitespace", "多余空行", "双换行", 0)
@@ -177,7 +171,6 @@ func (bc *BasicCleaner) normalizeWhitespace(result BasicCleanResult) BasicCleanR
 	cleanedLines := []string{}
 	for _, line := range lines {
 		trimmed := strings.TrimRight(line, " \t")
-		spaceRegex := regexp.MustCompile(`[ \t]{2,}`)
 		trimmed = spaceRegex.ReplaceAllString(trimmed, " ")
 		cleanedLines = append(cleanedLines, trimmed)
 	}
@@ -241,8 +234,8 @@ func (bc *BasicCleaner) removeAdvertisements(result BasicCleanResult) BasicClean
 		{`本文由[^\n]{2,30}提供[^\n]*`, "来源声明"},
 		{`更多精彩内容请访问[^\n]*`, "网站推广"},
 		{`下载[^\n]{0,10}APP[^\n]*`, "APP推广"},
-		{`www\.[a-zA-Z0-9]+\.[a-zA-Z]{2,}[^\s]*`, "网址广告"},
-		{`https?://[^\s\n]+`, "链接广告"},
+		{`www\.[a-zA-Z0-9]+\.[a-zA-Z]{2,}\S*`, "网址广告"},
+		{`https?://\S+`, "链接广告"},
 		{`欢迎加入[^\n]{0,20}(群|频道|社区)[^\n]*`, "群推广"},
 		{`QQ群[:：]\d+[^\n]*`, "QQ群推广"},
 		{`本章未完[，,]点击下一页继续[^\n]*`, "翻页提示"},

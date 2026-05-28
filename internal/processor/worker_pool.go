@@ -4,6 +4,7 @@ import (
   "context"
   "fmt"
   "log"
+  "runtime"
   "sync"
   "time"
 )
@@ -156,8 +157,11 @@ var (
 // GetWorkerPool 获取默认工作池（单例）
 func GetWorkerPool() *WorkerPool {
   once.Do(func() {
-    // 默认最大并发数为CPU核心数 * 2
-    maxWorkers := 4 // 保守估计，避免资源耗尽
+    // 默认最大并发数为CPU核心数，至少为1
+    maxWorkers := runtime.NumCPU()
+    if maxWorkers < 1 {
+      maxWorkers = 1
+    }
     defaultWorkerPool = NewWorkerPool(maxWorkers)
     log.Printf("初始化工作池，最大工作协程数: %d", maxWorkers)
   })

@@ -45,7 +45,10 @@ func CreateFile(record *FileRecord) error {
 	if err != nil {
 		return fmt.Errorf("创建文件记录失败: %w", err)
 	}
-	id, _ := result.LastInsertId()
+	id, err := result.LastInsertId()
+	if err != nil {
+		return fmt.Errorf("获取文件记录ID失败: %w", err)
+	}
 	record.ID = id
 	record.CreatedAt = now
 	record.UpdatedAt = now
@@ -199,6 +202,9 @@ func scanFileRows(rows *sql.Rows) ([]FileRecord, error) {
 		record.LlmProgressParagraph = int(llmParagraph.Int64)
 		record.LlmProgressCheckpoint = llmCheckpoint.String
 		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("遍历文件行失败: %w", err)
 	}
 	return records, nil
 }

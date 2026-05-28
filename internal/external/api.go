@@ -141,9 +141,8 @@ func IsRetryableError(err error) bool {
 			}
 		}
 	}
-	// 网络错误、超时错误等也可重试
+	// 网络错误、超时错误等也可重试（context.Canceled 不重试，因为表示主动取消）
 	return errors.Is(err, context.DeadlineExceeded) ||
-		errors.Is(err, context.Canceled) ||
 		isTimeoutError(err)
 }
 
@@ -375,8 +374,8 @@ func (api *API) doRequestWithRetry(req *http.Request) (*http.Response, error) {
 		resp.Body.Close()
 
 		errorBody := string(bodyBytes)
-		if len(errorBody) > 500 {
-			errorBody = errorBody[:500] + "..."
+		if runes := []rune(errorBody); len(runes) > 500 {
+			errorBody = string(runes[:500]) + "..."
 		}
 
 		// 根据状态码决定是否重试

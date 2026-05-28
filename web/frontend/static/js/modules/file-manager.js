@@ -135,7 +135,8 @@ const FileManager = (function() {
 
         if (data.success) {
           refreshFileList();
-          if (data.md5) {
+          // 仅新文件自动跳转规则配置；已存在/中间版本留在列表页
+          if (data.md5 && !data.exists && !data.isIntermediate) {
             RulesConfigModule.configureRules(data.md5);
           } else {
             showSection('file-list');
@@ -260,10 +261,16 @@ const FileManager = (function() {
       .then(blob => {
         const objUrl = window.URL.createObjectURL(blob);
         const win = window.open(objUrl, '_blank');
-        // 等新窗口加载完再释放，防止过早撤销导致空白页
-        if (win) {
-          win.addEventListener('load', () => window.URL.revokeObjectURL(objUrl));
+        if (!win) {
+          // 弹窗被拦截时立即释放，避免内存泄漏
+          window.URL.revokeObjectURL(objUrl);
+          DomUtils.showFeedback('无法打开报告窗口，请检查弹窗拦截设置', 'error');
+          return;
         }
+        // 等新窗口加载完再释放，防止过早撤销导致空白页
+        win.addEventListener('load', () => window.URL.revokeObjectURL(objUrl));
+        // 超时兜底释放（60秒）
+        setTimeout(() => window.URL.revokeObjectURL(objUrl), 60000);
       })
       .catch(err => DomUtils.showFeedback(err.message, 'error'));
   }

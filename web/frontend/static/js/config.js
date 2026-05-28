@@ -76,6 +76,12 @@ const AppConfig = {
         reject(new Error('网络错误'));
       });
 
+      // 超时处理
+      xhr.timeout = 60000;
+      xhr.addEventListener('timeout', () => {
+        reject(new Error('上传超时，请检查网络连接后重试'));
+      });
+
       xhr.open('POST', `${this.apiBaseUrl}/files/upload`);
       xhr.send(formData);
     });
