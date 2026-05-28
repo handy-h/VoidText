@@ -1,15 +1,14 @@
-# Binaries for programs and plugins
+# Binaries and executables
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
 *.test
+voidtext
+voidtext.exe
 
-# Test binary, built with `go test -c`
-*.test
-
-# Output of the go coverage tool, specifically when used with LiteIDE
+# Output of the go coverage tool
 *.out
 
 # Dependency directories
@@ -51,25 +50,21 @@ build/
 logs/
 *.log
 
-# Temporary files
+# Temporary and backup files
 tmp/
-
-# Backup files
 *.bak
 *.backup
 
-# Configuration files (local)
+# Local configuration
 configs/local.yaml
 configs/development.yaml
 configs/production.yaml
 
-
+# Code context and indexing
+code-text/
 .code-context-index-state.json
 .codex/config.toml
-voidtext
-.gitignore
-.gitignore
-code-text/code-context-mcp
 .codebuddy/mcp.json
-code-text/
+
+# Project-specific
 opencode.json
