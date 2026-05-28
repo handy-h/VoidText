@@ -1,0 +1,18 @@
+[
+  {
+    "id": "1",
+    "name": "广告清理",
+    "pattern": "本文由.*提供",
+    "replacement": "",
+    "description": "清理常见的广告文本",
+    "enabled": true
+  },
+  {
+    "id": "2",
+    "name": "错别字修正",
+    "pattern": "名子",
+    "replacement": "名字",
+    "description": "修正常见错别字",
+    "enabled": true
+  }
+]

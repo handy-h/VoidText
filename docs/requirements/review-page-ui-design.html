@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>审核页面 UI 设计规范 - VoidText</title>
+    <style>
+        body { font-family: -apple-system, "Noto Sans SC", sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; line-height: 1.8; color: #333; }
+        h1 { color: #1a1a2e; border-bottom: 2px solid #00d4aa; padding-bottom: 10px; }
+        h2 { color: #2a2a3a; margin-top: 40px; }
+        h3 { color: #4a4a5a; }
+        .spec { background: #f8f9fa; border-left: 4px solid #00d4aa; padding: 16px 20px; margin: 16px 0; border-radius: 0 8px 8px 0; }
+        .spec-title { font-weight: 600; color: #00a884; margin-bottom: 8px; }
+        code { background: #e8e8f0; padding: 2px 6px; border-radius: 4px; font-family: "JetBrains Mono", monospace; font-size: 0.9em; }
+        .color-demo { display: inline-block; width: 20px; height: 20px; vertical-align: middle; margin-right: 8px; border-radius: 3px; border: 1px solid #ccc; }
+        table { border-collapse: collapse; width: 100%; margin: 16px 0; }
+        th, td { border: 1px solid #ddd; padding: 10px 14px; text-align: left; }
+        th { background: #f0f0f5; font-weight: 600; }
+        .mock { font-family: "JetBrains Mono", monospace; background: #1a1a2e; color: #e8e8f0; padding: 20px; border-radius: 8px; white-space: pre; overflow-x: auto; font-size: 13px; line-height: 1.6; }
+        .mock .line-num { color: #606070; }
+        .mock .orig { background: rgba(255,107,107,0.15); }
+        .mock .orig-del { background: rgba(255,80,80,0.6); color: #8b0000; font-weight: 600; }
+        .mock .sugg { background: rgba(80,200,120,0.15); }
+        .mock .sugg-ins { background: rgba(60,180,80,0.6); color: #006400; font-weight: 600; }
+        .mock .normal { color: #a0a0b0; }
+    </style>
+</head>
+<body>
+
+<h1>审核页面 UI 设计规范</h1>
+<p><strong>版本</strong>: v2.0 | <strong>更新日期</strong>: 2026-05-15 | <strong>状态</strong>: 实施中</p>
+
+<h2>1. 整体布局</h2>
+
+<div class="spec">
+    <div class="spec-title">全屏沉浸式 Diff 视图</div>
+    <ul>
+        <li>审核页面采用全屏布局，移除侧边栏</li>
+        <li>顶部工具栏：审核进度、分页控件、筛选器、字体缩放、批量操作、快捷键提示</li>
+        <li>中间内容区：逐行显示全文内容，审核项以 Diff 方式高亮</li>
+        <li>底部操作栏：完成审核按钮、返回列表按钮</li>
+    </ul>
+</div>
+
+<h2>2. 行类型与样式</h2>
+
+<h3>2.1 普通行（无审核项）</h3>
+<div class="spec">
+    <div class="spec-title">样式</div>
+    <ul>
+        <li>背景：透明</li>
+        <li>文字颜色：<code>var(--text-secondary)</code></li>
+        <li>左侧：行号 gutter</li>
+        <li>右侧：无操作按钮</li>
+    </ul>
+</div>
+
+<h3>2.2 原文行（有审核项）</h3>
+<div class="spec">
+    <div class="spec-title">底色分层（关键）</div>
+    <ul>
+        <li><span class="color-demo" style="background: rgba(255,107,107,0.15);"></span> <strong>整行浅红色底色</strong>：<code>rgba(255, 107, 107, 0.15)</code></li>
+        <li><span class="color-demo" style="background: rgba(255,80,80,0.6);"></span> <strong>被修改文字深红色底色</strong>：<code>rgba(255, 80, 80, 0.6)</code>，带删除线</li>
+        <li>左侧边框：3px 实线，颜色 <code>rgba(255, 107, 107, 0.6)</code></li>
+    </ul>
+</div>
+
+<h3>2.3 建议行（每个审核项一行）</h3>
+<div class="spec">
+    <div class="spec-title">底色分层（关键）</div>
+    <ul>
+        <li><span class="color-demo" style="background: rgba(80,200,120,0.15);"></span> <strong>整行浅绿色底色</strong>：<code>rgba(80, 200, 120, 0.15)</code></li>
+        <li><span class="color-demo" style="background: rgba(60,180,80,0.6);"></span> <strong>建议文字深绿色底色</strong>：<code>rgba(60, 180, 80, 0.6)</code>，无删除线</li>
+        <li>左侧边框：3px 实线，颜色 <code>rgba(80, 200, 120, 0.6)</code></li>
+        <li>左侧 gutter 显示 <code>→</code> 箭头</li>
+    </ul>
+</div>
+
+<h3>2.4 布局示意</h3>
+<div class="mock"><span class="line-num">  15  </span><span class="orig">在我们生存的这个星球上，<span class="orig-del">并存着无数个</span>世界。有人类世界，有植物世界</span>  <span style="color:#00d4aa">[保留] [撤销]</span>
+<span class="line-num">   →  </span><span class="sugg">在我们生存的这个星球上，<span class="sugg-ins">存在多个      </span>世界。有人类世界，有植物世界</span>
+<span class="line-num">  16  </span><span class="normal">有空气世界，有水的世界…</span>
+<span class="line-num">  17  </span><span class="normal">我们的这个主人公，属于尘埃世界。</span></div>
+
+<h2>3. 逐字符对齐 Diff</h2>
+
+<div class="spec">
+    <div class="spec-title">核心规则</div>
+    <ol>
+        <li><strong>字符位置对齐</strong>：原文行与建议行的每个字符位置必须逐字符对齐</li>
+        <li><strong>双向空格填充</strong>：
+            <ul>
+                <li>建议比原文短 → 建议行填充空格</li>
+                <li>原文比建议短 → 原文行填充空格</li>
+            </ul>
+        </li>
+        <li><strong>空格只用于展示</strong>：实际保存时不包含填充空格</li>
+        <li><strong>不可见字符可视化</strong>：<code>\n</code> 显示为 <code>↵</code>，<code>\t</code> 显示为 <code>→</code></li>
+    </ol>
+</div>
+
+<h2>4. 浮动操作框</h2>
+
+<div class="spec">
+    <div class="spec-title">定位与显示</div>
+    <ul>
+        <li><strong>位置</strong>：定位在原文行的右侧（<code>position: absolute; right: 8px; top: 50%; transform: translateY(-50%)</code>）</li>
+        <li><strong>触发条件</strong>：hover 或 active（选中）原文行时显示</li>
+        <li><strong>按钮</strong>：<code>[保留]</code>（Enter）/ <code>[撤销]</code>（Esc）</li>
+        <li><strong>多个审核项</strong>：显示 <code>[全部保留]</code> / <code>[全部撤销]</code></li>
+        <li><strong>不遮挡文本</strong>：工具栏只在原文行上显示，不覆盖建议行</li>
+    </ul>
+</div>
+
+<h2>5. 快捷键</h2>
+
+<table>
+    <thead>
+        <tr><th>按键</th><th>功能</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><code>↑</code> / <code>P</code></td><td>上一个审核行</td></tr>
+        <tr><td><code>↓</code> / <code>N</code></td><td>下一个审核行</td></tr>
+        <tr><td><code>Enter</code></td><td>保留当前行所有审核项</td></tr>
+        <tr><td><code>Esc</code></td><td>撤销当前行所有审核项</td></tr>
+        <tr><td><code>PageUp</code> / <code>PageDown</code></td><td>翻页</td></tr>
+        <tr><td><code>Home</code> / <code>End</code></td><td>首页 / 末页</td></tr>
+        <tr><td><code>Ctrl +</code> / <code>Ctrl -</code></td><td>放大 / 缩小字体</td></tr>
+    </tbody>
+</table>
+
+<h2>6. 分页</h2>
+
+<div class="spec">
+    <ul>
+        <li>默认 50 行/页，可选 25 / 50 / 75 / 100</li>
+        <li>分页基于全文行数，审核项所在的行会显示原文行 + 建议行</li>
+    </ul>
+</div>
+
+<h2>7. 批量审核</h2>
+
+<div class="spec">
+    <div class="spec-title">检测规则</div>
+    <ul>
+        <li>当多个审核项的 <code>original</code> 和 <code>suggested</code> 完全相同时，归为一组</li>
+        <li>组内有 2 项以上时，显示"批量 (N)"按钮</li>
+        <li>点击进入独立全屏页面，可逐项审核或全部通过/拒绝</li>
+    </ul>
+</div>
+
+<h2>8. 涉及文件</h2>
+
+<table>
+    <thead>
+        <tr><th>文件</th><th>职责</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><code>web/frontend/index.html</code></td><td>HTML 结构</td></tr>
+        <tr><td><code>web/frontend/static/css/style.css</code></td><td>CSS 样式</td></tr>
+        <tr><td><code>web/frontend/static/js/diff-utils.js</code></td><td>Diff 算法（含逐字符对齐）</td></tr>
+        <tr><td><code>web/frontend/static/js/modules/review.js</code></td><td>审核模块逻辑</td></tr>
+        <tr><td><code>internal/processor/model_repairer.go</code></td><td>Position 偏移量修复</td></tr>
+    </tbody>
+</table>
+
+</body>
+</html>

@@ -1,13 +1,13 @@
 package processor
 
 import (
+	"log"
 	"sort"
 	"strings"
 
-	"txt-cleaning/internal/config"
-	"txt-cleaning/internal/processor/preprocess"
-	"txt-cleaning/internal/processor/rules"
-	"txt-cleaning/internal/review/manager"
+	"voidtext/internal/config"
+	"voidtext/internal/processor/preprocess"
+	"voidtext/internal/processor/rules"
 )
 
 // ProcessResult 处理结果
@@ -26,9 +26,6 @@ type ProcessingStage struct {
 	Stats   map[string]int      `json:"stats"`
 	Changes []preprocess.Change `json:"changes"`
 }
-
-// 全局审核管理器
-var reviewManager = manager.NewManager()
 
 // 全局规则管理器
 var ruleManager = rules.NewRuleManager()
@@ -63,17 +60,20 @@ func Process(content string) ProcessResult {
 			config.AppConfigInstance.VectorModelType,
 			config.AppConfigInstance.VectorModelName,
 		)
-		vectorResult := vectorDetector.DetectDuplicates(currentContent)
+		vectorResult, err := vectorDetector.DetectDuplicates(currentContent)
+		if err != nil {
+			log.Printf("[向量检测] 失败，跳过此阶段: %v", err)
+		} else {
+			stages = append(stages, ProcessingStage{
+				Name:    "向量检测去重",
+				Stats:   vectorResult.Stats,
+				Changes: vectorResult.Changes,
+			})
 
-		stages = append(stages, ProcessingStage{
-			Name:    "向量检测去重",
-			Stats:   vectorResult.Stats,
-			Changes: vectorResult.Changes,
-		})
-
-		currentContent = vectorResult.Content
-		allChanges = append(allChanges, vectorResult.Changes...)
-		mergeStats(allStats, vectorResult.Stats)
+			currentContent = vectorResult.Content
+			allChanges = append(allChanges, vectorResult.Changes...)
+			mergeStats(allStats, vectorResult.Stats)
+		}
 	}
 
 	// 第三阶段：模型修复（错别字和语法错误纠正）
@@ -128,78 +128,90 @@ func GetRuleManager() *rules.RuleManager {
 	return ruleManager
 }
 
-// ProcessWithReview 处理文本并创建审核会话
-func ProcessWithReview(content, fileID, processID string) (ProcessResult, error) {
-	result := Process(content)
-
-	// 创建审核会话
-	sessionID := processID + "_review"
-	session, err := reviewManager.CreateSession(sessionID, fileID, processID, result.Suggestions)
-	if err != nil {
-		return result, err
-	}
-
-	result.ReviewSessionID = session.ID
-	return result, nil
-}
-
 // ApplySuggestion 应用单个修改建议
+//
+// 实现说明：远程审核项 review_items 中保存的 Position 是基于"产生该建议时的段落或步骤快照"
+// 计算的，与 finalize 阶段使用的最终内容并不对齐，因此不能完全依赖 Position 做精确切片。
+// 按 ModificationType 分流：
+//   - 段落级（duplicate_paragraph / advertisement）：按整段相似度匹配后移除/替换一次
+//   - 字符级（character_correction / typo_correction / text_*）：全文 ReplaceAll，
+//     因为同一错别字在不同段落都应该被修正，且不存在位置歧义
+//   - 其他类型：保守起见仅替换首个匹配
 func ApplySuggestion(content string, suggestion preprocess.Change) string {
 	if suggestion.Original == "" && suggestion.Replacement == "" {
 		return content
 	}
-
 	if suggestion.Original == "" {
 		return content
 	}
 
-	if suggestion.Position >= 0 && suggestion.Position < len(content) {
-		expectedEnd := suggestion.Position + len(suggestion.Original)
-		if expectedEnd <= len(content) && content[suggestion.Position:expectedEnd] == suggestion.Original {
-			return content[:suggestion.Position] + suggestion.Replacement + content[expectedEnd:]
-		}
+	switch suggestion.Type {
+	case "duplicate_paragraph", "advertisement":
+		return applyParagraphSuggestion(content, suggestion)
+	case "character_correction", "typo_correction", "text_deletion", "text_insertion":
+		return strings.ReplaceAll(content, suggestion.Original, suggestion.Replacement)
 	}
 
-	idx := strings.Index(content, suggestion.Original)
-	if idx >= 0 {
+	// 未知类型：保守起见仅替换首个匹配
+	if idx := strings.Index(content, suggestion.Original); idx >= 0 {
 		return content[:idx] + suggestion.Replacement + content[idx+len(suggestion.Original):]
 	}
-
-	if suggestion.Type == "duplicate_paragraph" || suggestion.Type == "advertisement" {
-		origTrimmed := strings.TrimSpace(suggestion.Original)
-		origRunes := []rune(origTrimmed)
-		origLen := len(origRunes)
-		threshold := float64(0.6)
-		paragraphs := strings.Split(content, "\n\n")
-		filtered := []string{}
-		for _, para := range paragraphs {
-			paraTrimmed := strings.TrimSpace(para)
-			paraRunes := []rune(paraTrimmed)
-			if origLen > 0 && len(paraRunes) > 0 {
-				minLen := origLen
-				if len(paraRunes) < minLen {
-					minLen = len(paraRunes)
-				}
-				matchCount := 0
-				minIdx := minLen
-				for i := 0; i < minIdx; i++ {
-					if origRunes[i] == paraRunes[i] {
-						matchCount++
-					}
-				}
-				similarity := float64(matchCount) / float64(origLen)
-				if len(paraRunes) > origLen {
-					similarity = float64(matchCount) / float64(len(paraRunes))
-				}
-				if similarity >= threshold {
-					continue
-				}
-			}
-			filtered = append(filtered, para)
-		}
-		return strings.Join(filtered, "\n\n")
-	}
 	return content
+}
+
+// applyParagraphSuggestion 按段落相似度移除/替换段落（仅作用于首个匹配段落，避免误删多个相似段落）
+func applyParagraphSuggestion(content string, suggestion preprocess.Change) string {
+	origTrimmed := strings.TrimSpace(suggestion.Original)
+	origRunes := []rune(origTrimmed)
+	origLen := len(origRunes)
+	if origLen == 0 {
+		return content
+	}
+
+	const threshold = 0.6
+	paragraphs := strings.Split(content, "\n\n")
+	filtered := make([]string, 0, len(paragraphs))
+	matched := false
+
+	for _, para := range paragraphs {
+		if matched {
+			filtered = append(filtered, para)
+			continue
+		}
+		paraTrimmed := strings.TrimSpace(para)
+		paraRunes := []rune(paraTrimmed)
+		if len(paraRunes) == 0 {
+			filtered = append(filtered, para)
+			continue
+		}
+
+		minLen := origLen
+		if len(paraRunes) < minLen {
+			minLen = len(paraRunes)
+		}
+		matchCount := 0
+		for i := 0; i < minLen; i++ {
+			if origRunes[i] == paraRunes[i] {
+				matchCount++
+			}
+		}
+		denom := origLen
+		if len(paraRunes) > origLen {
+			denom = len(paraRunes)
+		}
+		similarity := float64(matchCount) / float64(denom)
+
+		if similarity >= threshold {
+			matched = true
+			if strings.TrimSpace(suggestion.Replacement) != "" {
+				filtered = append(filtered, suggestion.Replacement)
+			}
+			continue
+		}
+		filtered = append(filtered, para)
+	}
+
+	return strings.Join(filtered, "\n\n")
 }
 
 // ApplyAllSuggestions 应用所有修改建议
@@ -215,7 +227,3 @@ func ApplyAllSuggestions(content string, suggestions []preprocess.Change) string
 	return content
 }
 
-// GetReviewManager 获取审核管理器
-func GetReviewManager() *manager.Manager {
-	return reviewManager
-}

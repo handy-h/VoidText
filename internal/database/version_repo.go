@@ -27,7 +27,10 @@ func CreateVersion(record *VersionRecord) error {
 	if err != nil {
 		return fmt.Errorf("创建版本记录失败: %w", err)
 	}
-	id, _ := result.LastInsertId()
+	id, err := result.LastInsertId()
+	if err != nil {
+		return fmt.Errorf("获取版本记录ID失败: %w", err)
+	}
 	record.ID = id
 	return nil
 }
@@ -109,6 +112,9 @@ func scanVersionRows(rows *sql.Rows) ([]VersionRecord, error) {
 			return nil, fmt.Errorf("扫描版本记录失败: %w", err)
 		}
 		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("行迭代错误: %w", err)
 	}
 	return records, nil
 }

@@ -3,53 +3,148 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>小说文本清洗工具</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=4" />
+    <title>湮文 VoidText</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+    <link rel="stylesheet" href="/static/css/style.css?v=10" />
+    <link rel="stylesheet" href="/static/css/theme.css?v=3" />
+    <link rel="stylesheet" href="/static/css/reader-controls.css?v=1" />
   </head>
   <body>
+    <!-- 主应用界面 -->
     <div id="app">
       <header>
-        <h1>小说文本清洗工具</h1>
+        <div class="header-brand">
+          <h1>湮文</h1>
+        </div>
         <nav>
           <button class="nav-btn active" onclick="showSection('file-list')">
+            <span class="nav-icon">&#x1F4C1;</span>
             文件列表
           </button>
           <button class="nav-btn" onclick="showSection('upload')">
+            <span class="nav-icon">&#x2B06;</span>
             上传文件
           </button>
         </nav>
       </header>
 
       <main>
-        <!-- 文件列表 -->
+        <!-- ===== 文件列表 ===== -->
         <section id="file-list-section">
           <div class="section-header">
             <h2>待处理文件</h2>
-            <button class="btn-primary" onclick="refreshFileList()">
-              刷新
-            </button>
+            <div class="section-header-actions">
+              <span
+                id="file-count-badge"
+                class="status-badge status-pending"
+                style="display: none"
+                >0 个文件</span
+              >
+              <button class="btn-secondary btn-sm" onclick="refreshFileList()">
+                刷新
+              </button>
+            </div>
+          </div>
+          <!-- 拖拽上传区（文件列表为空时显示） -->
+          <div id="drop-zone-empty" class="drop-zone" style="display: none">
+            <div class="drop-zone-content">
+              <div class="drop-zone-icon">
+                <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
+                  <rect
+                    x="8"
+                    y="16"
+                    width="48"
+                    height="40"
+                    rx="6"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    fill="none"
+                  />
+                  <path
+                    d="M32 12 L32 36 M24 28 L32 36 L40 28"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                  <circle
+                    cx="24"
+                    cy="30"
+                    r="3"
+                    fill="currentColor"
+                    opacity="0.4"
+                  />
+                  <circle
+                    cx="40"
+                    cy="26"
+                    r="3"
+                    fill="currentColor"
+                    opacity="0.4"
+                  />
+                </svg>
+              </div>
+              <p class="drop-zone-text">
+                点击选择或拖拽小说文件（.txt / .docx）至此开始处理
+              </p>
+              <p class="drop-zone-hint">
+                支持 .txt 和 .docx 格式，单文件最大 100MB
+              </p>
+              <input
+                type="file"
+                id="drop-zone-input"
+                accept=".txt,.docx"
+                class="drop-zone-input"
+              />
+            </div>
           </div>
           <div id="file-list-container"></div>
         </section>
 
-        <!-- 上传文件 -->
+        <!-- ===== 上传文件 ===== -->
         <section id="upload-section" style="display: none">
           <h2>上传文件</h2>
           <div class="upload-area" id="upload-area">
             <input
               type="file"
               id="file-input"
-              accept=".txt"
+              accept=".txt,.docx"
               onchange="handleFileUpload(event)"
             />
-            <p>拖拽或点击上传 .txt 文件</p>
+            <p>拖拽或点击上传 .txt / .docx 文件</p>
           </div>
           <div id="upload-result" style="display: none"></div>
         </section>
 
-        <!-- 规则配置 -->
+        <!-- ===== 规则配置 ===== -->
         <section id="rules-config-section" style="display: none">
-          <h2>规则配置</h2>
+          <div class="section-header">
+            <h2>规则配置</h2>
+          </div>
+          <!-- 预设模板 -->
+          <div class="preset-templates">
+            <span class="preset-label">快速模板：</span>
+            <button
+              class="preset-btn"
+              data-preset="basic"
+              onclick="RulesConfigModule.applyPreset('basic')"
+            >
+              基础清洗模式
+            </button>
+            <button
+              class="preset-btn"
+              data-preset="deep"
+              onclick="RulesConfigModule.applyPreset('deep')"
+            >
+              深度修复模式
+            </button>
+            <button
+              class="preset-btn"
+              data-preset="minimal"
+              onclick="RulesConfigModule.applyPreset('minimal')"
+            >
+              仅清洗
+            </button>
+          </div>
           <div class="rules-form">
             <div class="form-group">
               <label
@@ -88,6 +183,12 @@
               >
             </div>
             <div class="form-group">
+              <label
+                ><input type="checkbox" id="rule-newline-fix" checked />
+                换行符修复（自动补全段落分隔）</label
+              >
+            </div>
+            <div class="form-group">
               <label>错别字映射 (每行一个: 错字=正字)</label>
               <textarea
                 id="rule-typo-map"
@@ -104,7 +205,10 @@
               ></textarea>
             </div>
             <div class="form-actions">
-              <button class="btn-primary" onclick="saveRulesAndProcess()">
+              <button
+                class="btn-primary"
+                onclick="RulesConfigModule.saveRulesAndProcess()"
+              >
                 保存并开始处理
               </button>
               <button class="btn-secondary" onclick="showSection('file-list')">
@@ -114,11 +218,13 @@
           </div>
         </section>
 
-        <!-- 处理进度 -->
+        <!-- ===== 处理进度 ===== -->
         <section id="processing-section" style="display: none">
-          <h2>处理进度</h2>
+          <div class="section-header">
+            <h2>处理进度</h2>
+          </div>
           <div class="processing-info">
-            <div id="file-info-display"></div>
+            <div id="file-info-display" class="file-info-display"></div>
             <div class="steps-progress">
               <div class="step-item" data-step="cleaning">
                 <span class="step-icon">1</span>
@@ -149,8 +255,45 @@
               <div class="progress-bar" id="overall-progress"></div>
               <span id="progress-text">0%</span>
             </div>
-            <div id="processing-message"></div>
+            <div id="processing-message" class="processing-message"></div>
             <div id="current-action" class="current-action"></div>
+            <!-- 自动跳转开关 -->
+            <div class="auto-nav-toggle">
+              <label class="toggle-label">
+                <input type="checkbox" id="auto-nav-review" checked />
+                <span class="toggle-track">
+                  <span class="toggle-thumb"></span>
+                </span>
+                <span class="toggle-text">处理完成后自动进入审核页面</span>
+              </label>
+            </div>
+            <div
+              id="chunk-progress-container"
+              class="chunk-progress"
+              style="display: none"
+            >
+              <div class="chunk-progress-header">
+                <span>LLM修复进度</span>
+                <span id="chunk-eta" class="chunk-eta"></span>
+              </div>
+              <div class="chunk-progress-bar-container">
+                <div class="chunk-progress-bar" id="chunk-progress-bar"></div>
+              </div>
+              <div class="chunk-stats">
+                <span id="chunk-count">已处理: 0/0 块</span>
+                <span id="chunk-api-stats">API调用: 0次 | 缓存命中: 0次</span>
+                <span id="chunk-avg-time">平均耗时: 0ms/块</span>
+              </div>
+            </div>
+            <div class="processing-logs">
+              <div class="logs-header" onclick="toggleLogs()">
+                <span>处理日志</span>
+                <span id="logs-toggle-icon">&#x25BC;</span>
+              </div>
+              <div id="logs-content" class="logs-content">
+                <div id="logs-list" class="logs-list"></div>
+              </div>
+            </div>
             <div class="processing-actions">
               <button class="btn-secondary" onclick="downloadCurrentVersion()">
                 下载当前版本
@@ -162,49 +305,139 @@
           </div>
         </section>
 
-        <!-- 审核界面 -->
-        <section id="review-section" style="display: none">
-          <div class="section-header">
-            <h2>审核修改建议</h2>
-            <div class="review-progress-info">
-              <span id="review-progress-text">0/0</span>
-              <button class="btn-secondary" onclick="downloadCurrentVersion()">
-                下载当前版本
-              </button>
+        <!-- ===== 审核界面（全屏沉浸式 Diff 视图） ===== -->
+        <section id="review-section" data-theme="light" style="display: none">
+          <div class="review-fullscreen">
+            <!-- 顶部工具栏 -->
+            <div class="review-toolbar">
+              <div class="toolbar-left">
+                <span id="review-progress-info" class="review-progress-info">
+                  审核进度: <span id="review-progress-text">0/0</span>
+                </span>
+                <span id="review-current-category" class="review-current-category">全部待审核</span>
+              </div>
+              <div class="toolbar-center">
+                <div class="pagination-controls">
+                  <button class="btn-page" id="page-prev" title="上一页 (PageUp)">◀</button>
+                  <span class="page-info">
+                    第 <span id="current-page">1</span> / <span id="total-pages">1</span> 页
+                  </span>
+                  <button class="btn-page" id="page-next" title="下一页 (PageDown)">▶</button>
+                  <span class="page-separator">|</span>
+                  <label class="page-size-label">每页</label>
+                  <select id="page-size-select" class="page-size-select">
+                    <option value="25">25行</option>
+                    <option value="50" selected>50行</option>
+                    <option value="75">75行</option>
+                    <option value="100">100行</option>
+                  </select>
+                </div>
+              </div>
+              <div class="toolbar-right">
+                <select id="review-status-filter">
+                  <option value="pending">待审核</option>
+                  <option value="all">全部</option>
+                  <option value="approved">已通过</option>
+                  <option value="rejected">已拒绝</option>
+                  <option value="edited">已编辑</option>
+                </select>
+                <div class="font-scale-controls">
+                  <button class="btn-font-scale" id="font-scale-down" title="缩小字体 (Ctrl+-)">A-</button>
+                  <span class="font-scale-value" id="font-scale-value">13px</span>
+                  <button class="btn-font-scale" id="font-scale-up" title="放大字体 (Ctrl++)">A+</button>
+                </div>
+                <button class="btn-reader-settings" id="btn-reader-settings" title="阅读设置">⚙ 阅读设置</button>
+                <button class="btn-secondary btn-sm" id="batch-approve-all-btn" title="全部通过">✓ 全部通过</button>
+                <button class="btn-secondary btn-sm" id="batch-reject-all-btn" title="全部拒绝">✗ 全部拒绝</button>
+                <span class="keyboard-hint">
+                  <kbd>↑</kbd><kbd>↓</kbd> 切换
+                  <kbd>Enter</kbd> 保留 <kbd>Esc</kbd> 撤销
+                  <kbd>PgUp</kbd><kbd>PgDn</kbd> 翻页
+                </span>
+
+                <!-- 阅读设置面板（浮动下拉） -->
+                <div id="reader-settings-panel" class="reader-settings-panel hidden">
+                  <div class="reader-settings-title">阅读设置</div>
+
+                  <!-- 主题 -->
+                  <div class="reader-settings-section">
+                    <div class="reader-settings-section-label">主题</div>
+                    <div class="theme-grid" id="theme-grid">
+                      <!-- 由 ThemeModule.renderThemeButtons() 动态生成 -->
+                    </div>
+                  </div>
+
+                  <!-- 字体 -->
+                  <div class="reader-settings-section">
+                    <div class="reader-settings-section-label">字体</div>
+                    <div class="font-select-row">
+                      <select id="font-family-select" class="font-select">
+                        <!-- 由 ReaderSettingsModule.renderFontOptions() 动态生成 -->
+                      </select>
+                      <button class="btn-add-font" id="btn-add-font" title="添加自定义字体">+ 字体</button>
+                    </div>
+                    <div class="custom-font-list" id="custom-font-list">
+                      <!-- 由 ReaderSettingsModule.renderCustomFontList() 动态生成 -->
+                    </div>
+                  </div>
+
+                  <!-- 间距 -->
+                  <div class="reader-settings-section">
+                    <div class="reader-settings-section-label">间距</div>
+                    <div class="spacing-row">
+                      <span class="spacing-label">字间距</span>
+                      <input type="range" class="spacing-slider" id="letter-spacing-slider"
+                        min="0" max="0.3" step="0.02" value="0" />
+                      <span class="spacing-value" id="letter-spacing-value">0em</span>
+                    </div>
+                    <div class="spacing-row">
+                      <span class="spacing-label">行间距</span>
+                      <input type="range" class="spacing-slider" id="line-height-slider"
+                        min="1.4" max="2.8" step="0.1" value="1.8" />
+                      <span class="spacing-value" id="line-height-value">1.8</span>
+                    </div>
+                    <div class="spacing-row">
+                      <span class="spacing-label">段间距</span>
+                      <input type="range" class="spacing-slider" id="paragraph-gap-slider"
+                        min="0.2" max="3.0" step="0.2" value="1.0" />
+                      <span class="spacing-value" id="paragraph-gap-value">1.0em</span>
+                    </div>
+                  </div>
+
+                  <div class="reader-settings-divider"></div>
+                  <button class="btn-reset-settings" id="btn-reset-settings">恢复默认设置</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 审核内容区域 -->
+            <div class="review-content-area">
+              <div class="review-page-container" id="review-page-container">
+                <!-- 动态生成：审核行 -->
+              </div>
+            </div>
+
+            <!-- 底部操作栏 -->
+            <div class="review-bottom-bar">
+              <div class="bottom-bar-left">
+                <button class="btn-primary" id="finalize-btn" style="display: none">
+                  完成审核并生成文件
+                </button>
+              </div>
+              <div class="bottom-bar-right">
+                <button class="btn-secondary" onclick="showSection('file-list')">返回列表</button>
+              </div>
             </div>
           </div>
-          <div class="review-filters">
-            <select id="review-status-filter" onchange="loadReviewItems()">
-              <option value="pending">待审核</option>
-              <option value="all">全部</option>
-              <option value="approved">已通过</option>
-              <option value="rejected">已拒绝</option>
-              <option value="edited">已编辑</option>
-            </select>
-            <button class="btn-secondary" onclick="batchApproveAll()">
-              全部通过
-            </button>
-            <button class="btn-secondary" onclick="batchRejectAll()">
-              全部拒绝
-            </button>
-          </div>
-          <div id="review-items-list"></div>
-          <div class="review-actions">
-            <button
-              class="btn-primary"
-              id="finalize-btn"
-              onclick="finalizeFile()"
-              style="display: none"
-            >
-              完成审核并生成文件
-            </button>
-            <button class="btn-secondary" onclick="showSection('file-list')">
-              返回列表
-            </button>
+
+          <!-- 审核加载遮罩 -->
+          <div id="review-loading-overlay" class="loading-overlay" style="display: none">
+            <div class="loading-spinner"></div>
+            <div class="loading-text">操作处理中...</div>
           </div>
         </section>
 
-        <!-- 完成界面 -->
+        <!-- ===== 完成界面 ===== -->
         <section id="completed-section" style="display: none">
           <h2>处理完成</h2>
           <div id="completed-info"></div>
@@ -222,8 +455,90 @@
         </section>
       </main>
 
+      <!-- Toast 反馈 -->
       <div id="feedback" class="feedback" style="display: none"></div>
     </div>
-    <script src="/static/js/main.js?v=4"></script>
+
+    <!-- 自定义主题编辑器（模态框） -->
+    <div id="theme-editor-overlay" class="theme-editor-overlay hidden">
+      <div class="theme-editor">
+        <div class="theme-editor-header">
+          <span class="theme-editor-title">自定义主题</span>
+          <button class="theme-editor-close" id="theme-editor-close">✕</button>
+        </div>
+        <div class="theme-editor-body">
+          <!-- 主题名称 -->
+          <div class="theme-name-input-group">
+            <label for="theme-editor-name">主题名称</label>
+            <input type="text" class="theme-name-input" id="theme-editor-name"
+              placeholder="请输入主题名..." maxlength="20" />
+          </div>
+          <!-- 左右分栏 -->
+          <div class="theme-editor-columns">
+            <div class="theme-editor-left">
+              <div class="reader-settings-section-label">颜色配置</div>
+              <div class="color-config-list" id="color-config-list">
+                <!-- 由 ThemeModule.renderColorConfigList() 动态生成 -->
+              </div>
+            </div>
+            <div class="theme-editor-right">
+              <div class="reader-settings-section-label">预览</div>
+              <div class="theme-preview-box" id="theme-preview-box">
+                <div class="theme-preview-title">这是一段主体文字</div>
+                <div class="theme-preview-body">效果展示在这里，预览区域实时反映当前配色。</div>
+                <div class="theme-preview-separator"></div>
+                <div class="theme-preview-muted">弱化文字效果展示</div>
+                <div class="theme-preview-accent">高亮效果</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="theme-editor-footer">
+          <button class="btn-secondary" id="theme-editor-cancel">取消</button>
+          <button class="btn-primary" id="theme-editor-save">保存并应用</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 添加自定义字体对话框 -->
+    <div id="add-font-overlay" class="theme-editor-overlay hidden">
+      <div class="theme-editor" style="width:420px;">
+        <div class="theme-editor-header">
+          <span class="theme-editor-title">添加自定义字体</span>
+          <button class="theme-editor-close" id="add-font-close-btn">✕</button>
+        </div>
+        <div class="theme-editor-body">
+          <div class="font-url-input-group">
+            <label for="add-font-name">字体名称</label>
+            <input type="text" class="font-url-input" id="add-font-name"
+              placeholder="例如: MyFont" maxlength="30" />
+          </div>
+          <div class="font-url-input-group">
+            <label for="add-font-url">字体文件 URL</label>
+            <input type="text" class="font-url-input" id="add-font-url"
+              placeholder="https://example.com/font.woff2" />
+            <div class="font-url-hint">仅支持 woff2/woff/ttf 格式</div>
+            <div class="font-url-error" id="add-font-error"></div>
+          </div>
+        </div>
+        <div class="theme-editor-footer">
+          <button class="btn-secondary" id="add-font-cancel">取消</button>
+          <button class="btn-primary" id="add-font-save">添加字体</button>
+        </div>
+      </div>
+    </div>
+    <script src="/static/js/config.js?v=5"></script>
+    <script src="/static/js/dom-utils.js?v=5"></script>
+    <script src="/static/js/diff-utils.js?v=6"></script>
+    <!-- 模块化JS文件 -->
+    <script src="/static/js/modules/theme.js?v=1"></script>
+    <script src="/static/js/modules/reader-settings.js?v=1"></script>
+    <script src="/static/js/modules/review.js?v=6"></script>
+    <script src="/static/js/modules/file-manager.js?v=5"></script>
+    <script src="/static/js/modules/processing.js?v=5"></script>
+    <script src="/static/js/modules/rules-config.js?v=5"></script>
+    <script src="/static/js/modules/app.js?v=5"></script>
+    <!-- 主JS文件 -->
+    <script src="/static/js/main.js?v=5"></script>
   </body>
 </html>

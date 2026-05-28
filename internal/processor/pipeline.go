@@ -1,19 +1,21 @@
 package processor
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"sync"
 	"time"
 
-	"txt-cleaning/internal/config"
-	"txt-cleaning/internal/database"
-	"txt-cleaning/internal/file"
-	"txt-cleaning/internal/processor/preprocess"
-	"txt-cleaning/internal/processor/rules"
+	"voidtext/internal/config"
+	"voidtext/internal/database"
+	"voidtext/internal/file"
+	"voidtext/internal/processor/rules"
 )
 
 const (
@@ -188,6 +190,14 @@ func processCleaningStep(fileMd5, content string, rulesConfig RulesConfig, _ *da
 	ruleMgr := rules.NewRuleManager()
 	cleanResult.Content = ruleMgr.ApplyRules(cleanResult.Content)
 
+	// 换行修复：为缺少换行符的文本智能添加段落分隔
+	newlineFixer := NewNewlineFixer()
+	fixResult := newlineFixer.Fix(cleanResult.Content)
+	if fixResult.Content != cleanResult.Content {
+		cleanResult.Content = fixResult.Content
+		log.Printf("[基础清洗] 换行修复完成: 段落数=%d, 修改=%d", fixResult.Stats["total_paragraphs"], len(fixResult.Changes))
+	}
+
 	if err := saveIntermediateFile(fileMd5, StepCleaning, cleanResult.Content); err != nil {
 		return nil, fmt.Errorf("保存中间文件失败: %w", err)
 	}
@@ -230,27 +240,48 @@ func processIndexingStep(fileMd5, content string, rulesConfig RulesConfig, _ *da
 		config.AppConfigInstance.VectorModelType,
 		config.AppConfigInstance.VectorModelName,
 	)
-	detectResult := detector.DetectDuplicates(content)
+	detectResult, err := detector.DetectDuplicates(content)
+	if err != nil {
+		return nil, fmt.Errorf("向量检测失败: %w", err)
+	}
 
-	if err := saveIntermediateFile(fileMd5, StepIndexing, detectResult.Content); err != nil {
+	// 重复段检测仅产生待审核记录，不直接从内容里删除：
+	// 保持下一步 (LLM 修复) 段索引与原文一致，让用户在审核阶段决定是否真删
+	if err := saveIntermediateFile(fileMd5, StepIndexing, content); err != nil {
 		return nil, fmt.Errorf("保存中间文件失败: %w", err)
 	}
 
-	var items []database.ReviewItemRecord
+	// 用 change.Original 精确匹配段索引（vector_detector 输出按段顺序产生 change）
+	paragraphs := strings.Split(content, "\n")
+	indexByText := make(map[string][]int, len(paragraphs))
+	for i, p := range paragraphs {
+		indexByText[p] = append(indexByText[p], i)
+	}
+	var records []database.ReviewParagraphRecord
 	for _, change := range detectResult.Changes {
-		items = append(items, database.ReviewItemRecord{
+		if change.Type != "duplicate_paragraph" {
+			continue
+		}
+		candidates := indexByText[change.Original]
+		if len(candidates) == 0 {
+			continue
+		}
+		// 同一文本可能多次出现，每次按顺序消费一个段索引
+		paragraphIndex := candidates[0]
+		indexByText[change.Original] = candidates[1:]
+		records = append(records, database.ReviewParagraphRecord{
 			FileMd5:          fileMd5,
+			ParagraphIndex:   paragraphIndex,
 			OriginalText:     change.Original,
-			SuggestedText:    change.Replacement,
-			ModificationType: change.Type,
-			Confidence:       change.Confidence,
-			PositionStart:    change.Position,
-			PositionEnd:      change.Position + len(change.Original),
+			SuggestedText:    "",
+			ModificationType: "duplicate_paragraph",
 			Status:           "pending",
 		})
 	}
-	if len(items) > 0 {
-		database.CreateReviewItems(items)
+	if len(records) > 0 {
+		if err := database.CreateReviewParagraphs(records); err != nil {
+			return nil, fmt.Errorf("写入段级审核记录失败: %w", err)
+		}
 	}
 
 	nextStep := GetNextStep(StepIndexing)
@@ -261,7 +292,7 @@ func processIndexingStep(fileMd5, content string, rulesConfig RulesConfig, _ *da
 		FileMd5: fileMd5,
 		Step:    StepIndexing,
 		Action:  "complete",
-		Details: fmt.Sprintf("检测到重复: %d", len(detectResult.Changes)),
+		Details: fmt.Sprintf("检测到重复段: %d", len(records)),
 		Status:  "success",
 	})
 
@@ -269,15 +300,21 @@ func processIndexingStep(fileMd5, content string, rulesConfig RulesConfig, _ *da
 		CurrentStep: StepIndexing,
 		NextStep:    nextStep,
 		Progress:    progress,
-		Message:     fmt.Sprintf("向量检测完成，检测到重复: %d", len(detectResult.Changes)),
+		Message:     fmt.Sprintf("向量检测完成，检测到重复段: %d", len(records)),
 	}, nil
 }
 
 // LlmCheckpoint LLM修复断点数据
 type LlmCheckpoint struct {
-	ParagraphIndex    int                `json:"paragraphIndex"`
-	RepairedParagraphs []string          `json:"repairedParagraphs"`
-	Changes           []preprocess.Change `json:"changes"`
+	ParagraphIndex     int                              `json:"paragraphIndex"`
+	RepairedParagraphs []string                         `json:"repairedParagraphs"`
+	Records            []database.ReviewParagraphRecord `json:"records"`
+}
+
+type llmParagraphResult struct {
+	Index    int
+	Repaired string
+	Err      error
 }
 
 // processLlmFixStep LLM修复步骤（支持断点恢复和取消）
@@ -316,116 +353,211 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, record 
 
 	paragraphs := repairer.SplitIntoParagraphs(content)
 	totalParagraphs := len(paragraphs)
+	if totalParagraphs == 0 {
+		nextStep := GetNextStep(StepLlmFix)
+		database.UpdateFileStatus(fileMd5, "processing", nextStep, CalculateProgress(nextStep, 0), "")
+		return &PipelineResult{
+			CurrentStep: StepLlmFix,
+			NextStep:    nextStep,
+			Progress:    CalculateProgress(nextStep, 0),
+			Message:     "LLM修复完成，无需处理的段落",
+		}, nil
+	}
 
 	// 尝试从断点恢复
 	startIndex := 0
-	repairedParagraphs := []string{}
-	allChanges := []preprocess.Change{}
+	repairedParagraphs := make([]string, totalParagraphs)
+	for i := range repairedParagraphs {
+		repairedParagraphs[i] = paragraphs[i]
+	}
+	allRecords := []database.ReviewParagraphRecord{}
 
 	if record != nil && record.LlmProgressParagraph > 0 && record.LlmProgressParagraph < totalParagraphs {
 		startIndex = record.LlmProgressParagraph
-		// 恢复之前的已修复段落
-		for i := 0; i < startIndex; i++ {
-			repairedParagraphs = append(repairedParagraphs, paragraphs[i])
+		if record.LlmProgressCheckpoint != "" {
+			var checkpoint LlmCheckpoint
+			if err := json.Unmarshal([]byte(record.LlmProgressCheckpoint), &checkpoint); err == nil {
+				for i := 0; i < startIndex && i < len(checkpoint.RepairedParagraphs); i++ {
+					repairedParagraphs[i] = checkpoint.RepairedParagraphs[i]
+				}
+				allRecords = checkpoint.Records
+			} else {
+				log.Printf("[LLM修复] 断点数据解析失败，仅恢复段落进度: %v", err)
+			}
 		}
 		log.Printf("[LLM修复] 断点恢复: 从段落 %d/%d 继续", startIndex+1, totalParagraphs)
 	}
 
 	const checkpointInterval = 50
+	concurrency := config.AppConfigInstance.LLMConcurrency
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	// 本地 Ollama 启用时强制串行，避免单实例并发推理触发 OOM
+	if config.AppConfigInstance.EnableLocalModel && GetHealthManager().ShouldUseLocalModel() && concurrency > 1 {
+		log.Printf("[LLM修复] 本地模型启用且健康，并发数从 %d 降为 1 以避免 OOM", concurrency)
+		concurrency = 1
+	}
+	remaining := totalParagraphs - startIndex
+	if concurrency > remaining {
+		concurrency = remaining
+	}
+	progressTracker := GlobalProgressTracker.StartTracking(fileMd5, totalParagraphs)
+	if startIndex > 0 {
+		for i := 0; i < startIndex; i++ {
+			progressTracker.RecordChunkComplete(true, 0, "checkpoint")
+		}
+	}
+	defer GlobalProgressTracker.FinishTracking(fileMd5)
 
 	database.CreateProcessingLog(&database.ProcessingLogRecord{
 		FileMd5: fileMd5,
 		Step:    StepLlmFix,
 		Action:  "progress",
-		Details: fmt.Sprintf("LLM修复开始，共 %d 个段落，从第 %d 段开始", totalParagraphs, startIndex+1),
+		Details: fmt.Sprintf("LLM修复开始，共 %d 个段落，从第 %d 段开始，并发数 %d", totalParagraphs, startIndex+1, concurrency),
 		Status:  "running",
 	})
 
-	for i := startIndex; i < totalParagraphs; i++ {
-		// 定期检查取消标志
-		if i%checkpointInterval == 0 {
-			cancelled, _ := database.IsFileCancelled(fileMd5)
-			if cancelled {
-				log.Printf("[LLM修复] 文件 %s 已被取消，停止处理（已完成 %d/%d 段落）", fileMd5, i, totalParagraphs)
-				database.SetCancelFlag(fileMd5, 0) // 重置取消标志
-				return &PipelineResult{
-					CurrentStep: StepLlmFix,
-					NextStep:    "",
-					Progress:    CalculateProgress(StepLlmFix, i*100/totalParagraphs),
-					Message:     fmt.Sprintf("LLM修复已取消 (%d/%d)", i, totalParagraphs),
-				}, nil
+	jobs := make(chan int)
+	results := make(chan llmParagraphResult)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var wg sync.WaitGroup
+	for workerID := 0; workerID < concurrency; workerID++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for index := range jobs {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+
+				start := time.Now()
+				repaired := repairer.RepairParagraph(paragraphs[index])
+				select {
+				case results <- llmParagraphResult{
+					Index:    index,
+					Repaired: repaired,
+					Err:      nil,
+				}:
+				case <-ctx.Done():
+					return
+				}
+				source := "remote"
+				if repairer.RepairModelType != "api" {
+					source = "local"
+				}
+				progressTracker.RecordChunkComplete(true, time.Since(start).Milliseconds(), source)
+			}
+		}()
+	}
+	go func() {
+		for i := startIndex; i < totalParagraphs; i++ {
+			select {
+			case <-ctx.Done():
+				close(jobs)
+				wg.Wait()
+				close(results)
+				return
+			case jobs <- i:
+			}
+		}
+		close(jobs)
+		wg.Wait()
+		close(results)
+	}()
+
+	nextToCommit := startIndex
+	pendingResults := make(map[int]llmParagraphResult)
+	completed := startIndex
+	cancelRequested := false
+	var firstErr error
+	for result := range results {
+		if result.Err != nil {
+			if firstErr == nil {
+				firstErr = result.Err
+				cancel()
+			}
+			continue
+		}
+		if firstErr != nil {
+			continue
+		}
+
+		pendingResults[result.Index] = result
+		completed++
+
+		stepProgress := completed * 100 / totalParagraphs
+		database.UpdateFileStatus(fileMd5, "processing", StepLlmFix,
+			CalculateProgress(StepLlmFix, stepProgress),
+			fmt.Sprintf("LLM修复: 已完成 %d/%d 段落", completed, totalParagraphs))
+
+		for {
+			committed, ok := pendingResults[nextToCommit]
+			if !ok {
+				break
+			}
+			repairedParagraphs[nextToCommit] = committed.Repaired
+			if committed.Repaired != paragraphs[nextToCommit] {
+				allRecords = append(allRecords, database.ReviewParagraphRecord{
+					FileMd5:          fileMd5,
+					ParagraphIndex:   nextToCommit,
+					OriginalText:     paragraphs[nextToCommit],
+					SuggestedText:    committed.Repaired,
+					ModificationType: "llm_repair",
+					Status:           "pending",
+				})
+			}
+			delete(pendingResults, nextToCommit)
+			nextToCommit++
+
+			if nextToCommit%checkpointInterval == 0 || nextToCommit == totalParagraphs {
+				if err := saveLlmCheckpoint(fileMd5, repairedParagraphs[:nextToCommit], allRecords, nextToCommit, totalParagraphs); err != nil {
+					log.Printf("[LLM修复] 断点保存失败: %v", err)
+				}
 			}
 		}
 
-		preview := paragraphs[i]
-		previewRunes := []rune(preview)
-		if len(previewRunes) > 40 {
-			preview = string(previewRunes[:40]) + "..."
-		}
-
-		database.UpdateFileStatus(fileMd5, "processing", StepLlmFix,
-			CalculateProgress(StepLlmFix, i*100/totalParagraphs),
-			fmt.Sprintf("LLM修复: 正在处理 %d/%d", i+1, totalParagraphs))
-
-		repaired, changes := repairer.RepairParagraph(paragraphs[i])
-		repairedParagraphs = append(repairedParagraphs, repaired)
-		allChanges = append(allChanges, changes...)
-
-		stepProgress := (i + 1) * 100 / totalParagraphs
-		database.UpdateFileStatus(fileMd5, "processing", StepLlmFix,
-			CalculateProgress(StepLlmFix, stepProgress),
-			fmt.Sprintf("LLM修复: 已完成 %d/%d 段落", i+1, totalParagraphs))
-
-		// 每隔 checkpointInterval 个段落保存断点
-		if (i+1)%checkpointInterval == 0 || i == totalParagraphs-1 {
-			checkpointContent := strings.Join(repairedParagraphs, "\n")
-			checkpointJSON, _ := json.Marshal(LlmCheckpoint{
-				ParagraphIndex:    i + 1,
-				RepairedParagraphs: repairedParagraphs,
-				Changes:           allChanges,
-			})
-			database.UpdateLlmProgress(fileMd5, i+1, string(checkpointJSON))
-			// 同时保存中间文件
-			saveIntermediateFile(fileMd5, StepLlmFix, checkpointContent)
-
-			database.CreateProcessingLog(&database.ProcessingLogRecord{
-				FileMd5: fileMd5,
-				Step:    StepLlmFix,
-				Action:  "checkpoint",
-				Details: fmt.Sprintf("断点保存: 段落 %d/%d (累计修改 %d 处)", i+1, totalParagraphs, len(allChanges)),
-				Status:  "running",
-			})
-
-			log.Printf("[LLM修复] 断点保存: %d/%d 段落完成", i+1, totalParagraphs)
+		if completed%checkpointInterval == 0 {
+			cancelled, _ := database.IsFileCancelled(fileMd5)
+			if cancelled {
+				cancelRequested = true
+				cancel()
+				database.SetCancelFlag(fileMd5, 0)
+				log.Printf("[LLM修复] 文件 %s 已被取消，已完成 %d/%d 段落，已提交 %d/%d 段落",
+					fileMd5, completed, totalParagraphs, nextToCommit, totalParagraphs)
+			}
 		}
 	}
-
-	// 最终保存
-	repairResult := ModelRepairResult{
-		Content: strings.Join(repairedParagraphs, "\n"),
-		Changes: allChanges,
+	if cancelRequested {
+		// 同步将 status 标记为 cancelled，外层 RunAllSteps 可据此中止后续步骤，
+		// 避免取消后仍被推进到 review/finalizing
+		progress := CalculateProgress(StepLlmFix, completed*100/totalParagraphs)
+		database.UpdateFileStatus(fileMd5, "cancelled", StepLlmFix, progress,
+			fmt.Sprintf("用户取消（已完成 %d/%d 段落）", completed, totalParagraphs))
+		return &PipelineResult{
+			CurrentStep: StepLlmFix,
+			NextStep:    "",
+			Progress:    progress,
+			Message:     fmt.Sprintf("LLM修复已取消 (%d/%d)", completed, totalParagraphs),
+		}, nil
 	}
-
-	if err := saveIntermediateFile(fileMd5, StepLlmFix, repairResult.Content); err != nil {
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	// 审核基线为原段拼接（LLM 修复前），与 review_paragraphs.paragraph_index 一一对应
+	baselineContent := strings.Join(paragraphs, "\n")
+	if err := saveIntermediateFile(fileMd5, StepLlmFix, baselineContent); err != nil {
 		return nil, fmt.Errorf("保存中间文件失败: %w", err)
 	}
 
-	// 批量写入审核项
-	var llmItems []database.ReviewItemRecord
-	for _, change := range repairResult.Changes {
-		llmItems = append(llmItems, database.ReviewItemRecord{
-			FileMd5:          fileMd5,
-			OriginalText:     change.Original,
-			SuggestedText:    change.Replacement,
-			ModificationType: change.Type,
-			Confidence:       change.Confidence,
-			PositionStart:    change.Position,
-			PositionEnd:      change.Position + len(change.Original),
-			Status:           "pending",
-		})
-	}
-	if len(llmItems) > 0 {
-		database.CreateReviewItems(llmItems)
+	// 批量写入段级审核记录
+	if len(allRecords) > 0 {
+		if err := database.CreateReviewParagraphs(allRecords); err != nil {
+			return nil, fmt.Errorf("写入段级审核记录失败: %w", err)
+		}
 	}
 
 	// 清除断点记录
@@ -439,7 +571,7 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, record 
 		FileMd5: fileMd5,
 		Step:    StepLlmFix,
 		Action:  "complete",
-		Details: fmt.Sprintf("修复建议: %d", len(repairResult.Changes)),
+		Details: fmt.Sprintf("修复段落: %d", len(allRecords)),
 		Status:  "success",
 	})
 
@@ -447,13 +579,41 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, record 
 		CurrentStep: StepLlmFix,
 		NextStep:    nextStep,
 		Progress:    progress,
-		Message:     fmt.Sprintf("LLM修复完成，修复建议: %d", len(repairResult.Changes)),
+		Message:     fmt.Sprintf("LLM修复完成，修复段落: %d", len(allRecords)),
 	}, nil
 }
 
+func saveLlmCheckpoint(fileMd5 string, repairedParagraphs []string, records []database.ReviewParagraphRecord, paragraphIndex, totalParagraphs int) error {
+	checkpointContent := strings.Join(repairedParagraphs, "\n")
+	checkpointJSON, err := json.Marshal(LlmCheckpoint{
+		ParagraphIndex:     paragraphIndex,
+		RepairedParagraphs: repairedParagraphs,
+		Records:            records,
+	})
+	if err != nil {
+		return err
+	}
+	if err := database.UpdateLlmProgress(fileMd5, paragraphIndex, string(checkpointJSON)); err != nil {
+		return err
+	}
+	if err := saveIntermediateFile(fileMd5, StepLlmFix, checkpointContent); err != nil {
+		return err
+	}
+
+	database.CreateProcessingLog(&database.ProcessingLogRecord{
+		FileMd5: fileMd5,
+		Step:    StepLlmFix,
+		Action:  "checkpoint",
+		Details: fmt.Sprintf("断点保存: 段落 %d/%d (累计修改 %d 段)", paragraphIndex, totalParagraphs, len(records)),
+		Status:  "running",
+	})
+	log.Printf("[LLM修复] 断点保存: %d/%d 段落完成", paragraphIndex, totalParagraphs)
+	return nil
+}
+
 // processReviewStep 审核步骤（进入审核等待状态）
-func processReviewStep(fileMd5, _ string, _ *database.FileRecord) (*PipelineResult, error) {
-	total, resolved, err := database.GetReviewProgress(fileMd5)
+func processReviewStep(fileMd5, content string, record *database.FileRecord) (*PipelineResult, error) {
+	total, resolved, err := database.GetReviewParagraphProgress(fileMd5)
 	if err != nil {
 		return nil, fmt.Errorf("查询审核进度失败: %w", err)
 	}
@@ -467,6 +627,15 @@ func processReviewStep(fileMd5, _ string, _ *database.FileRecord) (*PipelineResu
 			Progress:    CalculateProgress(nextStep, 0),
 			Message:     "无需审核，直接进入下一步",
 		}, nil
+	}
+
+	// 保存审核基线：固定 LLM 修复后的文本，确保审核期间不会被覆盖
+	baselinePath := filepath.Join(config.AppConfigInstance.DataDir, "uploads", fileMd5+"_review_baseline.txt")
+	if err := os.WriteFile(baselinePath, []byte(content), 0644); err != nil {
+		return nil, fmt.Errorf("保存审核基线文件失败: %w", err)
+	}
+	if err := database.SetReviewBaselinePath(fileMd5, baselinePath); err != nil {
+		return nil, fmt.Errorf("记录审核基线路径失败: %w", err)
 	}
 
 	stepProgress := 0
@@ -487,14 +656,38 @@ func processReviewStep(fileMd5, _ string, _ *database.FileRecord) (*PipelineResu
 
 // processFinalizingStep 生成最终文件步骤
 func processFinalizingStep(fileMd5, content string, record *database.FileRecord) (*PipelineResult, error) {
-	items, err := database.GetReviewItemsByFileMd5(fileMd5, "")
+	records, err := database.GetReviewParagraphsByFileMd5(fileMd5, "")
 	if err != nil {
-		return nil, fmt.Errorf("查询审核项失败: %w", err)
+		return nil, fmt.Errorf("查询段级审核记录失败: %w", err)
 	}
 
-	finalContent := content
-	sortedChanges := buildSortedChanges(items)
-	finalContent = ApplyAllSuggestions(finalContent, sortedChanges)
+	// 按段索引重建最终文本：approved 用 suggested，edited 用 editedText，
+	// rejected/pending 保留原段；duplicate_paragraph 在 approved 时整段删除
+	byIndex := make(map[int]*database.ReviewParagraphRecord, len(records))
+	for i := range records {
+		byIndex[records[i].ParagraphIndex] = &records[i]
+	}
+	baselineParagraphs := strings.Split(content, "\n")
+	finalParagraphs := make([]string, 0, len(baselineParagraphs))
+	for i, original := range baselineParagraphs {
+		r, hit := byIndex[i]
+		if !hit {
+			finalParagraphs = append(finalParagraphs, original)
+			continue
+		}
+		switch r.Status {
+		case "approved":
+			if r.ModificationType == "duplicate_paragraph" {
+				continue
+			}
+			finalParagraphs = append(finalParagraphs, r.SuggestedText)
+		case "edited":
+			finalParagraphs = append(finalParagraphs, r.EditedText)
+		default:
+			finalParagraphs = append(finalParagraphs, original)
+		}
+	}
+	finalContent := strings.Join(finalParagraphs, "\n")
 
 	author := record.Author
 	title := record.Title
@@ -541,7 +734,7 @@ func processFinalizingStep(fileMd5, content string, record *database.FileRecord)
 
 // CheckReviewComplete 检查审核是否全部完成
 func CheckReviewComplete(fileMd5 string) (bool, error) {
-	total, resolved, err := database.GetReviewProgress(fileMd5)
+	total, resolved, err := database.GetReviewParagraphProgress(fileMd5)
 	if err != nil {
 		return false, err
 	}
@@ -562,7 +755,7 @@ func AdvanceFromReview(fileMd5 string) (*PipelineResult, error) {
 	return ProcessStep(fileMd5, nextStep)
 }
 
-// saveIntermediateFile 保存中间文件并记录版本
+// saveIntermediateFile 保存中间文件并记录版本（不更新 file_path，避免审核基线被覆盖）
 func saveIntermediateFile(fileMd5, step, content string) error {
 	filePath := filepath.Join(config.AppConfigInstance.DataDir, "uploads", fileMd5+"_"+step+".txt")
 	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
@@ -586,42 +779,28 @@ func saveIntermediateFile(fileMd5, step, content string) error {
 		Step:        step,
 	})
 
+	// 仅更新 file_path（非审核步骤时），审核基线由 processReviewStep 独立维护
 	record, _ := database.GetFileByMd5(fileMd5)
 	if record != nil {
-		record.FilePath = filePath
-		db := database.GetDB()
-		db.Exec(`UPDATE files SET file_path = ? WHERE md5 = ?`, filePath, fileMd5)
+		// 审核步骤不更新 file_path，因为过程审核已使用独立基线
+		if step != StepReview && step != StepFinalizing {
+			record.FilePath = filePath
+			db := database.GetDB()
+			db.Exec(`UPDATE files SET file_path = ? WHERE md5 = ?`, filePath, fileMd5)
+		}
 	}
 
 	return nil
 }
 
 // removeAdContent 根据正则模式移除广告内容
-func removeAdContent(content, _ string) string {
-	cleaner := NewBasicCleaner(false)
-	_ = cleaner
-	return content
-}
-
-// buildSortedChanges 从审核项构建排序后的修改建议
-func buildSortedChanges(items []database.ReviewItemRecord) []preprocess.Change {
-	var changes []preprocess.Change
-	for _, item := range items {
-		if item.Status == "approved" {
-			changes = append(changes, preprocess.Change{
-				Original:    item.OriginalText,
-				Replacement: item.SuggestedText,
-				Type:        item.ModificationType,
-				Position:    item.PositionStart,
-			})
-		} else if item.Status == "edited" && item.EditedText != "" {
-			changes = append(changes, preprocess.Change{
-				Original:    item.OriginalText,
-				Replacement: item.EditedText,
-				Type:        item.ModificationType,
-				Position:    item.PositionStart,
-			})
-		}
+func removeAdContent(content, pattern string) string {
+	if pattern == "" {
+		return content
 	}
-	return changes
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return content
+	}
+	return re.ReplaceAllString(content, "")
 }

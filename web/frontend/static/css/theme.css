@@ -1,0 +1,371 @@
+/* ============================================
+   湮文 VoidText - 阅读器皮肤系统
+   5 套内置主题 + @font-face + 阅读间距变量
+   ============================================ */
+
+/* ==================== @font-face 声明 ==================== */
+@font-face {
+  font-family: 'LXGW WenKai';
+  src: url('/static/fonts/lxgwwenkai/lxgw-wenkai-regular.woff2') format('woff2');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ==================== 亮色护眼（light） ==================== */
+#review-section[data-theme="light"],
+#batch-review-section[data-theme="light"] {
+  --void-void: #f1f5f9;
+  --void-black: #f8fafc;
+  --void-deep: #f1f5f9;
+  --void-card: #ffffff;
+  --void-border: #e2e8f0;
+  --void-subtle: #cbd5e1;
+
+  --annihilation-dim: #0f766e;
+  --annihilation-cyan: #14b8a6;
+  --annihilation-glow: #2dd4bf;
+  --annihilation-dark: #115e59;
+
+  --ash-dim: #6366f1;
+  --ash-purple: #818cf8;
+  --ash-glow: #a5b4fc;
+
+  --status-pending: #cbd5e1;
+  --status-processing: #14b8a6;
+  --status-reviewing: #818cf8;
+  --status-completed: #10b981;
+  --status-failed: #f87171;
+
+  --text-primary: #334155;
+  --text-secondary: #64748b;
+  --text-muted: #8898a8;
+
+  --glow-cyan: 0 0 20px rgba(20, 184, 166, 0.15);
+  --glow-purple: 0 0 30px rgba(129, 140, 248, 0.12);
+
+  --loading-overlay-bg: rgba(248, 250, 252, 0.9);
+}
+
+/* ==================== 寂灭黑（dark） ==================== */
+/* 注意：只有显式选择 dark 时才应用，不绑定 :root */
+#review-section[data-theme="dark"],
+#batch-review-section[data-theme="dark"] {
+  /* 虚空黑系 */
+  --void-void: #050508;
+  --void-black: #0a0a0f;
+  --void-deep: #12121a;
+  --void-card: #1a1a24;
+  --void-border: #2a2a3a;
+  --void-subtle: #3a3a4a;
+
+  /* 寂灭青系 */
+  --annihilation-dim: #00a884;
+  --annihilation-cyan: #00d4aa;
+  --annihilation-glow: #00f5c4;
+  --annihilation-dark: #008f6b;
+
+  /* 灰烬紫系 */
+  --ash-dim: #4a3fb5;
+  --ash-purple: #6b5ce7;
+  --ash-glow: #8b7cf7;
+
+  /* 状态色 */
+  --status-pending: #4a5568;
+  --status-processing: #00d4aa;
+  --status-reviewing: #6b5ce7;
+  --status-completed: #00a884;
+  --status-failed: #ff4757;
+
+  /* 文字色 */
+  --text-primary: #e8e8f0;
+  --text-secondary: #a0a0b0;
+  --text-muted: #606070;
+
+  /* 光效 */
+  --glow-cyan: 0 0 20px rgba(0, 212, 170, 0.3);
+  --glow-purple: 0 0 30px rgba(107, 92, 231, 0.2);
+  --loading-overlay-bg: rgba(10, 10, 15, 0.85);
+}
+
+/* ==================== 羊皮纸（paper） ==================== */
+#review-section[data-theme="paper"],
+#batch-review-section[data-theme="paper"] {
+  --void-void: #e8e0d0;
+  --void-black: #f5f0e8;
+  --void-deep: #e8e0d0;
+  --void-card: #ffffff;
+  --void-border: #d0c8b8;
+  --void-subtle: #c8c0b0;
+
+  --annihilation-dim: #6a5010;
+  --annihilation-cyan: #8b6914;
+  --annihilation-glow: #a07818;
+  --annihilation-dark: #5a4208;
+
+  --ash-dim: #5a4090;
+  --ash-purple: #7a5cb5;
+  --ash-glow: #9a7cd5;
+
+  --status-pending: #7a7060;
+  --status-processing: #8b6914;
+  --status-reviewing: #7a5cb5;
+  --status-completed: #5a7a18;
+  --status-failed: #c83030;
+
+  --text-primary: #3a3028;
+  --text-secondary: #6a6050;
+  --text-muted: #9a9080;
+
+  --glow-cyan: 0 0 20px rgba(139, 105, 20, 0.2);
+  --glow-purple: 0 0 30px rgba(122, 92, 181, 0.15);
+  --loading-overlay-bg: rgba(245, 240, 232, 0.85);
+}
+
+/* ==================== 绿豆沙（green） ==================== */
+#review-section[data-theme="green"],
+#batch-review-section[data-theme="green"] {
+  --void-void: #b8e6be;
+  --void-black: #c7edcc;
+  --void-deep: #b8e6be;
+  --void-card: #d4f0d8;
+  --void-border: #a8d8ad;
+  --void-subtle: #98c89d;
+
+  --annihilation-dim: #1a6a28;
+  --annihilation-cyan: #2d8a42;
+  --annihilation-glow: #3aa855;
+  --annihilation-dark: #1a5a22;
+
+  --ash-dim: #3a2a80;
+  --ash-purple: #5a4a9a;
+  --ash-glow: #7a6aba;
+
+  --status-pending: #5a7a5e;
+  --status-processing: #2d8a42;
+  --status-reviewing: #5a4a9a;
+  --status-completed: #1a6a28;
+  --status-failed: #b03030;
+
+  --text-primary: #1a3a1e;
+  --text-secondary: #2d5a32;
+  --text-muted: #5a8a5e;
+
+  --glow-cyan: 0 0 20px rgba(45, 138, 66, 0.2);
+  --glow-purple: 0 0 30px rgba(90, 74, 154, 0.15);
+  --loading-overlay-bg: rgba(199, 237, 204, 0.85);
+}
+
+/* ==================== 深夜蓝（night-blue） ==================== */
+#review-section[data-theme="night-blue"],
+#batch-review-section[data-theme="night-blue"] {
+  --void-void: #0a1420;
+  --void-black: #0d1b2a;
+  --void-deep: #1b2a3a;
+  --void-card: #243447;
+  --void-border: #3a4a5a;
+  --void-subtle: #4a5a6a;
+
+  --annihilation-dim: #3070c0;
+  --annihilation-cyan: #4a9eff;
+  --annihilation-glow: #6ab0ff;
+  --annihilation-dark: #2060a0;
+
+  --ash-dim: #5a3fa5;
+  --ash-purple: #7a5ce7;
+  --ash-glow: #9a7cf7;
+
+  --status-pending: #506070;
+  --status-processing: #4a9eff;
+  --status-reviewing: #7a5ce7;
+  --status-completed: #30a080;
+  --status-failed: #ff4757;
+
+  --text-primary: #c8d8e8;
+  --text-secondary: #a0b0c0;
+  --text-muted: #708090;
+
+  --glow-cyan: 0 0 20px rgba(74, 158, 255, 0.25);
+  --glow-purple: 0 0 30px rgba(122, 92, 231, 0.2);
+  --loading-overlay-bg: rgba(13, 27, 42, 0.85);
+}
+
+/* ==================== 暖黄灯（warm） ==================== */
+#review-section[data-theme="warm"],
+#batch-review-section[data-theme="warm"] {
+  --void-void: #e8dac0;
+  --void-black: #faf0e0;
+  --void-deep: #f0e6d0;
+  --void-card: #ffffff;
+  --void-border: #e0d0b0;
+  --void-subtle: #d0c0a0;
+
+  --annihilation-dim: #905820;
+  --annihilation-cyan: #c07830;
+  --annihilation-glow: #d89040;
+  --annihilation-dark: #704810;
+
+  --ash-dim: #5a3fa5;
+  --ash-purple: #7a5cb5;
+  --ash-glow: #9a7cd5;
+
+  --status-pending: #8a7a6a;
+  --status-processing: #c07830;
+  --status-reviewing: #7a5cb5;
+  --status-completed: #5a8a20;
+  --status-failed: #c03030;
+
+  --text-primary: #3a2a1a;
+  --text-secondary: #6a5a4a;
+  --text-muted: #9a8a7a;
+
+  --glow-cyan: 0 0 20px rgba(192, 120, 48, 0.2);
+  --glow-purple: 0 0 30px rgba(122, 92, 181, 0.15);
+  --loading-overlay-bg: rgba(250, 240, 224, 0.85);
+}
+
+/* ==================== 自定义主题 ==================== */
+/* 自定义主题通过 JS 设置 data-theme="custom-{name}" + 行内 CSS 变量 */
+#review-section[data-theme^="custom-"],
+#batch-review-section[data-theme^="custom-"] {
+  /* 具体值由 ThemeModule 通过 document.documentElement.style.setProperty 设置 */
+}
+
+/* ==================== 阅读间距 CSS 变量 ==================== */
+:root {
+  --reader-letter-spacing: 0;
+  --reader-line-height: 1.8;
+  --reader-paragraph-gap: 1em;
+  --reader-font-family: "Inter", "Noto Sans SC", -apple-system, sans-serif;
+}
+
+.review-paragraph + .review-paragraph {
+  margin-top: var(--reader-paragraph-gap);
+}
+
+/* 审核行背景色跟随主题 */
+.review-line-gutter {
+  background: rgba(0, 0, 0, 0.15);
+  border-right: 1px solid var(--void-border);
+}
+
+/* Diff 高亮在不同主题下的适配 */
+.line-original {
+  background: rgba(255, 107, 107, 0.15);
+  border-left: 3px solid rgba(255, 107, 107, 0.6);
+}
+
+.line-original .review-line-gutter {
+  background: rgba(255, 107, 107, 0.15);
+}
+
+.line-suggested {
+  background: rgba(80, 200, 120, 0.15);
+  border-left: 3px solid rgba(80, 200, 120, 0.6);
+}
+
+.line-suggested .review-line-gutter {
+  background: rgba(80, 200, 120, 0.15);
+}
+
+/* 浅色主题下 Diff 高亮颜色调整 */
+#review-section[data-theme="paper"] .diff-highlight-original,
+#batch-review-section[data-theme="paper"] .diff-highlight-original,
+#review-section[data-theme="green"] .diff-highlight-original,
+#batch-review-section[data-theme="green"] .diff-highlight-original,
+#review-section[data-theme="warm"] .diff-highlight-original,
+#batch-review-section[data-theme="warm"] .diff-highlight-original {
+  color: #b03030;
+}
+
+#review-section[data-theme="paper"] .line-original del.diff-del,
+#batch-review-section[data-theme="paper"] .line-original del.diff-del,
+#review-section[data-theme="green"] .line-original del.diff-del,
+#batch-review-section[data-theme="green"] .line-original del.diff-del,
+#review-section[data-theme="warm"] .line-original del.diff-del,
+#batch-review-section[data-theme="warm"] .line-original del.diff-del {
+  color: #8b0000;
+}
+
+#review-section[data-theme="paper"] .diff-highlight-suggested,
+#batch-review-section[data-theme="paper"] .diff-highlight-suggested,
+#review-section[data-theme="green"] .diff-highlight-suggested,
+#batch-review-section[data-theme="green"] .diff-highlight-suggested,
+#review-section[data-theme="warm"] .diff-highlight-suggested,
+#batch-review-section[data-theme="warm"] .diff-highlight-suggested {
+  color: #1a6a28;
+}
+
+#review-section[data-theme="paper"] .line-suggested ins.diff-ins,
+#batch-review-section[data-theme="paper"] .line-suggested ins.diff-ins,
+#review-section[data-theme="green"] .line-suggested ins.diff-ins,
+#batch-review-section[data-theme="green"] .line-suggested ins.diff-ins,
+#review-section[data-theme="warm"] .line-suggested ins.diff-ins,
+#batch-review-section[data-theme="warm"] .line-suggested ins.diff-ins {
+  color: #006400;
+}
+
+/* 深夜蓝主题微调 */
+#review-section[data-theme="night-blue"] .diff-highlight-original,
+#batch-review-section[data-theme="night-blue"] .diff-highlight-original {
+  color: #ff8a8a;
+}
+
+#review-section[data-theme="night-blue"] .line-original del.diff-del,
+#batch-review-section[data-theme="night-blue"] .line-original del.diff-del {
+  color: #ff6b6b;
+}
+
+#review-section[data-theme="night-blue"] .diff-highlight-suggested,
+#batch-review-section[data-theme="night-blue"] .diff-highlight-suggested {
+  color: #6be89a;
+}
+
+#review-section[data-theme="night-blue"] .line-suggested ins.diff-ins,
+#batch-review-section[data-theme="night-blue"] .line-suggested ins.diff-ins {
+  color: #40c870;
+}
+
+/* 段级审核单元格在夜间蓝下的高亮微调 */
+#review-section[data-theme="night-blue"] .review-cell-original del.diff-del,
+#batch-review-section[data-theme="night-blue"] .review-cell-original del.diff-del {
+  background: rgba(255, 90, 90, 0.32);
+  color: #ffb0b0;
+}
+#review-section[data-theme="night-blue"] .review-cell-suggested ins.diff-ins,
+#batch-review-section[data-theme="night-blue"] .review-cell-suggested ins.diff-ins {
+  background: rgba(70, 220, 130, 0.30);
+  color: #aef0c4;
+}
+
+/* 浅色主题下审核行分隔线 */
+#review-section[data-theme="paper"] .review-line,
+#batch-review-section[data-theme="paper"] .review-line,
+#review-section[data-theme="green"] .review-line,
+#batch-review-section[data-theme="green"] .review-line,
+#review-section[data-theme="warm"] .review-line,
+#batch-review-section[data-theme="warm"] .review-line {
+  border-bottom-color: rgba(0, 0, 0, 0.06);
+}
+
+/* 浅色主题下 gutter 背景 */
+#review-section[data-theme="paper"] .review-line-gutter,
+#batch-review-section[data-theme="paper"] .review-line-gutter,
+#review-section[data-theme="green"] .review-line-gutter,
+#batch-review-section[data-theme="green"] .review-line-gutter,
+#review-section[data-theme="warm"] .review-line-gutter,
+#batch-review-section[data-theme="warm"] .review-line-gutter {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+/* 浅色主题下不可见字符 */
+#review-section[data-theme="paper"] .ws-char,
+#batch-review-section[data-theme="paper"] .ws-char,
+#review-section[data-theme="green"] .ws-char,
+#batch-review-section[data-theme="green"] .ws-char,
+#review-section[data-theme="warm"] .ws-char,
+#batch-review-section[data-theme="warm"] .ws-char {
+  background: rgba(0, 0, 0, 0.08);
+  color: #666;
+}
+

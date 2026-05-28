@@ -6,9 +6,9 @@ import (
 	"math"
 	"strings"
 	"time"
-	"txt-cleaning/internal/config"
-	"txt-cleaning/internal/external"
-	"txt-cleaning/internal/processor/preprocess"
+	"voidtext/internal/config"
+	"voidtext/internal/external"
+	"voidtext/internal/processor/preprocess"
 )
 
 // ModelRepairer 模型修复器
@@ -16,6 +16,7 @@ type ModelRepairer struct {
 	RepairModelType string
 	RepairModelName string
 	api             *external.API
+	ollamaClient    *external.OllamaClient
 }
 
 // ModelRepairResult 模型修复结果
@@ -28,11 +29,20 @@ type ModelRepairResult struct {
 
 // NewModelRepairer 创建模型修复器
 func NewModelRepairer(modelType, modelName string) *ModelRepairer {
-	return &ModelRepairer{
+	mr := &ModelRepairer{
 		RepairModelType: modelType,
 		RepairModelName: modelName,
 		api:             external.NewAPI(),
 	}
+	if config.AppConfigInstance.EnableLocalModel {
+		timeout := time.Duration(config.AppConfigInstance.LocalModelTimeout) * time.Second
+		mr.ollamaClient = external.NewOllamaClient(
+			config.AppConfigInstance.LocalModelURL,
+			config.AppConfigInstance.LocalModelName,
+			timeout,
+		)
+	}
+	return mr
 }
 
 // RepairText 修复文本中的错别字和语法错误
@@ -60,15 +70,13 @@ func (mr *ModelRepairer) RepairText(content string) ModelRepairResult {
 	repairedParagraphs := []string{}
 
 	for _, paragraph := range paragraphs {
-		repaired, changes := mr.RepairParagraph(paragraph)
+		repaired := mr.RepairParagraph(paragraph)
 		repairedParagraphs = append(repairedParagraphs, repaired)
-		result.Changes = append(result.Changes, changes...)
 	}
 
 	// 重新组合文本
 	result.Content = strings.Join(repairedParagraphs, "\n")
 	result.Stats["paragraphs_repaired"] = len(paragraphs)
-	result.Stats["total_changes"] = len(result.Changes)
 
 	return result
 }
@@ -91,24 +99,71 @@ func (mr *ModelRepairer) SplitIntoParagraphs(content string) []string {
 }
 
 // RepairParagraph 修复单个段落
-func (mr *ModelRepairer) RepairParagraph(paragraph string) (string, []preprocess.Change) {
-	// 如果段落太短，直接返回
+func (mr *ModelRepairer) RepairParagraph(paragraph string) string {
 	if len(paragraph) < 10 {
-		return paragraph, []preprocess.Change{}
+		return paragraph
 	}
 
-	// 使用外部API进行修复
+	// 本地 Ollama 优先（若已配置且当前健康）
+	if mr.ollamaClient != nil && GetHealthManager().ShouldUseLocalModel() {
+		return mr.repairWithOllama(paragraph)
+	}
+
+	// 远程 API
 	if mr.RepairModelType == "api" {
 		return mr.repairWithAPI(paragraph)
 	}
 
-	// 本地修复（简化实现）
-	return mr.repairLocally(paragraph)
+	repaired, _ := mr.repairLocally(paragraph)
+	return repaired
+}
+
+// repairWithOllama 使用本地 Ollama 模型修复文本
+// 重试 3 次仍失败（可重试错误指数退避）才降级到远程 API 或本地字典
+func (mr *ModelRepairer) repairWithOllama(paragraph string) string {
+	systemPrompt := "你是一个专业的中文小说校对编辑。请修正以下段落中的错别字和语法错误，保持原文风格不变。严格保持段落开头和结尾的标点符号位置不变——不要在段首添加原文没有的标点，不要把段尾的标点挪到段首。只输出修正后的文本，无需解释。"
+	userPrompt := "输入：她高兴及了，跑过去抱住他。\n输出：她高兴极了，跑过去抱住他。\n\n当前任务：\n输入：" + paragraph + "\n输出："
+
+	maxRetries := 3
+	baseDelay := 1 * time.Second
+	var lastErr error
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		repairedText, err := mr.ollamaClient.Generate(userPrompt, systemPrompt)
+		if err == nil {
+			repairedText = strings.TrimSpace(repairedText)
+			if repairedText == "" || repairedText == paragraph {
+				return paragraph
+			}
+			if !mr.validateRepair(paragraph, repairedText) {
+				return paragraph
+			}
+			log.Printf("[Ollama修复] 成功: 输入长度=%d, 输出长度=%d (第%d次尝试)", len(paragraph), len(repairedText), attempt+1)
+			return repairedText
+		}
+
+		lastErr = err
+		// 不可重试错误（如 4xx 模型不存在）直接退出循环降级
+		if !isRetryableError(err) || attempt == maxRetries-1 {
+			break
+		}
+
+		delay := time.Duration(math.Pow(2, float64(attempt))) * baseDelay
+		log.Printf("[Ollama修复] 第%d次失败（可重试），等待%v后重试: 段落长度=%d, 错误=%v", attempt+1, delay, len(paragraph), err)
+		time.Sleep(delay)
+	}
+
+	log.Printf("[Ollama修复] %d次尝试全部失败，降级处理: 段落长度=%d, 最后错误=%v", maxRetries, len(paragraph), lastErr)
+	if mr.RepairModelType == "api" {
+		return mr.repairWithAPI(paragraph)
+	}
+	repaired, _ := mr.repairLocally(paragraph)
+	return repaired
 }
 
 // repairWithAPI 使用外部API修复文本，带重试机制
-func (mr *ModelRepairer) repairWithAPI(paragraph string) (string, []preprocess.Change) {
-	systemPrompt := "你是一个专业的中文小说校对编辑。请修正以下段落中的错别字和语法错误，保持原文风格不变。只输出修正后的文本，无需解释。"
+func (mr *ModelRepairer) repairWithAPI(paragraph string) string {
+	systemPrompt := "你是一个专业的中文小说校对编辑。请修正以下段落中的错别字和语法错误，保持原文风格不变。严格保持段落开头和结尾的标点符号位置不变——不要在段首添加原文没有的标点，不要把段尾的标点挪到段首。只输出修正后的文本，无需解释。"
 	userPrompt := "输入：她高兴及了，跑过去抱住他。\n输出：她高兴极了，跑过去抱住他。\n\n当前任务：\n输入：" + paragraph + "\n输出："
 
 	maxRetries := 3
@@ -117,20 +172,30 @@ func (mr *ModelRepairer) repairWithAPI(paragraph string) (string, []preprocess.C
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		resp, err := mr.api.GenerateChatCompletion(systemPrompt, userPrompt, 0, -1)
 		if err == nil && resp != nil && len(resp.Choices) > 0 {
+			// 输出被 max_tokens 截断时，模型只给出段落前半部分，整段对比会产生大量
+			// 虚假的"删除"建议；此处回退原文，不生成 change
+			if resp.Choices[0].FinishReason == "length" {
+				log.Printf("[LLM修复] 响应被 max_tokens 截断，回退原文: 段落长度=%d", len(paragraph))
+				return paragraph
+			}
+
 			// 成功响应
 			repairedText := strings.TrimSpace(resp.Choices[0].Message.Content)
 			if repairedText == "" || repairedText == paragraph {
-				return paragraph, []preprocess.Change{}
+				return paragraph
 			}
-			changes := mr.compareTexts(paragraph, repairedText)
-			log.Printf("[LLM修复] 成功: 输入长度=%d, 输出长度=%d, 修改数=%d (第%d次尝试)", len(paragraph), len(repairedText), len(changes), attempt+1)
-			return repairedText, changes
+			if !mr.validateRepair(paragraph, repairedText) {
+				return paragraph
+			}
+			log.Printf("[LLM修复] 成功: 输入长度=%d, 输出长度=%d (第%d次尝试)", len(paragraph), len(repairedText), attempt+1)
+			return repairedText
 		}
 
 		// 判断错误是否可重试
 		if !isRetryableError(err) || attempt == maxRetries-1 {
 			log.Printf("[LLM修复] API调用失败，回退到本地修复: 段落长度=%d, 错误=%v, 尝试=%d", len(paragraph), err, attempt+1)
-			return mr.repairLocally(paragraph)
+			repaired, _ := mr.repairLocally(paragraph)
+			return repaired
 		}
 
 		// 指数退避
@@ -141,7 +206,8 @@ func (mr *ModelRepairer) repairWithAPI(paragraph string) (string, []preprocess.C
 
 	// 所有重试均失败，回退本地修复
 	log.Printf("[LLM修复] %d次重试全部失败，回退到本地修复: 段落长度=%d", maxRetries, len(paragraph))
-	return mr.repairLocally(paragraph)
+	repaired, _ := mr.repairLocally(paragraph)
+	return repaired
 }
 
 // isRetryableError 判断API错误是否可重试
@@ -174,9 +240,7 @@ func (mr *ModelRepairer) repairLocally(paragraph string) (string, []preprocess.C
 		"以经":  "已经",
 		"好象":  "好像",
 		"做车":  "坐车",
-		"的士":  "的士", // 保留
-		"他":   "他",  // 保留
-		"她":   "她",  // 保留
+
 	}
 
 	// 应用错别字修正
@@ -198,111 +262,6 @@ func (mr *ModelRepairer) repairLocally(paragraph string) (string, []preprocess.C
 	}
 
 	return repaired, changes
-}
-
-// compareTexts 比较两个文本，生成变更记录
-func (mr *ModelRepairer) compareTexts(original, repaired string) []preprocess.Change {
-	changes := []preprocess.Change{}
-
-	if original == repaired {
-		return changes
-	}
-
-	origRunes := []rune(original)
-	repRunes := []rune(repaired)
-
-	if len(origRunes) == len(repRunes) {
-		byteOffset := 0
-		for i := 0; i < len(origRunes); i++ {
-			if origRunes[i] != repRunes[i] {
-				origStr := string(origRunes[i])
-				repStr := string(repRunes[i])
-
-				j := i + 1
-				for j < len(origRunes) && origRunes[j] != repRunes[j] {
-					origStr += string(origRunes[j])
-					repStr += string(repRunes[j])
-					j++
-				}
-
-				changes = append(changes, preprocess.Change{
-					Type:        "character_correction",
-					Original:    origStr,
-					Replacement: repStr,
-					Position:    byteOffset,
-				})
-				i = j - 1
-			}
-			byteOffset += len(string(origRunes[i]))
-		}
-	} else {
-		minLen := len(origRunes)
-		if len(repRunes) < minLen {
-			minLen = len(repRunes)
-		}
-
-		byteOffset := 0
-		i := 0
-		for i < minLen {
-			if origRunes[i] != repRunes[i] {
-				origChunk := string(origRunes[i])
-				repChunk := string(repRunes[i])
-
-				j := i + 1
-				oob := j < len(origRunes)
-				rob := j < len(repRunes)
-				for oob && rob && origRunes[j] != repRunes[j] {
-					origChunk += string(origRunes[j])
-					repChunk += string(repRunes[j])
-					j++
-					oob = j < len(origRunes)
-					rob = j < len(repRunes)
-				}
-
-				changes = append(changes, preprocess.Change{
-					Type:        "character_correction",
-					Original:    origChunk,
-					Replacement: repChunk,
-					Position:    byteOffset,
-				})
-				byteOffset += len(string(origRunes[i]))
-				i = j
-			} else {
-				byteOffset += len(string(origRunes[i]))
-				i++
-			}
-		}
-
-		if len(origRunes) > minLen {
-			remaining := ""
-			for k := minLen; k < len(origRunes); k++ {
-				remaining += string(origRunes[k])
-			}
-			if remaining != "" {
-				changes = append(changes, preprocess.Change{
-					Type:        "text_deletion",
-					Original:    remaining,
-					Replacement: "",
-					Position:    byteOffset,
-				})
-			}
-		} else if len(repRunes) > minLen {
-			remaining := ""
-			for k := minLen; k < len(repRunes); k++ {
-				remaining += string(repRunes[k])
-			}
-			if remaining != "" {
-				changes = append(changes, preprocess.Change{
-					Type:        "text_insertion",
-					Original:    "",
-					Replacement: remaining,
-					Position:    byteOffset,
-				})
-			}
-		}
-	}
-
-	return changes
 }
 
 // paragraphReconstructPrompt 段落重组系统提示词（通用版，不包含任何特定书目例子）
@@ -383,6 +342,7 @@ func (mr *ModelRepairer) ReconstructParagraphs(content string) (string, error) {
 
 // ReconstructParagraphsWithCheckpoint 带断点保存的段落重组
 // fileMd5 用于断点恢复，checkpointFn 为进度回调（参数：已完成块数, 总块数）
+// chunk 间严格串行，避免本地模型并发推理触发 OOM
 func (mr *ModelRepairer) ReconstructParagraphsWithCheckpoint(content, fileMd5 string, checkpointFn func(done, total int)) (string, error) {
 	chunkSize := config.AppConfigInstance.ParagraphChunkSize
 	if chunkSize <= 0 {
@@ -392,27 +352,22 @@ func (mr *ModelRepairer) ReconstructParagraphsWithCheckpoint(content, fileMd5 st
 
 	chunks := mr.smartChunk(content, chunkSize, overlap)
 	totalChunks := len(chunks)
-	log.Printf("[段落重组] 分块完成: 总块数=%d, 分块大小=%d, 重叠=%d", totalChunks, chunkSize, overlap)
+	log.Printf("[段落重组] 分块完成: 总块数=%d, 分块大小=%d, 重叠=%d（统一使用远程 API）", totalChunks, chunkSize, overlap)
 
 	reconstructedChunks := make([]string, 0, totalChunks)
 
 	for i, chunk := range chunks {
 		log.Printf("[段落重组] 正在处理第 %d/%d 块 (长度=%d字符)", i+1, totalChunks, len([]rune(chunk)))
 
-		resp, err := mr.api.GenerateChatCompletion(paragraphReconstructPrompt, chunk, 0, -1)
+		repaired, err := mr.reconstructChunk(chunk)
 		if err != nil {
-			// 保存当前进度
 			if len(reconstructedChunks) > 0 && fileMd5 != "" {
 				partial := mr.mergeChunks(reconstructedChunks, overlap)
 				log.Printf("[段落重组] 第%d块失败，已保存 %d/%d 块的部分结果（%d字符）", i+1, i, totalChunks, len([]rune(partial)))
 			}
-			return content, fmt.Errorf("第%d块LLM调用失败: %w", i+1, err)
-		}
-		if resp == nil || len(resp.Choices) == 0 {
-			return content, fmt.Errorf("第%d块LLM返回空结果", i+1)
+			return content, fmt.Errorf("第%d块处理失败: %w", i+1, err)
 		}
 
-		repaired := strings.TrimSpace(resp.Choices[0].Message.Content)
 		if repaired == "" {
 			repaired = chunk // 降级：使用原块
 		}
@@ -430,6 +385,19 @@ func (mr *ModelRepairer) ReconstructParagraphsWithCheckpoint(content, fileMd5 st
 		len([]rune(content)), len([]rune(result)))
 
 	return result, nil
+}
+
+// reconstructChunk 单块段落重组：直接调用远程 API
+// 本地模型推理段落重组（长上下文）容易 OOM，统一走远程 API；错别字修复仍由本地 LLM 处理
+func (mr *ModelRepairer) reconstructChunk(chunk string) (string, error) {
+	resp, err := mr.api.GenerateChatCompletion(paragraphReconstructPrompt, chunk, 0, -1)
+	if err != nil {
+		return "", fmt.Errorf("远程 API 调用失败: %w", err)
+	}
+	if resp == nil || len(resp.Choices) == 0 {
+		return "", fmt.Errorf("远程 API 返回空结果")
+	}
+	return strings.TrimSpace(resp.Choices[0].Message.Content), nil
 }
 
 // smartChunk 智能分块
@@ -460,15 +428,18 @@ func (mr *ModelRepairer) smartChunk(content string, chunkSize, overlap int) []st
 		chunk := string(runes[start:end])
 		chunks = append(chunks, chunk)
 
-		// 下一块起点 = 当前结束 - 重叠
-		start = end - overlap
-		if start <= 0 || start >= totalLen {
+		// 已处理到末尾，退出循环（避免 end=totalLen 时下一轮 start=end-overlap 仍 < totalLen 导致无限循环）
+		if end >= totalLen {
 			break
 		}
-		// 防止无限循环
-		if start >= end {
-			start = end
+
+		// 下一块起点 = 当前结束 - 重叠
+		nextStart := end - overlap
+		// 防止 nextStart 倒退或不前进，至少前进 1 个 rune
+		if nextStart <= start {
+			nextStart = start + 1
 		}
+		start = nextStart
 	}
 
 	return chunks
@@ -591,34 +562,122 @@ func (mr *ModelRepairer) findMergePoint(curr, prev []rune) int {
 	return 0
 }
 
-// detectCommonTypos 检测常见错别字
-func (mr *ModelRepairer) detectCommonTypos(text string) []preprocess.Change {
-	changes := []preprocess.Change{}
+// validateRepair 校验LLM修复结果的质量
+// 如果修复结果与原始文本差异过大，返回 false 表示拒绝该修复
+// 这可以防止LLM产生不合理的输出（如"他是。"→"他是是"）被误接受
+func (mr *ModelRepairer) validateRepair(original, repaired string) bool {
+	origRunes := []rune(original)
+	repRunes := []rune(repaired)
+	origLen := len(origRunes)
+	repLen := len(repRunes)
 
-	// 常见错别字模式
-	typoPatterns := map[string]string{
-		"管":  "馆",  // 图书管 -> 图书馆
-		"及了": "极了", // 高兴及了 -> 高兴极了
-		"在次": "再次", // 在次见面 -> 再次见面
-		"哪么": "那么", // 哪么好 -> 那么好
-		"因该": "应该", // 因该去 -> 应该去
-		"以经": "已经", // 以经完成 -> 已经完成
-		"好象": "好像", // 好象是 -> 好像是
-		"做车": "坐车", // 做车去 -> 坐车去
+	if origLen == 0 || repLen == 0 {
+		return false
 	}
 
-	// 应用字符串模式匹配
-	for pattern, replacement := range typoPatterns {
-		if strings.Contains(text, pattern) {
-			position := strings.Index(text, pattern)
-			changes = append(changes, preprocess.Change{
-				Type:        "typo_correction",
-				Original:    pattern,
-				Replacement: replacement,
-				Position:    position,
-			})
+	// 标点搬家检测：LLM 常见幻觉是把段尾标点挪到段首
+	// 命中条件：原文末尾的句尾标点 == 修复结果开头的句尾标点，且原文开头不是该标点
+	if isSentenceEndPunct(repRunes[0]) &&
+		repRunes[0] == origRunes[origLen-1] &&
+		origRunes[0] != repRunes[0] {
+		log.Printf("[修复校验] 拒绝修复（标点搬家：段尾→段首）: 标点='%s'", string(repRunes[0]))
+		return false
+	}
+
+	// 短文本（< 15 字符）校验更严格：只要长度不同就拒绝
+	if origLen < 15 || repLen < 15 {
+		if origLen != repLen {
+			log.Printf("[修复校验] 拒绝修复（短文本长度变化）: 原始=%d字符 修复=%d字符", origLen, repLen)
+			return false
 		}
 	}
 
-	return changes
+	// 长度差比例超过 20% 且长度差 > 2，拒绝
+	lenDiff := float64(abs(origLen - repLen))
+	maxLen := float64(max(origLen, repLen))
+	if lenDiff > 2 && lenDiff/maxLen > 0.20 {
+		log.Printf("[修复校验] 拒绝修复（长度变化过大）: 原始=%d字符 修复=%d字符", origLen, repLen)
+		return false
+	}
+
+	// 编辑距离校验：仅对短段落（≤ 500 字符）计算编辑距离
+	// 长段落的内存和时间开销过大，只用长度差判断
+	if origLen <= 500 && repLen <= 500 {
+		editDist := levenshteinDistanceRunes(origRunes, repRunes)
+		if float64(editDist)/maxLen > 0.25 {
+			log.Printf("[修复校验] 拒绝修复（编辑距离过大）: 原文=%d字符 编辑距离=%d 比例=%.2f",
+				origLen, editDist, float64(editDist)/maxLen)
+			return false
+		}
+	}
+
+	return true
+}
+
+// levenshteinDistanceRunes 计算两个 rune 切片的莱文斯坦编辑距离，使用O(min(m,n))空间的优化实现
+func levenshteinDistanceRunes(a, b []rune) int {
+	m, n := len(a), len(b)
+
+	// 确保 a 是较短的，以节省空间
+	if m > n {
+		a, b = b, a
+		m, n = n, m
+	}
+
+	// 当前行和前一行
+	prev := make([]int, m+1)
+	curr := make([]int, m+1)
+
+	for i := 0; i <= m; i++ {
+		prev[i] = i
+	}
+
+	for j := 1; j <= n; j++ {
+		curr[0] = j
+		for i := 1; i <= m; i++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			curr[i] = min3(
+				prev[i]+1,      // 删除
+				curr[i-1]+1,    // 插入
+				prev[i-1]+cost, // 替换
+			)
+		}
+		prev, curr = curr, prev
+	}
+
+	return prev[m]
+}
+
+// isSentenceEndPunct 是否为中文句尾标点（含逗号、分号等会被 LLM 跨段挪动的标点）
+func isSentenceEndPunct(r rune) bool {
+	switch r {
+	case '。', '！', '？', '，', '；', '：', '、':
+		return true
+	}
+	return false
+}
+
+// abs 返回整数的绝对值
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+// min3 返回三个整数的最小值
+func min3(a, b, c int) int {
+	if a < b {
+		if a < c {
+			return a
+		}
+		return c
+	}
+	if b < c {
+		return b
+	}
+	return c
 }

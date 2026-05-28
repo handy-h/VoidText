@@ -11,10 +11,18 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// ModelEndpoint 模型端点配置（URL + 密钥 + 模型名）
+type ModelEndpoint struct {
+	URL       string
+	APIKey    string
+	ModelName string
+}
+
 // AppConfig 应用配置
 type AppConfig struct {
 	Port           int
 	DataDir        string
+	BaseDir        string
 	MaxFileSize    int64
 	BackupKeepDays int
 
@@ -35,11 +43,18 @@ type AppConfig struct {
 	LLMApiURL             string
 	LLMApiKey             string
 	CompletionModelName   string
+	ModelEndpoints        []ModelEndpoint // 多模型端点列表（含主模型 + 备用模型）
 	CompletionTemperature float64
 	CompletionMaxTokens   int
+	LLMConcurrency        int
 
 	EnableLlmParagraphReconstruct bool
 	ParagraphChunkSize            int
+
+	EnableLocalModel   bool
+	LocalModelURL      string
+	LocalModelName     string
+	LocalModelTimeout  int
 
 	NameSeparators string
 }
@@ -69,9 +84,16 @@ func Load() error {
 	// 打印实际加载的环境变量值
 	log.Printf("DATA_DIR=%s", os.Getenv("DATA_DIR"))
 
+	// 获取当前工作目录作为 BaseDir
+	baseDir, err := os.Getwd()
+	if err != nil {
+		baseDir = "."
+	}
+
 	cfg := AppConfig{
 		Port:                      getEnvInt("PORT", 8080),
 		DataDir:                   getEnvStr("DATA_DIR", "./data"),
+		BaseDir:                   baseDir,
 		MaxFileSize:               getEnvInt64("MAX_FILE_SIZE", 100*1024*1024),
 		BackupKeepDays:            getEnvInt("BACKUP_KEEP_DAYS", 7),
 		EnableBasicCleaning:       getEnvBool("ENABLE_BASIC_CLEANING", true),
@@ -90,10 +112,18 @@ func Load() error {
 		LLMApiKey:                 getEnvStr("LLM_API_KEY", ""),
 		CompletionModelName:       getEnvStr("COMPLETION_MODEL_NAME", "gpt-3.5-turbo-instruct"),
 		CompletionTemperature:     getEnvFloat("COMPLETION_TEMPERATURE", 0.3),
-		CompletionMaxTokens:              getEnvInt("COMPLETION_MAX_TOKENS", 2048),
-		EnableLlmParagraphReconstruct:    getEnvBool("ENABLE_LLM_PARAGRAPH_RECONSTRUCT", false),
-		ParagraphChunkSize:               getEnvInt("PARAGRAPH_CHUNK_SIZE", 8000),
-		NameSeparators:                   getEnvStr("NAME_SEPARATORS", "-|—|·|·|_| "),
+		CompletionMaxTokens:           getEnvInt("COMPLETION_MAX_TOKENS", 2048),
+		LLMConcurrency:                getEnvInt("LLM_CONCURRENCY", 2),
+		EnableLlmParagraphReconstruct: getEnvBool("ENABLE_LLM_PARAGRAPH_RECONSTRUCT", true),
+		ParagraphChunkSize:            getEnvInt("PARAGRAPH_CHUNK_SIZE", 8000),
+		EnableLocalModel:              getEnvBool("ENABLE_LOCAL_MODEL", false),
+		LocalModelURL:                 getEnvStr("LOCAL_MODEL_URL", "http://localhost:11434"),
+		LocalModelName:                getEnvStr("LOCAL_MODEL_NAME", "qwen2.5"),
+		LocalModelTimeout:             getEnvInt("LOCAL_MODEL_TIMEOUT", 30),
+		NameSeparators:                getEnvStr("NAME_SEPARATORS", "-|—|·|·|_| "),
+	}
+	if cfg.LLMConcurrency < 1 {
+		cfg.LLMConcurrency = 1
 	}
 
 	if cfg.VectorModelURL == "" {
@@ -111,6 +141,9 @@ func Load() error {
 	if cfg.CompletionModelName == "" {
 		cfg.CompletionModelName = getEnvStr("EMBEDDING_MODEL_NAME", "gpt-3.5-turbo-instruct")
 	}
+
+	// 构建多模型端点列表（主模型 + 最多2个备用模型）
+	cfg.ModelEndpoints = buildModelEndpoints(cfg)
 
 	AppConfigInstance = cfg
 
@@ -141,7 +174,9 @@ func (c *AppConfig) GetNameSeparators() []string {
 
 func ensureDir(dir string) {
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		os.MkdirAll(dir, 0755)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			log.Printf("创建目录失败: %s, 错误: %v", dir, err)
+		}
 	}
 }
 
@@ -201,4 +236,48 @@ func Validate() error {
 		return fmt.Errorf("无效生成温度: %f", cfg.CompletionTemperature)
 	}
 	return nil
+}
+
+// buildModelEndpoints 从环境变量构建多模型端点列表
+// 模型1 使用原有的 LLM_API_URL/LLM_API_KEY/COMPLETION_MODEL_NAME 配置（向后兼容）
+// 模型2 使用 LLM_API_URL_2/LLM_API_KEY_2/COMPLETION_MODEL_NAME_2
+// 模型3 使用 LLM_API_URL_3/LLM_API_KEY_3/COMPLETION_MODEL_NAME_3
+// URL 和 APIKey 必须同时非空才算有效端点
+func buildModelEndpoints(cfg AppConfig) []ModelEndpoint {
+	var endpoints []ModelEndpoint
+
+	// 模型1：主配置（向后兼容）
+	if cfg.LLMApiURL != "" && cfg.LLMApiKey != "" {
+		endpoints = append(endpoints, ModelEndpoint{
+			URL:       cfg.LLMApiURL,
+			APIKey:    cfg.LLMApiKey,
+			ModelName: cfg.CompletionModelName,
+		})
+	}
+
+	// 模型2：备用模型
+	model2URL := getEnvStr("LLM_API_URL_2", "")
+	model2Key := getEnvStr("LLM_API_KEY_2", "")
+	model2Name := getEnvStr("COMPLETION_MODEL_NAME_2", cfg.CompletionModelName)
+	if model2URL != "" && model2Key != "" {
+		endpoints = append(endpoints, ModelEndpoint{
+			URL:       model2URL,
+			APIKey:    model2Key,
+			ModelName: model2Name,
+		})
+	}
+
+	// 模型3：备用模型
+	model3URL := getEnvStr("LLM_API_URL_3", "")
+	model3Key := getEnvStr("LLM_API_KEY_3", "")
+	model3Name := getEnvStr("COMPLETION_MODEL_NAME_3", cfg.CompletionModelName)
+	if model3URL != "" && model3Key != "" {
+		endpoints = append(endpoints, ModelEndpoint{
+			URL:       model3URL,
+			APIKey:    model3Key,
+			ModelName: model3Name,
+		})
+	}
+
+	return endpoints
 }

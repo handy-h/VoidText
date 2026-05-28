@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>换行符修复功能设计 - VoidText</title>
+    <style>
+        body { font-family: -apple-system, "Noto Sans SC", sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; line-height: 1.8; color: #333; }
+        h1 { color: #1a1a2e; border-bottom: 2px solid #00d4aa; padding-bottom: 10px; }
+        h2 { color: #2a2a3a; margin-top: 40px; }
+        h3 { color: #4a4a5a; }
+        .spec { background: #f8f9fa; border-left: 4px solid #00d4aa; padding: 16px 20px; margin: 16px 0; border-radius: 0 8px 8px 0; }
+        .spec-title { font-weight: 600; color: #00a884; margin-bottom: 8px; }
+        code { background: #e8e8f0; padding: 2px 6px; border-radius: 4px; font-family: "JetBrains Mono", monospace; font-size: 0.9em; }
+        pre { background: #1a1a2e; color: #e8e8f0; padding: 20px; border-radius: 8px; overflow-x: auto; font-size: 13px; line-height: 1.6; }
+        table { border-collapse: collapse; width: 100%; margin: 16px 0; }
+        th, td { border: 1px solid #ddd; padding: 10px 14px; text-align: left; }
+        th { background: #f0f0f5; font-weight: 600; }
+        .highlight { background: #fff3cd; padding: 2px 4px; border-radius: 3px; }
+    </style>
+</head>
+<body>
+
+<h1>换行符修复功能设计</h1>
+<p><strong>版本</strong>: v1.0 | <strong>更新日期</strong>: 2026-05-15 | <strong>状态</strong>: 已实施</p>
+
+<h2>1. 需求背景</h2>
+
+<div class="spec">
+    <div class="spec-title">问题描述</div>
+    <p>部分小说 TXT 文件缺少段落分隔符（换行符），整篇文本连成一片，严重影响阅读体验。典型表现：</p>
+    <ul>
+        <li>段落之间没有空行分隔</li>
+        <li>对话内容与叙述混在一起</li>
+        <li>章节标题嵌入在正文中</li>
+    </ul>
+</div>
+
+<div class="spec">
+    <div class="spec-title">示例</div>
+    <pre>狼窝里安了窃听器。」一辆抛锚的汽车给哥拉家族带来希望。族长使用调虎离山计智取窃听器。居住在白塔山上的几十只兔子同属于哥拉家族。哥拉家族祖祖辈辈定居在白塔山上。按兔家族繁衍的速度来计算，哥拉家族的数量早该逾万了。</pre>
+    <p>上述文本应被自动分割为多个段落，以提升可读性。</p>
+</div>
+
+<h2>2. 功能设计</h2>
+
+<h3>2.1 自动检测</h3>
+<div class="spec">
+    <div class="spec-title">检测策略</div>
+    <p>通过分析换行符密度判断文本是否缺少段落分隔：</p>
+    <ul>
+        <li><strong>密度阈值</strong>: 每 300 个字符少于 1 个换行符</li>
+        <li><strong>内容要求</strong>: 文本长度 ≥ 100 字符，且包含中文标点（句号、引号等）</li>
+        <li><strong>跳过条件</strong>: 已有足够换行符的文本不触发修复</li>
+    </ul>
+</div>
+
+<h3>2.2 智能分段规则</h3>
+<table>
+    <thead>
+        <tr>
+            <th>规则</th>
+            <th>触发条件</th>
+            <th>说明</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>章节标题识别</td>
+            <td><code>◇ 一 ◇</code>、<code>第X章</code>、<code>一、二、</code></td>
+            <td>自动识别常见章节标题格式，将其独立成段</td>
+        </tr>
+        <tr>
+            <td>对话结束检测</td>
+            <td>句号/感叹号/问号 + 引号闭合</td>
+            <td>识别对话结束位置，在引号闭合后分段</td>
+        </tr>
+        <tr>
+            <td>句子结束分段</td>
+            <td>句号 + 非引号开始的中文字符</td>
+            <td>在句号后检查后续内容，判断是否为新段落</td>
+        </tr>
+        <tr>
+            <td>连续省略号</td>
+            <td>三个及以上省略号</td>
+            <td>识别段落结尾的省略号</td>
+        </tr>
+        <tr>
+            <td>短段落合并</td>
+            <td>段落长度 &lt; 20 字符</td>
+            <td>自动合并过短的段落，避免碎片化</td>
+        </tr>
+    </tbody>
+</table>
+
+<h3>2.3 配置选项</h3>
+<div class="spec">
+    <div class="spec-title">用户可控</div>
+    <ul>
+        <li><strong>前端开关</strong>: 规则配置界面中的"换行符修复"复选框</li>
+        <li><strong>默认值</strong>: 启用（<code>enableNewlineFix: true</code>）</li>
+        <li><strong>配置存储</strong>: 数据库 <code>files.rules_config</code> 字段（JSON 格式）</li>
+    </ul>
+</div>
+
+<h2>3. 技术实现</h2>
+
+<h3>3.1 新增文件</h3>
+<table>
+    <thead>
+        <tr>
+            <th>文件</th>
+            <th>说明</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>internal/processor/newline_fixer.go</code></td>
+            <td>换行符修复器核心实现</td>
+        </tr>
+        <tr>
+            <td><code>internal/processor/newline_fixer_test.go</code></td>
+            <td>单元测试</td>
+        </tr>
+    </tbody>
+</table>
+
+<h3>3.2 修改文件</h3>
+<table>
+    <thead>
+        <tr>
+            <th>文件</th>
+            <th>修改内容</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>internal/processor/pipeline.go</code></td>
+            <td>在 <code>processCleaningStep</code> 中集成换行符修复，<code>RulesConfig</code> 新增 <code>EnableNewlineFix</code> 字段</td>
+        </tr>
+        <tr>
+            <td><code>web/frontend/index.html</code></td>
+            <td>新增"换行符修复"复选框</td>
+        </tr>
+        <tr>
+            <td><code>web/frontend/static/js/modules/rules-config.js</code></td>
+            <td>预设模板、加载配置、保存逻辑中添加 <code>enableNewlineFix</code></td>
+        </tr>
+    </tbody>
+</table>
+
+<h3>3.3 核心数据结构</h3>
+<pre>// NewlineFixResult 换行符修复结果
+type NewlineFixResult struct {
+    Content  string              `json:"content"`
+    Original string              `json:"original"`
+    Changes  []preprocess.Change `json:"changes"`
+    Stats    map[string]int      `json:"stats"`
+}
+
+// NewlineFixer 换行符修复器
+type NewlineFixer struct {
+    EnableAutoFix      bool  // 启用自动修复
+    MinParagraphLength int   // 最小段落长度（字符数）
+    MaxParagraphLength int   // 最大段落长度（字符数）
+}</pre>
+
+<h3>3.4 Pipeline 集成点</h3>
+<div class="spec">
+    <div class="spec-title">执行位置</div>
+    <p>在 <code>processCleaningStep</code> 中，<code>BasicCleaner.Clean()</code> 之后、自定义规则应用之前执行。</p>
+    <pre>// 换行符修复：检测并修复缺失的段落分隔
+if rulesConfig.EnableNewlineFix {
+    newlineFixer := NewNewlineFixer()
+    newlineResult := newlineFixer.Fix(cleanResult.Content)
+    if len(newlineResult.Changes) > 0 {
+        cleanResult.Content = newlineResult.Content
+        cleanResult.Changes = append(cleanResult.Changes, newlineResult.Changes...)
+        for k, v := range newlineResult.Stats {
+            cleanResult.Stats[k] = v
+        }
+    }
+}</pre>
+</div>
+
+<h2>4. 处理流程</h2>
+
+<div class="spec">
+    <div class="spec-title">流程图</div>
+    <pre>输入文本
+    ↓
+[自动检测] 换行符密度是否足够？
+    ├─ 是 → 跳过修复，返回原内容
+    └─ 否 ↓
+[智能分段] 基于标点符号和上下文分割段落
+    ↓
+[短段落合并] 合并长度 &lt; 20 字符的段落
+    ↓
+输出修复后文本 + 变更记录</pre>
+</div>
+
+<h2>5. 测试覆盖</h2>
+
+<table>
+    <thead>
+        <tr>
+            <th>测试用例</th>
+            <th>预期结果</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>缺少换行符的中文小说</td>
+            <td>自动分割为多个段落</td>
+        </tr>
+        <tr>
+            <td>正常换行的文本</td>
+            <td>跳过修复，保持原样</td>
+        </tr>
+        <tr>
+            <td>带有章节标题的文本</td>
+            <td>章节标题独立成段</td>
+        </tr>
+        <tr>
+            <td>带有对话的文本</td>
+            <td>对话结束处正确分段</td>
+        </tr>
+        <tr>
+            <td>空内容/短内容</td>
+            <td>跳过修复</td>
+        </tr>
+    </tbody>
+</table>
+
+<h2>6. 后续优化方向</h2>
+
+<div class="spec">
+    <div class="spec-title">可扩展性</div>
+    <ul>
+        <li>支持更多章节标题格式（如罗马数字、阿拉伯数字）</li>
+        <li>基于 LLM 的智能分段（处理复杂上下文）</li>
+        <li>用户自定义分段规则（通过配置界面）</li>
+        <li>分段置信度评估（低置信度项进入审核流程）</li>
+    </ul>
+</div>
+
+</body>
+</html>

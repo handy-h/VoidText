@@ -44,11 +44,8 @@ func Postprocess(content string) PostprocessResult {
 
 // optimizeFormat 优化文本格式
 func optimizeFormat(result PostprocessResult) PostprocessResult {
-	// 确保每个段落以换行开始
-	result.Content = regexp.MustCompile(`\n+`).ReplaceAllString(result.Content, "\n")
-
-	// 确保段落之间有适当的空行
-	result.Content = regexp.MustCompile(`\n([^\n])`).ReplaceAllString(result.Content, "\n\n$1")
+	// 将3个及以上连续换行压缩为2个（归一化空行）
+	result.Content = regexp.MustCompile(`\n{3,}`).ReplaceAllString(result.Content, "\n\n")
 
 	// 去除首尾空白
 	result.Content = strings.TrimSpace(result.Content)

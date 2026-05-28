@@ -2,11 +2,13 @@ package handlers
 
 import (
 	"net/http"
+	"regexp"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
-	"txt-cleaning/internal/processor"
-	"txt-cleaning/internal/processor/rules"
+	"voidtext/internal/processor"
+	"voidtext/internal/processor/rules"
 )
 
 // ListRules 列出所有自定义规则
@@ -31,6 +33,16 @@ func AddRule(c *gin.Context) {
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "无效的请求参数"})
+		return
+	}
+
+	// 输入验证
+	if strings.TrimSpace(req.Name) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "规则名称不能为空"})
+		return
+	}
+	if _, err := regexp.Compile(req.Pattern); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "无效的正则表达式: " + err.Error()})
 		return
 	}
 

@@ -6,9 +6,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sync"
 
-	"txt-cleaning/internal/config"
+	"voidtext/internal/config"
 )
+
+// compiledRegexCache 缓存已编译的正则表达式，避免每次ApplyRules重复编译
+var compiledRegexCache sync.Map
 
 // Rule 自定义规则
 type Rule struct {
@@ -140,11 +144,24 @@ func (rm *RuleManager) DeleteRule(id string) error {
 func (rm *RuleManager) ApplyRules(content string) string {
 	for _, rule := range rm.rules {
 		if rule.Enabled {
-			regex, err := regexp.Compile(rule.Pattern)
-			if err == nil {
+			regex := getCompiledRegex(rule.Pattern)
+			if regex != nil {
 				content = regex.ReplaceAllString(content, rule.Replacement)
 			}
 		}
 	}
 	return content
+}
+
+// getCompiledRegex 从缓存获取已编译的正则，缓存未命中时编译并缓存
+func getCompiledRegex(pattern string) *regexp.Regexp {
+	if cached, ok := compiledRegexCache.Load(pattern); ok {
+		return cached.(*regexp.Regexp)
+	}
+	regex, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil
+	}
+	compiledRegexCache.Store(pattern, regex)
+	return regex
 }
