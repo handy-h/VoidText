@@ -34,7 +34,17 @@ func RunAllSteps(c *gin.Context) {
 		return
 	}
 
-	if record.Status == "processing" || record.Status == "reviewing" {
+	// 检查是否真有 goroutine 在处理：数据库状态为 processing 但内存中无对应任务
+	// 说明是服务器重启后的残留状态，允许重新处理
+	fileProcessingMu.Lock()
+	actuallyProcessing := processingFiles[fileMd5]
+	fileProcessingMu.Unlock()
+
+	if record.Status == "reviewing" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "文件正在审核中，请使用审核页面操作"})
+		return
+	}
+	if record.Status == "processing" && actuallyProcessing {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "文件正在处理中"})
 		return
 	}

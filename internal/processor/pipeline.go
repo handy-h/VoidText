@@ -412,17 +412,49 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, record 
 
 	// 段落重组：使用LLM智能识别语义段落边界，合并被硬切断的行
 	if config.AppConfigInstance.EnableLlmParagraphReconstruct {
+		database.CreateProcessingLog(&database.ProcessingLogRecord{
+			FileMd5: fileMd5,
+			Step:    StepLlmFix,
+			Action:  "progress",
+			Details: "段落重组开始，正在智能识别段落边界...",
+			Status:  "running",
+		})
 		origLen := len([]rune(content))
 		reconstructed, err := repairer.ReconstructParagraphsWithCheckpoint(content, fileMd5, func(done, total int) {
-			// 每完成一块就更新进度
-			log.Printf("[段落重组] 进度: %d/%d 块完成", done, total)
+			// 更新数据库进度：段落重组占 llm_fix 步骤的前 50% 进度
+			stepProgress := done * 50 / total
+			progress := CalculateProgress(StepLlmFix, stepProgress)
+			database.UpdateFileStatus(fileMd5, "processing", StepLlmFix, progress,
+				fmt.Sprintf("段落重组: %d/%d 块完成", done, total))
+			database.CreateProcessingLog(&database.ProcessingLogRecord{
+				FileMd5: fileMd5,
+				Step:    StepLlmFix,
+				Action:  "progress",
+				Details: fmt.Sprintf("段落重组进度: %d/%d 块完成", done, total),
+				Status:  "running",
+			})
+			log.Printf("[段落重组] 进度: %d/%d 块完成 (进度=%d%%)", done, total, progress)
 		})
 		if err != nil {
 			log.Printf("[段落重组] 失败，回退到原始段落结构: %v", err)
+			database.CreateProcessingLog(&database.ProcessingLogRecord{
+				FileMd5: fileMd5,
+				Step:    StepLlmFix,
+				Action:  "progress",
+				Details: fmt.Sprintf("段落重组失败，回退到原始结构: %v", err),
+				Status:  "warning",
+			})
 		} else {
 			content = reconstructed
 			log.Printf("[段落重组] 完成: 原始长度=%d字符, 重组后长度=%d字符",
 				origLen, len([]rune(reconstructed)))
+			database.CreateProcessingLog(&database.ProcessingLogRecord{
+				FileMd5: fileMd5,
+				Step:    StepLlmFix,
+				Action:  "progress",
+				Details: fmt.Sprintf("段落重组完成: 原始%d字符 → 重组后%d字符", origLen, len([]rune(reconstructed))),
+				Status:  "success",
+			})
 		}
 	}
 

@@ -86,8 +86,8 @@ func (mr *ModelRepairer) SplitIntoParagraphs(content string) []string {
 	// 按换行符分割
 	paragraphs := strings.Split(content, "\n")
 
-	// 过滤空段落
-	filtered := []string{}
+	// 过滤空段落（预分配容量，减少内存分配）
+	filtered := make([]string, 0, len(paragraphs))
 	for _, p := range paragraphs {
 		p = strings.TrimSpace(p)
 		if len(p) > 0 {
@@ -120,6 +120,8 @@ func (mr *ModelRepairer) RepairParagraph(paragraph string) string {
 
 // repairWithOllama 使用本地 Ollama 模型修复文本
 // 重试 3 次仍失败（可重试错误指数退避）才降级到远程 API 或本地字典
+// 注意：paragraph 直接拼入 user prompt，用户输入中的"忽略上述指令"等文本可能构成 prompt 注入，
+// 但当前场景为处理用户自己上传的小说文件，风险可控
 func (mr *ModelRepairer) repairWithOllama(paragraph string) string {
 	systemPrompt := "你是一个专业的中文小说校对编辑。请修正以下段落中的错别字和语法错误，保持原文风格不变。严格保持段落开头和结尾的标点符号位置不变——不要在段首添加原文没有的标点，不要把段尾的标点挪到段首。只输出修正后的文本，无需解释。"
 	userPrompt := "输入：她高兴及了，跑过去抱住他。\n输出：她高兴极了，跑过去抱住他。\n\n当前任务：\n输入：" + paragraph + "\n输出："
@@ -226,38 +228,52 @@ func isRetryableError(err error) bool {
 	return false
 }
 
-// repairLocally 本地修复（简化实现）
+// repairLocally 本地修复（基于常见错别字映射表）
 func (mr *ModelRepairer) repairLocally(paragraph string) (string, []preprocess.Change) {
-	changes := []preprocess.Change{}
-
-	// 常见错别字映射表
-	typoMap := map[string]string{
-		"图书管": "图书馆",
-		"及了":  "极了",
-		"在次":  "再次",
-		"哪么":  "那么",
-		"因该":  "应该",
-		"以经":  "已经",
-		"好象":  "好像",
-		"做车":  "坐车",
-
+	// 使用有序切片替代 map，确保每次运行的修复顺序一致、结果可复现
+	type typoPair struct{ wrong, correct string }
+	typoList := []typoPair{
+		{"图书管", "图书馆"},
+		{"及了", "极了"},
+		{"在次", "再次"},
+		{"哪么", "那么"},
+		{"因该", "应该"},
+		{"以经", "已经"},
+		{"好象", "好像"},
+		{"做车", "坐车"},
 	}
 
-	// 应用错别字修正
+	changes := make([]preprocess.Change, 0)
 	repaired := paragraph
-	for typo, correct := range typoMap {
-		if strings.Contains(repaired, typo) && typo != correct {
-			// 记录变更
-			position := strings.Index(repaired, typo)
+
+	for _, pair := range typoList {
+		if pair.wrong == pair.correct {
+			continue
+		}
+
+		// 查找并替换当前 typo 的所有出现（逐个替换，同时记录正确的字节位置）
+		offset := 0
+		for {
+			pos := strings.Index(repaired[offset:], pair.wrong)
+			if pos < 0 {
+				break
+			}
+			actualPos := offset + pos
+
+			// 记录变更（position 基于当前 repaired 的字节偏移）
 			changes = append(changes, preprocess.Change{
 				Type:        "typo_correction",
-				Original:    typo,
-				Replacement: correct,
-				Position:    position,
+				Original:    pair.wrong,
+				Replacement: pair.correct,
+				Position:    actualPos,
 			})
 
-			// 应用修正
-			repaired = strings.Replace(repaired, typo, correct, 1)
+			// 替换当前出现（仅一次）
+			// 由于索引基于当前 repaired，直接在 repaired 上替换不会导致 position 错位
+			repaired = repaired[:actualPos] + pair.correct + repaired[actualPos+len(pair.wrong):]
+
+			// offset 前进到替换后的正确文本之后，继续搜索后续出现
+			offset = actualPos + len(pair.correct)
 		}
 	}
 
@@ -300,6 +316,11 @@ const paragraphReconstructPrompt = `你是一个专业的中文小说排版助�
 // ReconstructParagraphs 使用LLM智能重组段落
 // 对全文进行分块处理后，逐块调用LLM识别段落边界，输出格式良好、段落结构清晰的文本
 func (mr *ModelRepairer) ReconstructParagraphs(content string) (string, error) {
+	// 防御：远程 API 客户端未初始化时直接返回原文
+	if mr.api == nil {
+		return content, fmt.Errorf("远程 API 客户端未初始化，无法执行段落重组")
+	}
+
 	chunkSize := config.AppConfigInstance.ParagraphChunkSize
 	if chunkSize <= 0 {
 		chunkSize = 8000
@@ -315,12 +336,26 @@ func (mr *ModelRepairer) ReconstructParagraphs(content string) (string, error) {
 	for i, chunk := range chunks {
 		log.Printf("[段落重组] 正在处理第 %d/%d 块 (长度=%d字符)", i+1, len(chunks), len([]rune(chunk)))
 
-		resp, err := mr.api.GenerateChatCompletion(paragraphReconstructPrompt, chunk, 0, -1)
+		// 计算合理的 maxTokens：段落重组只调整换行，输出长度应与输入大致相当
+		chunkRunes := len([]rune(chunk))
+		maxTokens := chunkRunes * 3 / 2
+		if maxTokens < 4096 {
+			maxTokens = 4096
+		}
+
+		resp, err := mr.api.GenerateChatCompletion(paragraphReconstructPrompt, chunk, maxTokens, -1)
 		if err != nil {
 			return content, fmt.Errorf("第%d块LLM调用失败: %w", i+1, err)
 		}
 		if resp == nil || len(resp.Choices) == 0 {
 			return content, fmt.Errorf("第%d块LLM返回空结果", i+1)
+		}
+
+		// 检查是否因 token 限制被截断
+		finishReason := resp.Choices[0].FinishReason
+		if finishReason == "length" {
+			log.Printf("[段落重组] 警告: 第%d块API输出被截断 (finish_reason=length, 输入=%d字符), 回退到原始文本", i+1, chunkRunes)
+			return content, fmt.Errorf("第%d块API输出被截断 (finish_reason=length)", i+1)
 		}
 
 		repaired := strings.TrimSpace(resp.Choices[0].Message.Content)
@@ -344,6 +379,11 @@ func (mr *ModelRepairer) ReconstructParagraphs(content string) (string, error) {
 // fileMd5 用于断点恢复，checkpointFn 为进度回调（参数：已完成块数, 总块数）
 // chunk 间严格串行，避免本地模型并发推理触发 OOM
 func (mr *ModelRepairer) ReconstructParagraphsWithCheckpoint(content, fileMd5 string, checkpointFn func(done, total int)) (string, error) {
+	// 防御：远程 API 客户端未初始化时直接返回原文
+	if mr.api == nil {
+		return content, fmt.Errorf("远程 API 客户端未初始化，无法执行段落重组")
+	}
+
 	chunkSize := config.AppConfigInstance.ParagraphChunkSize
 	if chunkSize <= 0 {
 		chunkSize = 8000
@@ -390,13 +430,29 @@ func (mr *ModelRepairer) ReconstructParagraphsWithCheckpoint(content, fileMd5 st
 // reconstructChunk 单块段落重组：直接调用远程 API
 // 本地模型推理段落重组（长上下文）容易 OOM，统一走远程 API；错别字修复仍由本地 LLM 处理
 func (mr *ModelRepairer) reconstructChunk(chunk string) (string, error) {
-	resp, err := mr.api.GenerateChatCompletion(paragraphReconstructPrompt, chunk, 0, -1)
+	// 计算合理的 maxTokens：段落重组只调整换行，输出长度应与输入大致相当
+	// 使用输入字符数的 1.5 倍作为 token 上限，最低 4096
+	chunkRunes := len([]rune(chunk))
+	maxTokens := chunkRunes * 3 / 2
+	if maxTokens < 4096 {
+		maxTokens = 4096
+	}
+
+	resp, err := mr.api.GenerateChatCompletion(paragraphReconstructPrompt, chunk, maxTokens, -1)
 	if err != nil {
 		return "", fmt.Errorf("远程 API 调用失败: %w", err)
 	}
 	if resp == nil || len(resp.Choices) == 0 {
 		return "", fmt.Errorf("远程 API 返回空结果")
 	}
+
+	// 检查是否因 token 限制被截断
+	finishReason := resp.Choices[0].FinishReason
+	if finishReason == "length" {
+		log.Printf("[段落重组] 警告: API 输出被截断 (finish_reason=length, 输入=%d字符), 回退到原始文本", chunkRunes)
+		return "", fmt.Errorf("API 输出被截断 (finish_reason=length, 输入=%d字符)", chunkRunes)
+	}
+
 	return strings.TrimSpace(resp.Choices[0].Message.Content), nil
 }
 
@@ -422,7 +478,7 @@ func (mr *ModelRepairer) smartChunk(content string, chunkSize, overlap int) []st
 
 		// 如果不是最后一块，尝试找最佳切割点
 		if end < totalLen {
-			end = mr.findBestSplitPoint(runes, start, end, chunkSize)
+			end = mr.findBestSplitPoint(runes, start, end)
 		}
 
 		chunk := string(runes[start:end])
@@ -446,8 +502,8 @@ func (mr *ModelRepairer) smartChunk(content string, chunkSize, overlap int) []st
 }
 
 // findBestSplitPoint 在指定范围内找到最佳切割点
-// 优先级：双换行 > 句子结尾标点 > 原始切点
-func (mr *ModelRepairer) findBestSplitPoint(runes []rune, start, maxEnd, chunkSize int) int {
+// 优先级：双换行 > 句子结尾标点 > 单个换行 > 原始切点
+func (mr *ModelRepairer) findBestSplitPoint(runes []rune, start, maxEnd int) int {
 	// 搜索范围：从 maxEnd-400 到 maxEnd+200
 	searchStart := maxEnd - 400
 	if searchStart < start {
@@ -458,17 +514,17 @@ func (mr *ModelRepairer) findBestSplitPoint(runes []rune, start, maxEnd, chunkSi
 		searchEnd = len(runes)
 	}
 
-	// 优先找双换行
-	for i := maxEnd - 1; i >= searchStart && i < searchEnd; i-- {
+	// 优先找双换行（从后往前扫描，找到的第一个即为距离 maxEnd 最近的双换行）
+	for i := maxEnd - 1; i >= searchStart; i-- {
 		if i+1 < len(runes) && runes[i] == '\n' && runes[i+1] == '\n' {
-			return i + 2
+			return i + 2 // 切割点在双换行之后
 		}
 		if i > 0 && runes[i] == '\n' && runes[i-1] == '\n' {
-			return i + 1
+			return i + 1 // 切割点在双换行之后
 		}
 	}
 
-	// 次优先找句子结尾标点（。！？）
+	// 次优先找句子结尾标点（。！？'"」）
 	sentenceEnds := map[rune]bool{'。': true, '！': true, '？': true, '"': true, '」': true}
 	for i := maxEnd - 1; i >= searchStart; i-- {
 		if sentenceEnds[runes[i]] {
@@ -476,13 +532,14 @@ func (mr *ModelRepairer) findBestSplitPoint(runes []rune, start, maxEnd, chunkSi
 		}
 	}
 
-	// 降级到换行符
+	// 降级到单个换行符
 	for i := maxEnd - 1; i >= searchStart; i-- {
 		if runes[i] == '\n' {
 			return i + 1
 		}
 	}
 
+	// 找不到合适切点，使用原始切点
 	return maxEnd
 }
 
@@ -503,7 +560,7 @@ func (mr *ModelRepairer) mergeChunks(chunks []string, overlap int) string {
 		curr := []rune(chunks[i])
 
 		if len(prev) < overlap || len(curr) < overlap {
-			// 块太短，直接拼接
+			// 块太短，直接添加换行符后拼接
 			result.WriteString("\n")
 			result.WriteString(chunks[i])
 			continue
@@ -511,8 +568,13 @@ func (mr *ModelRepairer) mergeChunks(chunks []string, overlap int) string {
 
 		// 找到前一块末尾与后一块开头的最长公共序列，确定去重边界
 		cutIndex := mr.findMergePoint(curr, prev)
-		if cutIndex < len(curr) {
+		if cutIndex > 0 {
+			// 找到可靠重叠点，跳过重叠部分直接拼接
 			result.WriteString(string(curr[cutIndex:]))
+		} else {
+			// 未找到重叠，用换行符分隔后拼接
+			result.WriteString("\n")
+			result.WriteString(chunks[i])
 		}
 	}
 
