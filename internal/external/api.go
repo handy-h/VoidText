@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 	"math/rand"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -135,7 +136,7 @@ func IsRetryableError(err error) bool {
 	var apiErr *APIError
 	if errors.As(err, &apiErr) {
 		// 检查状态码是否在可重试范围内
-		for _, status := range DefaultRetryConfig().RetryableStatus {
+		for _, status := range retryableStatuses {
 			if apiErr.StatusCode == status {
 				return true
 			}
@@ -151,10 +152,40 @@ func isTimeoutError(err error) bool {
 	if err == nil {
 		return false
 	}
-	errStr := err.Error()
+	// 使用 net.Error 接口的 Timeout() 方法，比字符串匹配更可靠
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
 	return errors.Is(err, http.ErrHandlerTimeout) ||
-		errors.Is(err, context.DeadlineExceeded) ||
-		containsAny(errStr, []string{"timeout", "Timeout", "timed out", "Timed out"})
+		errors.Is(err, context.DeadlineExceeded)
+}
+
+// isQuotaExhausted 检测是否为额度耗尽类错误（不可恢复，应立即切换到下一个模型）
+// 匹配条件：429/403/402 状态码 + 错误消息中包含额度相关关键词
+func isQuotaExhausted(statusCode int, errorMessage string) bool {
+	if statusCode != 429 && statusCode != 403 && statusCode != 402 {
+		return false
+	}
+	msg := strings.ToLower(errorMessage)
+	quotaKeywords := []string{
+		"insufficient_quota",
+		"quota exceeded",
+		"quota_exceeded",
+		"exceeded_current_quota",
+		"balance insufficient",
+		"insufficient balance",
+		"余额不足",
+		"额度不足",
+		"payment required",
+		"billing",
+	}
+	for _, keyword := range quotaKeywords {
+		if strings.Contains(msg, keyword) {
+			return true
+		}
+	}
+	return false
 }
 
 // containsAny 检查字符串是否包含任意子串
@@ -167,9 +198,24 @@ func containsAny(s string, substrs []string) bool {
 	return false
 }
 
+// 可重试的 HTTP 状态码列表（包级常量，避免每次调用 IsRetryableError 都创建 DefaultRetryConfig）
+var retryableStatuses = []int{429, 500, 502, 503, 504}
+
+// ErrAPINotConfigured 表示 API 未配置的错误
+var ErrAPINotConfigured = errors.New("API未配置：请设置相应的 URL 和 APIKey")
+
+// QuotaExhaustedError 额度耗尽错误（上层可针对性处理，如切换端点）
+type QuotaExhaustedError struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *QuotaExhaustedError) Error() string {
+	return fmt.Sprintf("额度耗尽 (状态码: %d): %s", e.StatusCode, e.Message)
+}
+
 // API 外部API客户端（重构版）
 type API struct {
-	client                *http.Client
 	endpoints             []config.ModelEndpoint // 多模型端点列表（用于 chat completion 切换）
 	baseURL               string                 // 保留向后兼容（embedding / legacy completion）
 	apiKey                string                 // 保留向后兼容
@@ -178,35 +224,34 @@ type API struct {
 	completionTemperature float64
 	completionMaxTokens   int
 	retryConfig           *RetryConfig
-	mu                    sync.RWMutex // 保护配置更新
-	isLocalModel          bool         // 是否为本地模型
+	isLocalModel          bool // 是否为本地模型
 }
 
 // NewAPI 创建新的API客户端
 func NewAPI() *API {
+	cfg := config.AppConfigInstance
 	return &API{
-		client:                getGlobalHTTPClient(),
-		endpoints:             config.AppConfigInstance.ModelEndpoints,
-		baseURL:               config.AppConfigInstance.LLMApiURL,
-		apiKey:                config.AppConfigInstance.LLMApiKey,
-		embeddingModelName:    config.AppConfigInstance.VectorModelName,
-		completionModelName:   config.AppConfigInstance.CompletionModelName,
-		completionTemperature: config.AppConfigInstance.CompletionTemperature,
-		completionMaxTokens:   config.AppConfigInstance.CompletionMaxTokens,
+		endpoints:             cfg.ModelEndpoints,
+		baseURL:               cfg.LLMApiURL,
+		apiKey:                cfg.LLMApiKey,
+		embeddingModelName:    cfg.VectorModelName,
+		completionModelName:   cfg.CompletionModelName,
+		completionTemperature: cfg.CompletionTemperature,
+		completionMaxTokens:   cfg.CompletionMaxTokens,
 		retryConfig:           DefaultRetryConfig(),
-		isLocalModel:          false,
+		isLocalModel:          cfg.EnableLocalModel,
 	}
 }
 
 // NewEmbeddingAPI 创建专用于 Embedding 的 API 客户端，使用向量检测独立配置
 func NewEmbeddingAPI() *API {
+	cfg := config.AppConfigInstance
 	return &API{
-		client:             getGlobalHTTPClient(),
-		baseURL:            config.AppConfigInstance.VectorModelURL,
-		apiKey:             config.AppConfigInstance.VectorModelApiKey,
-		embeddingModelName: config.AppConfigInstance.VectorModelName,
-		retryConfig:        DefaultRetryConfig(),
-		isLocalModel:       false,
+		baseURL:         cfg.VectorModelURL,
+		apiKey:          cfg.VectorModelApiKey,
+		embeddingModelName: cfg.VectorModelName,
+		retryConfig:     DefaultRetryConfig(),
+		isLocalModel:    cfg.EnableLocalModel && cfg.VectorModelURL == cfg.LocalModelURL,
 	}
 }
 
@@ -316,6 +361,7 @@ func (api *API) doRequestWithRetry(req *http.Request) (*http.Response, error) {
 				MaxDelay:  30 * time.Second,
 				Jitter:    true,
 			},
+			RetryableStatus: retryableStatuses,
 		}
 	}
 
@@ -383,6 +429,19 @@ func (api *API) doRequestWithRetry(req *http.Request) (*http.Response, error) {
 
 		switch {
 		case statusCode == 429: // 限流
+			// 先检测是否为额度耗尽（不可恢复），如果是则不重试，立即返回让调用方切换模型
+			if isQuotaExhausted(statusCode, errorBody) {
+				logging.Warn("api_quota_exhausted", map[string]interface{}{
+					"status": statusCode,
+					"error":  errorBody,
+					"url":    req.URL.String(),
+				})
+				lastErr = &QuotaExhaustedError{
+					StatusCode: statusCode,
+					Message:    errorBody,
+				}
+				return nil, lastErr
+			}
 			shouldRetry = true
 			logging.Warn("api_rate_limited", map[string]interface{}{
 				"retry":  retry,
@@ -465,7 +524,7 @@ func (api *API) GenerateEmbedding(texts []string) (*EmbeddingResponse, error) {
 			"service": "embedding",
 			"reason":  "API未配置",
 		})
-		return nil, nil
+		return nil, ErrAPINotConfigured
 	}
 
 	if len(texts) == 0 {
@@ -483,9 +542,9 @@ func (api *API) GenerateEmbedding(texts []string) (*EmbeddingResponse, error) {
 		return api.generateEmbeddingBatches(texts, embeddingBatchSize)
 	}
 
-	// Ollama 的 embeddings 端点需要 /api 前缀
+	// Ollama 本地模型的 embeddings 端点需要 /api 前缀
 	url := api.baseURL + "/embeddings"
-	if strings.Contains(api.baseURL, "11434") || strings.Contains(api.baseURL, "ollama") {
+	if api.isLocalModel {
 		url = api.baseURL + "/api/embeddings"
 	}
 	startTime := time.Now()
@@ -589,7 +648,7 @@ func (api *API) generateEmbeddingBatches(texts []string, batchSize int) (*Embedd
 // GenerateCompletion 生成文本完成（Legacy API，带重试机制）
 func (api *API) GenerateCompletion(prompt string, maxTokens int, temperature float64) (*CompletionResponse, error) {
 	if api.baseURL == "" || api.apiKey == "" {
-		return nil, nil
+		return nil, ErrAPINotConfigured
 	}
 
 	if maxTokens <= 0 {

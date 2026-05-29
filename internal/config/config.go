@@ -63,26 +63,23 @@ var AppConfigInstance AppConfig
 
 // Load 加载配置
 func Load() error {
-	// 优先从可执行文件所在目录加载 .env
-	execPath, err := os.Executable()
-	if err == nil {
-		envPath := filepath.Join(filepath.Dir(execPath), ".env")
-		log.Printf("尝试从可执行文件目录加载配置: %s", envPath)
-		if loadErr := godotenv.Load(envPath); loadErr != nil {
-			log.Printf("从可执行文件目录加载失败: %v，尝试从工作目录加载", loadErr)
-			if loadErr2 := godotenv.Load(); loadErr2 != nil {
-				log.Printf("从工作目录加载也失败: %v", loadErr2)
+	// 按优先级依次尝试加载 .env：可执行文件目录 → 工作目录
+	paths := []string{""}
+	if execPath, err := os.Executable(); err == nil {
+		paths = append([]string{filepath.Join(filepath.Dir(execPath), ".env")}, paths...)
+	}
+	for _, p := range paths {
+		if p == "" {
+			if godotenv.Load() == nil {
+				break
+			}
+		} else {
+			log.Printf("尝试从 %s 加载配置", p)
+			if godotenv.Load(p) == nil {
+				break
 			}
 		}
-	} else {
-		log.Printf("获取可执行文件路径失败: %v，尝试从工作目录加载", err)
-		if loadErr := godotenv.Load(); loadErr != nil {
-			log.Printf("从工作目录加载失败: %v", loadErr)
-		}
 	}
-
-	// 打印实际加载的环境变量值
-	log.Printf("DATA_DIR=%s", os.Getenv("DATA_DIR"))
 
 	// 获取当前工作目录作为 BaseDir
 	baseDir, err := os.Getwd()
@@ -120,7 +117,7 @@ func Load() error {
 		LocalModelURL:                 getEnvStr("LOCAL_MODEL_URL", "http://localhost:11434"),
 		LocalModelName:                getEnvStr("LOCAL_MODEL_NAME", "qwen2.5"),
 		LocalModelTimeout:             getEnvInt("LOCAL_MODEL_TIMEOUT", 30),
-		NameSeparators:                getEnvStr("NAME_SEPARATORS", "-|—|·|·|_| "),
+		NameSeparators:                getEnvStr("NAME_SEPARATORS", "-|—|·|_| "),
 	}
 	if cfg.LLMConcurrency < 1 {
 		cfg.LLMConcurrency = 1
@@ -138,46 +135,58 @@ func Load() error {
 	if cfg.LLMApiKey == "" {
 		cfg.LLMApiKey = getEnvStr("EXTERNAL_API_KEY", "")
 	}
-	if cfg.CompletionModelName == "" {
-		cfg.CompletionModelName = getEnvStr("EMBEDDING_MODEL_NAME", "gpt-3.5-turbo-instruct")
-	}
-
 	// 构建多模型端点列表（主模型 + 最多2个备用模型）
 	cfg.ModelEndpoints = buildModelEndpoints(cfg)
 
 	AppConfigInstance = cfg
 
-	ensureDir(cfg.DataDir)
-	ensureDir(filepath.Join(cfg.DataDir, "uploads"))
-	ensureDir(filepath.Join(cfg.DataDir, "backups"))
-	ensureDir(filepath.Join(cfg.DataDir, "temp"))
+	var errs []string
+	for _, dir := range []string{
+		cfg.DataDir,
+		filepath.Join(cfg.DataDir, "uploads"),
+		filepath.Join(cfg.DataDir, "backups"),
+		filepath.Join(cfg.DataDir, "temp"),
+	} {
+		if err := ensureDir(dir); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", dir, err))
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("创建目录失败: %s", strings.Join(errs, "; "))
+	}
 
 	return nil
 }
 
-// GetNameSeparators 获取文件名分隔符列表
+// GetNameSeparators 获取文件名分隔符列表（自动去重）
 func (c *AppConfig) GetNameSeparators() []string {
 	parts := strings.Split(c.NameSeparators, "|")
 	var result []string
+	seen := make(map[string]bool)
 	for _, p := range parts {
 		trimmed := strings.TrimSpace(p)
-		if trimmed != "" || p == " " {
-			if p == " " {
+		if trimmed == " " {
+			if !seen[" "] {
 				result = append(result, " ")
-			} else {
+				seen[" "] = true
+			}
+		} else if trimmed != "" {
+			if !seen[trimmed] {
 				result = append(result, trimmed)
+				seen[trimmed] = true
 			}
 		}
 	}
 	return result
 }
 
-func ensureDir(dir string) {
+func ensureDir(dir string) error {
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		if err := os.MkdirAll(dir, 0755); err != nil {
-			log.Printf("创建目录失败: %s, 错误: %v", dir, err)
+			return fmt.Errorf("创建目录失败 %s: %w", dir, err)
 		}
 	}
+	return nil
 }
 
 func getEnvStr(key, fallback string) string {
@@ -238,24 +247,44 @@ func Validate() error {
 	return nil
 }
 
+// parseModelNames 解析逗号分隔的模型名列表，最多返回 5 个
+// 支持单个模型名（向后兼容）和逗号分隔的多个模型名
+func parseModelNames(names string) []string {
+	parts := strings.Split(names, ",")
+	var result []string
+	for _, p := range parts {
+		trimmed := strings.TrimSpace(p)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+		if len(result) >= 5 {
+			break
+		}
+	}
+	return result
+}
+
 // buildModelEndpoints 从环境变量构建多模型端点列表
-// 模型1 使用原有的 LLM_API_URL/LLM_API_KEY/COMPLETION_MODEL_NAME 配置（向后兼容）
-// 模型2 使用 LLM_API_URL_2/LLM_API_KEY_2/COMPLETION_MODEL_NAME_2
-// 模型3 使用 LLM_API_URL_3/LLM_API_KEY_3/COMPLETION_MODEL_NAME_3
+// 第一服务商：COMPLETION_MODEL_NAME 支持逗号分隔最多 5 个模型名（共享 URL/APIKey）
+// 备用服务商2：LLM_API_URL_2/LLM_API_KEY_2/COMPLETION_MODEL_NAME_2
+// 备用服务商3：LLM_API_URL_3/LLM_API_KEY_3/COMPLETION_MODEL_NAME_3
 // URL 和 APIKey 必须同时非空才算有效端点
 func buildModelEndpoints(cfg AppConfig) []ModelEndpoint {
 	var endpoints []ModelEndpoint
 
-	// 模型1：主配置（向后兼容）
+	// 第一服务商：解析逗号分隔的模型名，每个模型名生成一个端点（共享 URL/APIKey）
 	if cfg.LLMApiURL != "" && cfg.LLMApiKey != "" {
-		endpoints = append(endpoints, ModelEndpoint{
-			URL:       cfg.LLMApiURL,
-			APIKey:    cfg.LLMApiKey,
-			ModelName: cfg.CompletionModelName,
-		})
+		modelNames := parseModelNames(cfg.CompletionModelName)
+		for _, name := range modelNames {
+			endpoints = append(endpoints, ModelEndpoint{
+				URL:       cfg.LLMApiURL,
+				APIKey:    cfg.LLMApiKey,
+				ModelName: name,
+			})
+		}
 	}
 
-	// 模型2：备用模型
+	// 备用服务商2
 	model2URL := getEnvStr("LLM_API_URL_2", "")
 	model2Key := getEnvStr("LLM_API_KEY_2", "")
 	model2Name := getEnvStr("COMPLETION_MODEL_NAME_2", cfg.CompletionModelName)
@@ -267,7 +296,7 @@ func buildModelEndpoints(cfg AppConfig) []ModelEndpoint {
 		})
 	}
 
-	// 模型3：备用模型
+	// 备用服务商3
 	model3URL := getEnvStr("LLM_API_URL_3", "")
 	model3Key := getEnvStr("LLM_API_KEY_3", "")
 	model3Name := getEnvStr("COMPLETION_MODEL_NAME_3", cfg.CompletionModelName)
