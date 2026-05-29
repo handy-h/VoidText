@@ -78,7 +78,7 @@ const ProcessingModule = (function () {
         updateLogs(data.logs);
         updateChunkProgress(data.chunkProgress);
 
-        var statusChanged = previousStatus !== null && previousStatus !== data.status;
+        const statusChanged = previousStatus !== null && previousStatus !== data.status;
         previousStatus = data.status;
 
         if (data.status === 'completed' || data.status === 'failed' || data.status === 'reviewing') {
@@ -101,7 +101,7 @@ const ProcessingModule = (function () {
             FileManager.showSection('completed');
             updateCompletedInfo();
           } else if (data.status === 'failed') {
-            DomUtils.showFeedback('处理失败: ' + (data.error || '未知错误'), 'error');
+            DomUtils.showFeedback('处理失败: ' + (data.errorMsg || data.error || '未知错误'), 'error');
             FileManager.refreshFileList();
             FileManager.showSection('file-list');
           }
@@ -160,9 +160,54 @@ const ProcessingModule = (function () {
 
       const msgSpan = DomUtils.createElement('span', { className: 'log-message' });
       let detail = logEntry.details || logEntry.action || '';
+      let dedupPanel = null;
       try {
         const parsed = JSON.parse(detail);
-        if (parsed.action) {
+        if (parsed.action === 'vector_dedup_complete') {
+          // 向量去重统计：渲染徽章 + 展开详情
+          const dupCount = parsed.duplicate_paragraphs || 0;
+          const charCount = parsed.duplicate_chars || 0;
+          const contents = parsed.removed_contents || [];
+
+          const badgeP = DomUtils.createElement('span', { className: 'dedup-badge dedup-badge-paragraph' });
+          DomUtils.setTextContent(badgeP, '去除 ' + dupCount + ' 段');
+          msgSpan.appendChild(badgeP);
+
+          const badgeC = DomUtils.createElement('span', { className: 'dedup-badge dedup-badge-chars' });
+          DomUtils.setTextContent(badgeC, '减少 ' + charCount + ' 字');
+          msgSpan.appendChild(badgeC);
+
+          if (contents.length > 0) {
+            const toggleBtn = DomUtils.createElement('button', { className: 'dedup-detail-toggle' });
+            DomUtils.setTextContent(toggleBtn, '查看详情 ▼');
+            msgSpan.appendChild(toggleBtn);
+
+            dedupPanel = DomUtils.createElement('div', { className: 'dedup-detail-panel' });
+            if (parsed.truncated) {
+              const hint = DomUtils.createElement('div', { className: 'dedup-truncated-hint' });
+              DomUtils.setTextContent(hint, '…等共 ' + (parsed.total_removed || contents.length) + ' 段（已截断）');
+              dedupPanel.appendChild(hint);
+            }
+            contents.forEach(function (text, idx) {
+              const pItem = DomUtils.createElement('div', { className: 'dedup-paragraph' });
+              const numSpan = DomUtils.createElement('span', { className: 'dedup-paragraph-num' });
+              DomUtils.setTextContent(numSpan, '#' + (idx + 1));
+              pItem.appendChild(numSpan);
+              const textSpan = DomUtils.createElement('span', { className: 'dedup-paragraph-text' });
+              DomUtils.setTextContent(textSpan, text);
+              pItem.appendChild(textSpan);
+              dedupPanel.appendChild(pItem);
+            });
+
+            toggleBtn.addEventListener('click', function () {
+              const visible = dedupPanel.style.display !== 'none';
+              dedupPanel.style.display = visible ? 'none' : 'block';
+              DomUtils.setTextContent(toggleBtn, visible ? '查看详情 ▼' : '收起 ▲');
+            });
+          }
+
+          detail = null; // 标记已处理，跳过纯文本设置
+        } else if (parsed.action) {
           const actionMap = {
             step_started: '步骤开始',
             step_completed: '步骤完成',
@@ -191,10 +236,15 @@ const ProcessingModule = (function () {
       } catch (e) {
         // detail 是普通字符串
       }
-      DomUtils.setTextContent(msgSpan, detail);
+      if (detail !== null) {
+        DomUtils.setTextContent(msgSpan, detail);
+      }
       logItem.appendChild(msgSpan);
 
       fragment.appendChild(logItem);
+      if (dedupPanel) {
+        fragment.appendChild(dedupPanel);
+      }
     });
 
     logsList.innerHTML = '';

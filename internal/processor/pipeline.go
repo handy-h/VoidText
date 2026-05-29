@@ -63,13 +63,24 @@ func DefaultRulesConfig() RulesConfig {
 
 // ParseRulesConfig 解析规则配置JSON
 func ParseRulesConfig(jsonStr string) RulesConfig {
+	cfg := DefaultRulesConfig() // 先取默认值，确保缺失字段有合理默认值
 	if jsonStr == "" {
-		return DefaultRulesConfig()
+		return cfg
 	}
-	var cfg RulesConfig
 	if err := json.Unmarshal([]byte(jsonStr), &cfg); err != nil {
 		log.Printf("[配置] 规则配置 JSON 解析失败，使用默认配置: %v", err)
 		return DefaultRulesConfig()
+	}
+	// 防御：反序列化后阈值若为 0 或负数，恢复默认值
+	if cfg.SimilarityThreshold <= 0 {
+		cfg.SimilarityThreshold = config.AppConfigInstance.VectorSimilarityThreshold
+	}
+	// TypoMap 和 AdBlacklist 若为 nil，初始化为空集合
+	if cfg.TypoMap == nil {
+		cfg.TypoMap = make(map[string]string)
+	}
+	if cfg.AdBlacklist == nil {
+		cfg.AdBlacklist = []string{}
 	}
 	return cfg
 }
@@ -273,16 +284,23 @@ func processIndexingStep(fileMd5, content string, rulesConfig RulesConfig, _ *da
 	}
 
 	// 用 change.Original 精确匹配段索引（vector_detector 输出按段顺序产生 change）
+	// 构建索引时 trim 每个段落并跳过空行，与 splitIntoParagraphs 处理保持一致
 	paragraphs := strings.Split(content, "\n")
 	indexByText := make(map[string][]int, len(paragraphs))
 	for i, p := range paragraphs {
-		indexByText[p] = append(indexByText[p], i)
+		trimmed := strings.TrimSpace(p)
+		if trimmed == "" {
+			continue // 跳过空行，与 splitIntoParagraphs 保持一致
+		}
+		indexByText[trimmed] = append(indexByText[trimmed], i)
 	}
 	var records []database.ReviewParagraphRecord
+	var removedContents []string
 	for _, change := range detectResult.Changes {
 		if change.Type != "duplicate_paragraph" {
 			continue
 		}
+		removedContents = append(removedContents, change.Original)
 		candidates := indexByText[change.Original]
 		if len(candidates) == 0 {
 			continue
@@ -305,6 +323,42 @@ func processIndexingStep(fileMd5, content string, rulesConfig RulesConfig, _ *da
 		}
 	}
 
+	// 构建结构化日志详情
+	dupCount := len(records)
+	charsRemoved := detectResult.Stats["duplicate_chars_removed"]
+	logDetails := fmt.Sprintf("检测到重复段: %d, 减少文字: %d", dupCount, charsRemoved)
+	if len(removedContents) > 0 {
+		// 截断控制：最多存 20 条，总字符超过 5000 时截断
+		truncated := false
+		displayContents := removedContents
+		if len(displayContents) > 20 {
+			displayContents = displayContents[:20]
+			truncated = true
+		}
+		totalChars := 0
+		for _, c := range displayContents {
+			totalChars += len([]rune(c))
+		}
+		if totalChars > 5000 {
+			displayContents = displayContents[:10]
+			truncated = true
+		}
+		detailsMap := map[string]interface{}{
+			"action":               "vector_dedup_complete",
+			"duplicate_paragraphs": dupCount,
+			"duplicate_chars":      charsRemoved,
+			"removed_contents":     displayContents,
+		}
+		if truncated {
+			detailsMap["truncated"] = true
+			detailsMap["total_removed"] = len(removedContents)
+		}
+		detailsJSON, err := json.Marshal(detailsMap)
+		if err == nil {
+			logDetails = string(detailsJSON)
+		}
+	}
+
 	nextStep := GetNextStep(StepIndexing)
 	progress := CalculateProgress(nextStep, 0)
 	database.UpdateFileStatus(fileMd5, "processing", nextStep, progress, "")
@@ -313,7 +367,7 @@ func processIndexingStep(fileMd5, content string, rulesConfig RulesConfig, _ *da
 		FileMd5: fileMd5,
 		Step:    StepIndexing,
 		Action:  "complete",
-		Details: fmt.Sprintf("检测到重复段: %d", len(records)),
+		Details: logDetails,
 		Status:  "success",
 	})
 
@@ -321,7 +375,7 @@ func processIndexingStep(fileMd5, content string, rulesConfig RulesConfig, _ *da
 		CurrentStep: StepIndexing,
 		NextStep:    nextStep,
 		Progress:    progress,
-		Message:     fmt.Sprintf("向量检测完成，检测到重复段: %d", len(records)),
+		Message:     fmt.Sprintf("向量检测完成，去除重复段: %d, 减少文字: %d", dupCount, charsRemoved),
 	}, nil
 }
 
@@ -808,6 +862,7 @@ func removeAdContent(content, pattern string) string {
 	}
 	re, err := regexp.Compile(pattern)
 	if err != nil {
+		log.Printf("[广告过滤] 正则表达式编译失败 (pattern=%s): %v", pattern, err)
 		return content
 	}
 	return re.ReplaceAllString(content, "")

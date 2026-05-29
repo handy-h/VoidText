@@ -1122,6 +1122,94 @@ section h2::after {
   color: var(--text-secondary);
   word-break: break-all;
   flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 向量去重统计样式 */
+.dedup-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.dedup-badge-paragraph {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.dedup-badge-chars {
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.dedup-detail-toggle {
+  background: none;
+  border: 1px solid var(--border-color, rgba(255,255,255,0.1));
+  color: var(--ash-purple, #a78bfa);
+  font-size: 12px;
+  padding: 1px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.2s;
+}
+
+.dedup-detail-toggle:hover {
+  background: rgba(167, 139, 250, 0.1);
+}
+
+.dedup-detail-panel {
+  display: none;
+  margin: 4px 0 8px 24px;
+  padding: 8px 12px;
+  background: var(--void-card, rgba(30, 30, 40, 0.6));
+  border-left: 3px solid var(--ash-purple, #a78bfa);
+  border-radius: 0 4px 4px 0;
+  font-size: 13px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.dedup-paragraph {
+  display: flex;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  line-height: 1.5;
+}
+
+.dedup-paragraph:last-child {
+  border-bottom: none;
+}
+
+.dedup-paragraph-num {
+  color: var(--text-muted, #888);
+  font-size: 11px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  min-width: 24px;
+}
+
+.dedup-paragraph-text {
+  color: var(--text-secondary, #ccc);
+  word-break: break-all;
+}
+
+.dedup-truncated-hint {
+  color: var(--text-muted, #888);
+  font-size: 11px;
+  font-style: italic;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  margin-bottom: 4px;
 }
 
 /* 完成界面样式 */
@@ -2779,19 +2867,20 @@ section h2::after {
   background: var(--cell-suggested-bg, rgba(80, 180, 80, 0.05));
 }
 /* 段级审核：变动文字加深高亮（左红右绿） */
-.review-cell-original del.diff-del {
-  background: rgba(220, 50, 50, 0.45) !important;
-  color: #7a0000 !important;
-  text-decoration: line-through !important;
-  font-weight: 700 !important;
+/* 使用更具体的选择器替代 !important，通过 .review-row-body 提升优先级 */
+.review-row-body .review-cell-original del.diff-del {
+  background: rgba(220, 50, 50, 0.45);
+  color: #7a0000;
+  text-decoration: line-through;
+  font-weight: 700;
   border-radius: 3px;
   padding: 0 3px;
 }
-.review-cell-suggested ins.diff-ins {
-  background: rgba(40, 160, 80, 0.45) !important;
-  color: #0a4d20 !important;
-  text-decoration: none !important;
-  font-weight: 700 !important;
+.review-row-body .review-cell-suggested ins.diff-ins {
+  background: rgba(40, 160, 80, 0.45);
+  color: #0a4d20;
+  text-decoration: none;
+  font-weight: 700;
   border-radius: 3px;
   padding: 0 3px;
 }

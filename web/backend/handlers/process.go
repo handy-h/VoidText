@@ -216,6 +216,12 @@ func GetFileStatus(c *gin.Context) {
 		response["currentAction"] = latestLog.Details
 	}
 
+	// 返回最近 50 条处理日志，供前端展示
+	logs, _ := database.GetRecentProcessingLogs(fileMd5, 50)
+	if logs != nil {
+		response["logs"] = logs
+	}
+
 	if record.Status == "reviewing" || record.Status == "processing" || record.CurrentStep == "review" {
 		total, resolved, _ := database.GetReviewParagraphProgress(fileMd5)
 		response["reviewTotal"] = total

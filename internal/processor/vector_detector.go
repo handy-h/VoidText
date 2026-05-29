@@ -110,7 +110,10 @@ func (vd *VectorDetector) generateVectors(paragraphs []string) ([][]float64, err
 		if err != nil {
 			return nil, fmt.Errorf("embedding API 调用失败: %w", err)
 		}
-		if resp == nil || len(resp.Data) != len(paragraphs) {
+		if resp == nil {
+			return nil, fmt.Errorf("embedding API 返回空响应")
+		}
+		if len(resp.Data) != len(paragraphs) {
 			return nil, fmt.Errorf("embedding API 返回数量不匹配: 期望 %d, 实际 %d", len(paragraphs), len(resp.Data))
 		}
 		vectors := make([][]float64, len(paragraphs))
@@ -125,7 +128,10 @@ func (vd *VectorDetector) generateVectors(paragraphs []string) ([][]float64, err
 		if err != nil {
 			return nil, fmt.Errorf("ollama embedding 调用失败: %w", err)
 		}
-		if resp == nil || len(resp.Embeddings) != len(paragraphs) {
+		if resp == nil {
+			return nil, fmt.Errorf("ollama embedding 返回空响应")
+		}
+		if len(resp.Embeddings) != len(paragraphs) {
 			return nil, fmt.Errorf("ollama embedding 返回数量不匹配: 期望 %d, 实际 %d", len(paragraphs), len(resp.Embeddings))
 		}
 		vectors := make([][]float64, len(paragraphs))
@@ -228,6 +234,7 @@ func (vd *VectorDetector) removeDuplicateParagraphs(result VectorDetectionResult
 		dupSet[idx] = true
 	}
 
+	charsRemoved := 0
 	currentPos := 0
 	for i, paragraph := range paragraphs {
 		isDuplicate := dupSet[i]
@@ -235,6 +242,7 @@ func (vd *VectorDetector) removeDuplicateParagraphs(result VectorDetectionResult
 		if !isDuplicate {
 			filteredParagraphs = append(filteredParagraphs, paragraph)
 		} else {
+			charsRemoved += len([]rune(paragraph))
 			result.Changes = append(result.Changes, preprocess.Change{
 				Type:        "duplicate_paragraph",
 				Original:    paragraph,
@@ -248,6 +256,7 @@ func (vd *VectorDetector) removeDuplicateParagraphs(result VectorDetectionResult
 
 	result.Content = strings.Join(filteredParagraphs, "\n")
 	result.Stats["duplicate_paragraphs_removed"] = len(duplicateIndices)
+	result.Stats["duplicate_chars_removed"] = charsRemoved
 
 	return result
 }
