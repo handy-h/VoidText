@@ -1,14 +1,13 @@
 package preprocess
 
 import (
-	"bytes"
 	"fmt"
 	"io"
+	"log"
 	"regexp"
 	"strings"
 	"unicode/utf8"
 
-	"golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/simplifiedchinese"
 	"golang.org/x/text/transform"
 )
@@ -68,68 +67,18 @@ func PreprocessBytes(data []byte) (PreprocessResult, error) {
 }
 
 // detectAndConvertToUTF8 检测字节数组的编码并转换为UTF-8
+// 支持纯UTF-8、纯GBK、纯GB18030以及混合编码文件
+// 对于混合编码文件，采用逐行检测策略，每行独立判断编码
 func detectAndConvertToUTF8(data []byte) (string, error) {
-	// 检查是否包含UTF-8替换字符序列
-	containsReplacement := bytes.Contains(data, []byte{0xEF, 0xBF, 0xBD})
-	
-	// 如果包含替换字符，可能文件原本是其他编码但被错误地保存为UTF-8
-	// 我们需要尝试从原始字节中恢复
-	if containsReplacement {
-		// 尝试常见的编码
-		encodings := []struct {
-			name string
-			enc  encoding.Encoding
-		}{
-			{"gbk", simplifiedchinese.GBK},
-			{"gb18030", simplifiedchinese.GB18030},
-		}
-
-		for _, enc := range encodings {
-			decoder := enc.enc.NewDecoder()
-			reader := transform.NewReader(bytes.NewReader(data), decoder)
-			decoded, err := io.ReadAll(reader)
-			if err == nil && utf8.Valid(decoded) {
-				str := string(decoded)
-				// 检查解码后是否还有替换字符
-				if !strings.Contains(str, "�") {
-					return str, nil
-				}
-			}
-		}
-		
-		// 如果解码后仍然包含替换字符，尝试修复混合编码
-		str := string(data)
-		return fixMixedEncoding(str), nil
-	}
-	
-	// 不包含替换字符，检查是否是有效的UTF-8
+	// 快速路径：整个文件已经是有效的UTF-8
 	if utf8.Valid(data) {
 		return string(data), nil
 	}
-	
-	// 不是有效的UTF-8，尝试解码
-	encodings := []struct {
-		name string
-		enc  encoding.Encoding
-	}{
-		{"gbk", simplifiedchinese.GBK},
-		{"gb18030", simplifiedchinese.GB18030},
-	}
 
-	for _, enc := range encodings {
-		decoder := enc.enc.NewDecoder()
-		reader := transform.NewReader(bytes.NewReader(data), decoder)
-		decoded, err := io.ReadAll(reader)
-		if err == nil && utf8.Valid(decoded) {
-			str := string(decoded)
-			if !strings.Contains(str, "�") {
-				return str, nil
-			}
-		}
-	}
-
-	// 如果所有解码都失败，返回原始字符串
-	return string(data), nil
+	// 非有效UTF-8 → 直接走逐行检测（支持混合编码）
+	// 不再尝试整文件GBK/GB18030解码，因为混合编码场景下会损坏UTF-8部分
+	str := string(data)
+	return fixMixedEncoding(str), nil
 }
 
 // normalizeEncoding 规范化编码
@@ -180,26 +129,52 @@ func gbkToUtf8(gbkStr string) (string, error) {
 	return string(utf8Bytes), nil
 }
 
+// gb18030ToUtf8 将GB18030编码的字符串转换为UTF-8
+func gb18030ToUtf8(gb18030Str string) (string, error) {
+	reader := transform.NewReader(strings.NewReader(gb18030Str), simplifiedchinese.GB18030.NewDecoder())
+	utf8Bytes, err := io.ReadAll(reader)
+	if err != nil {
+		return "", err
+	}
+	return string(utf8Bytes), nil
+}
+
 // fixMixedEncoding 修复混合编码问题
+// 逐行检测编码，每行独立尝试 UTF-8 → GBK → GB18030 → 降级清理
+// 支持同一文件中不同行使用不同编码的场景
 func fixMixedEncoding(content string) string {
-	// 按行分割，逐行检测和转换
 	lines := strings.Split(content, "\n")
 	fixedLines := make([]string, len(lines))
+	convertedCount := 0
 
 	for i, line := range lines {
 		if utf8.ValidString(line) {
-			// 已经是有效的UTF-8
+			// 已经是有效的UTF-8，保留原样
 			fixedLines[i] = line
-		} else {
-			// 尝试GBK转UTF-8
-			converted, err := gbkToUtf8(line)
-			if err == nil && utf8.ValidString(converted) {
-				fixedLines[i] = converted
-			} else {
-				// 如果转换失败，替换为替换字符
-				fixedLines[i] = strings.ToValidUTF8(line, "")
-			}
+			continue
 		}
+
+		// 尝试GBK转UTF-8
+		if converted, err := gbkToUtf8(line); err == nil && utf8.ValidString(converted) {
+			fixedLines[i] = converted
+			convertedCount++
+			continue
+		}
+
+		// 尝试GB18030转UTF-8
+		if converted, err := gb18030ToUtf8(line); err == nil && utf8.ValidString(converted) {
+			fixedLines[i] = converted
+			convertedCount++
+			continue
+		}
+
+		// 所有编码都失败，移除无效字节
+		fixedLines[i] = strings.ToValidUTF8(line, "")
+		convertedCount++
+	}
+
+	if convertedCount > 0 {
+		log.Printf("[编码修复] 逐行检测完成: 总行数=%d, 修复行数=%d", len(lines), convertedCount)
 	}
 
 	return strings.Join(fixedLines, "\n")

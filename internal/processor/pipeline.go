@@ -15,6 +15,7 @@ import (
 	"voidtext/internal/config"
 	"voidtext/internal/database"
 	"voidtext/internal/file"
+	"voidtext/internal/processor/preprocess"
 	"voidtext/internal/processor/rules"
 )
 
@@ -26,7 +27,7 @@ const (
 	StepFinalizing = "finalizing"
 )
 
-var stepOrder = []string{StepCleaning, StepIndexing, StepLlmFix, StepReview, StepFinalizing}
+var stepOrder = [...]string{StepCleaning, StepIndexing, StepLlmFix, StepReview, StepFinalizing}
 
 // PipelineResult 流水线处理结果
 type PipelineResult struct {
@@ -67,6 +68,7 @@ func ParseRulesConfig(jsonStr string) RulesConfig {
 	}
 	var cfg RulesConfig
 	if err := json.Unmarshal([]byte(jsonStr), &cfg); err != nil {
+		log.Printf("[配置] 规则配置 JSON 解析失败，使用默认配置: %v", err)
 		return DefaultRulesConfig()
 	}
 	return cfg
@@ -98,8 +100,10 @@ func GetStepIndex(step string) int {
 // CalculateProgress 计算进度百分比
 func CalculateProgress(step string, stepProgress int) int {
 	stepIdx := GetStepIndex(step)
-	baseProgress := stepIdx * 20
-	stepContribution := stepProgress * 20 / 100
+	stepsTotal := len(stepOrder)
+	stepWeight := 100 / stepsTotal
+	baseProgress := stepIdx * stepWeight
+	stepContribution := stepProgress * stepWeight / 100
 	return baseProgress + stepContribution
 }
 
@@ -131,7 +135,16 @@ func ProcessStep(fileMd5 string, step string) (*PipelineResult, error) {
 
 	switch step {
 	case StepCleaning:
-		result, err = processCleaningStep(fileMd5, string(content), rulesConfig, record)
+		// 使用 preprocess.PreprocessBytes 进行编码检测和乱码修复
+		// 这是编码检测的唯一入口，确保后续步骤处理的都是有效 UTF-8 文本
+		preprocessResult, pErr := preprocess.PreprocessBytes(content)
+		if pErr != nil {
+			return nil, fmt.Errorf("预处理编码检测失败: %w", pErr)
+		}
+		if len(preprocessResult.Changes) > 0 {
+			log.Printf("[流水线] 预处理完成: 编码修复/乱码清理变更数=%d", len(preprocessResult.Changes))
+		}
+		result, err = processCleaningStep(fileMd5, preprocessResult, rulesConfig, record)
 	case StepIndexing:
 		result, err = processIndexingStep(fileMd5, string(content), rulesConfig, record)
 	case StepLlmFix:
@@ -160,7 +173,12 @@ func ProcessStep(fileMd5 string, step string) (*PipelineResult, error) {
 }
 
 // processCleaningStep 基础清洗步骤
-func processCleaningStep(fileMd5, content string, rulesConfig RulesConfig, _ *database.FileRecord) (*PipelineResult, error) {
+// preprocessResult 包含编码检测和乱码修复的预处理结果
+func processCleaningStep(fileMd5 string, preprocessResult preprocess.PreprocessResult, rulesConfig RulesConfig, _ *database.FileRecord) (*PipelineResult, error) {
+	// 合并预处理阶段的变更（编码修复、乱码清理）到清洗结果中
+	allChanges := make([]preprocess.Change, 0, len(preprocessResult.Changes))
+	allChanges = append(allChanges, preprocessResult.Changes...)
+
 	if !rulesConfig.EnableBasicCleaning {
 		nextStep := GetNextStep(StepCleaning)
 		database.UpdateFileStatus(fileMd5, "processing", nextStep, CalculateProgress(nextStep, 0), "")
@@ -173,7 +191,10 @@ func processCleaningStep(fileMd5, content string, rulesConfig RulesConfig, _ *da
 	}
 
 	cleaner := NewBasicCleaner(rulesConfig.TraditionalToSimple)
-	cleanResult := cleaner.Clean(content)
+	cleanResult := cleaner.Clean(preprocessResult.Content)
+
+	// 合并 BasicCleaner 的变更
+	allChanges = append(allChanges, cleanResult.Changes...)
 
 	if len(rulesConfig.AdBlacklist) > 0 {
 		for _, pattern := range rulesConfig.AdBlacklist {
@@ -210,7 +231,7 @@ func processCleaningStep(fileMd5, content string, rulesConfig RulesConfig, _ *da
 		FileMd5: fileMd5,
 		Step:    StepCleaning,
 		Action:  "complete",
-		Details: fmt.Sprintf("修改数: %d", len(cleanResult.Changes)),
+		Details: fmt.Sprintf("修改数: %d (编码修复: %d)", len(allChanges), len(preprocessResult.Changes)),
 		Status:  "success",
 	})
 
@@ -218,7 +239,7 @@ func processCleaningStep(fileMd5, content string, rulesConfig RulesConfig, _ *da
 		CurrentStep: StepCleaning,
 		NextStep:    nextStep,
 		Progress:    progress,
-		Message:     fmt.Sprintf("基础清洗完成，修改数: %d", len(cleanResult.Changes)),
+		Message:     fmt.Sprintf("基础清洗完成，修改数: %d (编码修复: %d)", len(allChanges), len(preprocessResult.Changes)),
 	}, nil
 }
 
@@ -473,19 +494,7 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, record 
 	pendingResults := make(map[int]llmParagraphResult)
 	completed := startIndex
 	cancelRequested := false
-	var firstErr error
 	for result := range results {
-		if result.Err != nil {
-			if firstErr == nil {
-				firstErr = result.Err
-				cancel()
-			}
-			continue
-		}
-		if firstErr != nil {
-			continue
-		}
-
 		pendingResults[result.Index] = result
 		completed++
 
@@ -544,9 +553,6 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, record 
 			Message:     fmt.Sprintf("LLM修复已取消 (%d/%d)", completed, totalParagraphs),
 		}, nil
 	}
-	if firstErr != nil {
-		return nil, firstErr
-	}
 	// 审核基线为原段拼接（LLM 修复前），与 review_paragraphs.paragraph_index 一一对应
 	baselineContent := strings.Join(paragraphs, "\n")
 	if err := saveIntermediateFile(fileMd5, StepLlmFix, baselineContent); err != nil {
@@ -583,17 +589,17 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, record 
 	}, nil
 }
 
-func saveLlmCheckpoint(fileMd5 string, repairedParagraphs []string, records []database.ReviewParagraphRecord, paragraphIndex, totalParagraphs int) error {
+func saveLlmCheckpoint(fileMd5 string, repairedParagraphs []string, records []database.ReviewParagraphRecord, committedCount, totalParagraphs int) error {
 	checkpointContent := strings.Join(repairedParagraphs, "\n")
 	checkpointJSON, err := json.Marshal(LlmCheckpoint{
-		ParagraphIndex:     paragraphIndex,
+		ParagraphIndex:     committedCount,
 		RepairedParagraphs: repairedParagraphs,
 		Records:            records,
 	})
 	if err != nil {
 		return err
 	}
-	if err := database.UpdateLlmProgress(fileMd5, paragraphIndex, string(checkpointJSON)); err != nil {
+	if err := database.UpdateLlmProgress(fileMd5, committedCount, string(checkpointJSON)); err != nil {
 		return err
 	}
 	if err := saveIntermediateFile(fileMd5, StepLlmFix, checkpointContent); err != nil {
@@ -604,15 +610,15 @@ func saveLlmCheckpoint(fileMd5 string, repairedParagraphs []string, records []da
 		FileMd5: fileMd5,
 		Step:    StepLlmFix,
 		Action:  "checkpoint",
-		Details: fmt.Sprintf("断点保存: 段落 %d/%d (累计修改 %d 段)", paragraphIndex, totalParagraphs, len(records)),
+		Details: fmt.Sprintf("断点保存: 段落 %d/%d (累计修改 %d 段)", committedCount, totalParagraphs, len(records)),
 		Status:  "running",
 	})
-	log.Printf("[LLM修复] 断点保存: %d/%d 段落完成", paragraphIndex, totalParagraphs)
+	log.Printf("[LLM修复] 断点保存: %d/%d 段落完成", committedCount, totalParagraphs)
 	return nil
 }
 
 // processReviewStep 审核步骤（进入审核等待状态）
-func processReviewStep(fileMd5, content string, record *database.FileRecord) (*PipelineResult, error) {
+func processReviewStep(fileMd5, content string, _ *database.FileRecord) (*PipelineResult, error) {
 	total, resolved, err := database.GetReviewParagraphProgress(fileMd5)
 	if err != nil {
 		return nil, fmt.Errorf("查询审核进度失败: %w", err)
@@ -786,7 +792,9 @@ func saveIntermediateFile(fileMd5, step, content string) error {
 		if step != StepReview && step != StepFinalizing {
 			record.FilePath = filePath
 			db := database.GetDB()
-			db.Exec(`UPDATE files SET file_path = ? WHERE md5 = ?`, filePath, fileMd5)
+			if _, err := db.Exec(`UPDATE files SET file_path = ? WHERE md5 = ?`, filePath, fileMd5); err != nil {
+				log.Printf("[中间文件] 更新 file_path 失败: %v", err)
+			}
 		}
 	}
 
