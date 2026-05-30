@@ -342,6 +342,8 @@ func (mr *ModelRepairer) ReconstructParagraphs(content string) (string, error) {
 		if maxTokens < 4096 {
 			maxTokens = 4096
 		}
+		// 防止 maxTokens 超出模型限制：使用配置上限进行截断
+		maxTokens = mr.capMaxTokens(maxTokens)
 
 		resp, err := mr.api.GenerateChatCompletion(paragraphReconstructPrompt, chunk, maxTokens, -1)
 		if err != nil {
@@ -437,6 +439,8 @@ func (mr *ModelRepairer) reconstructChunk(chunk string) (string, error) {
 	if maxTokens < 4096 {
 		maxTokens = 4096
 	}
+	// 防止 maxTokens 超出模型限制：使用配置上限进行截断
+	maxTokens = mr.capMaxTokens(maxTokens)
 
 	resp, err := mr.api.GenerateChatCompletion(paragraphReconstructPrompt, chunk, maxTokens, -1)
 	if err != nil {
@@ -454,6 +458,17 @@ func (mr *ModelRepairer) reconstructChunk(chunk string) (string, error) {
 	}
 
 	return strings.TrimSpace(resp.Choices[0].Message.Content), nil
+}
+
+// capMaxTokens 将 maxTokens 截断到配置允许的上限
+// 防止计算出的 maxTokens 超出目标模型的限制（如 qwen-math-turbo 上限 3072）
+func (mr *ModelRepairer) capMaxTokens(maxTokens int) int {
+	capTokens := config.AppConfigInstance.LLMMaxOutputTokens
+	if capTokens > 0 && maxTokens > capTokens {
+		log.Printf("[maxTokens截断] 原始值=%d, 截断为配置上限=%d", maxTokens, capTokens)
+		return capTokens
+	}
+	return maxTokens
 }
 
 // smartChunk 智能分块

@@ -46,15 +46,16 @@ type AppConfig struct {
 	ModelEndpoints        []ModelEndpoint // 多模型端点列表（含主模型 + 备用模型）
 	CompletionTemperature float64
 	CompletionMaxTokens   int
+	LLMMaxOutputTokens    int // LLM 最大输出 token 数上限（防止 max_tokens 超出模型限制）
 	LLMConcurrency        int
 
 	EnableLlmParagraphReconstruct bool
 	ParagraphChunkSize            int
 
-	EnableLocalModel   bool
-	LocalModelURL      string
-	LocalModelName     string
-	LocalModelTimeout  int
+	EnableLocalModel  bool
+	LocalModelURL     string
+	LocalModelName    string
+	LocalModelTimeout int
 
 	NameSeparators string
 }
@@ -88,28 +89,29 @@ func Load() error {
 	}
 
 	cfg := AppConfig{
-		Port:                      getEnvInt("PORT", 8080),
-		DataDir:                   getEnvStr("DATA_DIR", "./data"),
-		BaseDir:                   baseDir,
-		MaxFileSize:               getEnvInt64("MAX_FILE_SIZE", 100*1024*1024),
-		BackupKeepDays:            getEnvInt("BACKUP_KEEP_DAYS", 7),
-		EnableBasicCleaning:       getEnvBool("ENABLE_BASIC_CLEANING", true),
-		BasicCleaningTool:         getEnvStr("BASIC_CLEANING_TOOL", "regex"),
-		TraditionalToSimple:       getEnvBool("TRADITIONAL_TO_SIMPLE", false),
-		EnableVectorDetection:     getEnvBool("ENABLE_VECTOR_DETECTION", true),
-		VectorModelName:           getEnvStr("VECTOR_MODEL_NAME", "all-MiniLM-L6-v2"),
-		VectorModelType:           getEnvStr("VECTOR_MODEL_TYPE", "local"),
-		VectorSimilarityThreshold: getEnvFloat("VECTOR_SIMILARITY_THRESHOLD", 0.95),
-		VectorModelURL:            getEnvStr("VECTOR_MODEL_URL", ""),
-		VectorModelApiKey:         getEnvStr("VECTOR_MODEL_API_KEY", ""),
-		EnableModelRepair:         getEnvBool("ENABLE_MODEL_REPAIR", true),
-		RepairModelName:           getEnvStr("REPAIR_MODEL_NAME", "gpt-3.5-turbo-instruct"),
-		RepairModelType:           getEnvStr("REPAIR_MODEL_TYPE", "api"),
-		LLMApiURL:                 getEnvStr("LLM_API_URL", ""),
-		LLMApiKey:                 getEnvStr("LLM_API_KEY", ""),
-		CompletionModelName:       getEnvStr("COMPLETION_MODEL_NAME", "gpt-3.5-turbo-instruct"),
-		CompletionTemperature:     getEnvFloat("COMPLETION_TEMPERATURE", 0.3),
+		Port:                          getEnvInt("PORT", 8080),
+		DataDir:                       getEnvStr("DATA_DIR", "./data"),
+		BaseDir:                       baseDir,
+		MaxFileSize:                   getEnvInt64("MAX_FILE_SIZE", 100*1024*1024),
+		BackupKeepDays:                getEnvInt("BACKUP_KEEP_DAYS", 7),
+		EnableBasicCleaning:           getEnvBool("ENABLE_BASIC_CLEANING", true),
+		BasicCleaningTool:             getEnvStr("BASIC_CLEANING_TOOL", "regex"),
+		TraditionalToSimple:           getEnvBool("TRADITIONAL_TO_SIMPLE", false),
+		EnableVectorDetection:         getEnvBool("ENABLE_VECTOR_DETECTION", true),
+		VectorModelName:               getEnvStr("VECTOR_MODEL_NAME", "all-MiniLM-L6-v2"),
+		VectorModelType:               getEnvStr("VECTOR_MODEL_TYPE", "local"),
+		VectorSimilarityThreshold:     getEnvFloat("VECTOR_SIMILARITY_THRESHOLD", 0.95),
+		VectorModelURL:                getEnvStr("VECTOR_MODEL_URL", ""),
+		VectorModelApiKey:             getEnvStr("VECTOR_MODEL_API_KEY", ""),
+		EnableModelRepair:             getEnvBool("ENABLE_MODEL_REPAIR", true),
+		RepairModelName:               getEnvStr("REPAIR_MODEL_NAME", "gpt-3.5-turbo-instruct"),
+		RepairModelType:               getEnvStr("REPAIR_MODEL_TYPE", "api"),
+		LLMApiURL:                     getEnvStr("LLM_API_URL", ""),
+		LLMApiKey:                     getEnvStr("LLM_API_KEY", ""),
+		CompletionModelName:           getEnvStr("COMPLETION_MODEL_NAME", "gpt-3.5-turbo-instruct"),
+		CompletionTemperature:         getEnvFloat("COMPLETION_TEMPERATURE", 0.3),
 		CompletionMaxTokens:           getEnvInt("COMPLETION_MAX_TOKENS", 2048),
+		LLMMaxOutputTokens:            getEnvInt("LLM_MAX_OUTPUT_TOKENS", 4096),
 		LLMConcurrency:                getEnvInt("LLM_CONCURRENCY", 2),
 		EnableLlmParagraphReconstruct: getEnvBool("ENABLE_LLM_PARAGRAPH_RECONSTRUCT", true),
 		ParagraphChunkSize:            getEnvInt("PARAGRAPH_CHUNK_SIZE", 8000),
@@ -243,6 +245,9 @@ func Validate() error {
 	}
 	if cfg.CompletionTemperature < 0 || cfg.CompletionTemperature > 2 {
 		return fmt.Errorf("无效生成温度: %f", cfg.CompletionTemperature)
+	}
+	if cfg.LLMMaxOutputTokens < 1 || cfg.LLMMaxOutputTokens > 128000 {
+		return fmt.Errorf("无效LLM最大输出token数: %d（范围: 1~128000）", cfg.LLMMaxOutputTokens)
 	}
 	return nil
 }

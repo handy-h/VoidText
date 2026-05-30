@@ -198,6 +198,16 @@ func containsAny(s string, substrs []string) bool {
 	return false
 }
 
+// isMaxTokensError 检测是否为 max_tokens 超出范围的错误
+// 匹配条件：400 状态码 + 错误消息中包含 max_tokens 相关关键词
+func isMaxTokensError(statusCode int, errorMessage string) bool {
+	if statusCode != 400 {
+		return false
+	}
+	msg := strings.ToLower(errorMessage)
+	return strings.Contains(msg, "max_tokens") && containsAny(msg, []string{"range", "invalid", "exceed", "limit"})
+}
+
 // 可重试的 HTTP 状态码列表（包级常量，避免每次调用 IsRetryableError 都创建 DefaultRetryConfig）
 var retryableStatuses = []int{429, 500, 502, 503, 504}
 
@@ -223,6 +233,7 @@ type API struct {
 	completionModelName   string // 默认模型名（向后兼容）
 	completionTemperature float64
 	completionMaxTokens   int
+	maxOutputTokens       int // LLM 最大输出 token 数上限（防止 max_tokens 超出模型限制）
 	retryConfig           *RetryConfig
 	isLocalModel          bool // 是否为本地模型
 }
@@ -238,6 +249,7 @@ func NewAPI() *API {
 		completionModelName:   cfg.CompletionModelName,
 		completionTemperature: cfg.CompletionTemperature,
 		completionMaxTokens:   cfg.CompletionMaxTokens,
+		maxOutputTokens:       cfg.LLMMaxOutputTokens,
 		retryConfig:           DefaultRetryConfig(),
 		isLocalModel:          cfg.EnableLocalModel,
 	}
@@ -247,11 +259,11 @@ func NewAPI() *API {
 func NewEmbeddingAPI() *API {
 	cfg := config.AppConfigInstance
 	return &API{
-		baseURL:         cfg.VectorModelURL,
-		apiKey:          cfg.VectorModelApiKey,
+		baseURL:            cfg.VectorModelURL,
+		apiKey:             cfg.VectorModelApiKey,
 		embeddingModelName: cfg.VectorModelName,
-		retryConfig:     DefaultRetryConfig(),
-		isLocalModel:    cfg.EnableLocalModel && cfg.VectorModelURL == cfg.LocalModelURL,
+		retryConfig:        DefaultRetryConfig(),
+		isLocalModel:       cfg.EnableLocalModel && cfg.VectorModelURL == cfg.LocalModelURL,
 	}
 }
 
@@ -734,6 +746,14 @@ func (api *API) GenerateChatCompletion(systemPrompt, userPrompt string, maxToken
 	if maxTokens <= 0 {
 		maxTokens = api.completionMaxTokens
 	}
+	// 安全兜底：确保 maxTokens 不超过配置上限（防止调用方传入过大值）
+	if api.maxOutputTokens > 0 && maxTokens > api.maxOutputTokens {
+		logging.Warn("chat_completion_max_tokens_capped", map[string]interface{}{
+			"requested": maxTokens,
+			"capped_to": api.maxOutputTokens,
+		})
+		maxTokens = api.maxOutputTokens
+	}
 	if temperature < 0 {
 		temperature = api.completionTemperature
 	}
@@ -755,101 +775,125 @@ func (api *API) GenerateChatCompletion(systemPrompt, userPrompt string, maxToken
 		url := endpoint.URL + "/chat/completions"
 		startTime := time.Now()
 		endpointNum := idx + 1
+		currentMaxTokens := maxTokens
 
-		req := ChatCompletionRequest{
-			Model:       endpoint.ModelName,
-			Messages:    messages,
-			MaxTokens:   maxTokens,
-			Temperature: temperature,
-		}
+		// 内层循环：max_tokens 超限时自动减半重试（最多 3 次）
+		for maxTokensRetry := 0; maxTokensRetry <= 3; maxTokensRetry++ {
+			req := ChatCompletionRequest{
+				Model:       endpoint.ModelName,
+				Messages:    messages,
+				MaxTokens:   currentMaxTokens,
+				Temperature: temperature,
+			}
 
-		resp, err := api.doJSONRequestWithRetryKeyed(url, req, endpoint.APIKey)
-		if err != nil {
-			// HTTP 级重试已用尽，记录并尝试下一个端点
-			logging.Error("chat_completion_api_failed", nil, map[string]interface{}{
-				"url":          url,
-				"model":        endpoint.ModelName,
-				"endpoint_num": endpointNum,
-				"input_len":    len(userPrompt),
-				"duration":     time.Since(startTime).Milliseconds(),
-				"error":        err.Error(),
-			})
-			lastErr = err
-			api.tryFallback(idx, totalEndpoints, endpointNum, err.Error())
-			continue
-		}
+			resp, err := api.doJSONRequestWithRetryKeyed(url, req, endpoint.APIKey)
+			if err != nil {
+				// HTTP 级重试已用尽，记录并尝试下一个端点
+				logging.Error("chat_completion_api_failed", nil, map[string]interface{}{
+					"url":          url,
+					"model":        endpoint.ModelName,
+					"endpoint_num": endpointNum,
+					"input_len":    len(userPrompt),
+					"duration":     time.Since(startTime).Milliseconds(),
+					"error":        err.Error(),
+				})
+				lastErr = err
+				break // 跳出内层循环，尝试下一个端点
+			}
 
-		// resp 非 nil 说明 HTTP 200，解析响应
-		if resp.StatusCode != http.StatusOK {
-			var apiErrResp APIErrorResponse
-			json.NewDecoder(resp.Body).Decode(&apiErrResp)
+			// resp 非 nil 说明 HTTP 200，解析响应
+			if resp.StatusCode != http.StatusOK {
+				var apiErrResp APIErrorResponse
+				json.NewDecoder(resp.Body).Decode(&apiErrResp)
+				resp.Body.Close()
+
+				// max_tokens 超限错误：减半后重试当前端点
+				if isMaxTokensError(resp.StatusCode, apiErrResp.Error.Message) && maxTokensRetry < 3 {
+					newMaxTokens := currentMaxTokens / 2
+					if newMaxTokens < 256 {
+						newMaxTokens = 256 // 最低保底值，避免无限缩减
+					}
+					logging.Warn("chat_completion_max_tokens_retry", map[string]interface{}{
+						"url":            url,
+						"model":          endpoint.ModelName,
+						"endpoint_num":   endpointNum,
+						"old_max_tokens": currentMaxTokens,
+						"new_max_tokens": newMaxTokens,
+						"retry":          maxTokensRetry + 1,
+						"error":          apiErrResp.Error.Message,
+					})
+					currentMaxTokens = newMaxTokens
+					continue // 减半后重试
+				}
+
+				err := &APIError{
+					StatusCode: resp.StatusCode,
+					Message:    apiErrResp.Error.Message,
+				}
+
+				// 记录API拒绝错误（用于Evolver分析）
+				if resp.StatusCode == 400 || resp.StatusCode == 429 {
+					logging.APIRefusal(0, "v1", userPrompt[:min(100, len(userPrompt))], apiErrResp.Error.Message)
+				}
+
+				logging.Error("chat_completion_api_error_status", nil, map[string]interface{}{
+					"url":          url,
+					"model":        endpoint.ModelName,
+					"endpoint_num": endpointNum,
+					"status":       resp.StatusCode,
+					"duration":     time.Since(startTime).Milliseconds(),
+					"error":        apiErrResp.Error.Message,
+				})
+				lastErr = err
+				break // 非 max_tokens 错误，跳出内层循环，尝试下一个端点
+			}
+
+			var chatResp ChatCompletionResponse
+			decodeErr := json.NewDecoder(resp.Body).Decode(&chatResp)
 			resp.Body.Close()
 
-			err := &APIError{
-				StatusCode: resp.StatusCode,
-				Message:    apiErrResp.Error.Message,
+			if decodeErr != nil {
+				logging.Error("chat_completion_decode_failed", nil, map[string]interface{}{
+					"url":          url,
+					"model":        endpoint.ModelName,
+					"endpoint_num": endpointNum,
+					"duration":     time.Since(startTime).Milliseconds(),
+					"error":        decodeErr.Error(),
+				})
+				lastErr = fmt.Errorf("解析响应失败: %w", decodeErr)
+				break // 跳出内层循环，尝试下一个端点
 			}
 
-			// 记录API拒绝错误（用于Evolver分析）
-			if resp.StatusCode == 400 || resp.StatusCode == 429 {
-				logging.APIRefusal(0, "v1", userPrompt[:min(100, len(userPrompt))], apiErrResp.Error.Message)
+			// 响应为空或无效
+			if len(chatResp.Choices) == 0 {
+				logging.Warn("chat_completion_empty_choices", map[string]interface{}{
+					"url":          url,
+					"model":        endpoint.ModelName,
+					"endpoint_num": endpointNum,
+					"duration":     time.Since(startTime).Milliseconds(),
+				})
+				lastErr = fmt.Errorf("模型 %s 返回空结果", endpoint.ModelName)
+				break // 跳出内层循环，尝试下一个端点
 			}
 
-			logging.Error("chat_completion_api_error_status", nil, map[string]interface{}{
-				"url":          url,
-				"model":        endpoint.ModelName,
-				"endpoint_num": endpointNum,
-				"status":       resp.StatusCode,
-				"duration":     time.Since(startTime).Milliseconds(),
-				"error":        apiErrResp.Error.Message,
+			// 成功
+			logging.Info("chat_completion_api_success", map[string]interface{}{
+				"url":            url,
+				"model":          endpoint.ModelName,
+				"endpoint_num":   endpointNum,
+				"input_len":      len(userPrompt),
+				"output_len":     len(chatResp.Choices[0].Message.Content),
+				"tokens":         chatResp.Usage.TotalTokens,
+				"max_tokens_req": currentMaxTokens,
+				"duration":       time.Since(startTime).Milliseconds(),
 			})
-			lastErr = err
-			api.tryFallback(idx, totalEndpoints, endpointNum, fmt.Sprintf("状态码 %d: %s", resp.StatusCode, apiErrResp.Error.Message))
-			continue
-		}
 
-		var chatResp ChatCompletionResponse
-		decodeErr := json.NewDecoder(resp.Body).Decode(&chatResp)
-		resp.Body.Close()
+			return &chatResp, nil
+		} // end maxTokensRetry loop
 
-		if decodeErr != nil {
-			logging.Error("chat_completion_decode_failed", nil, map[string]interface{}{
-				"url":          url,
-				"model":        endpoint.ModelName,
-				"endpoint_num": endpointNum,
-				"duration":     time.Since(startTime).Milliseconds(),
-				"error":        decodeErr.Error(),
-			})
-			lastErr = fmt.Errorf("解析响应失败: %w", decodeErr)
-			api.tryFallback(idx, totalEndpoints, endpointNum, decodeErr.Error())
-			continue
-		}
-
-		// 响应为空或无效
-		if len(chatResp.Choices) == 0 {
-			logging.Warn("chat_completion_empty_choices", map[string]interface{}{
-				"url":          url,
-				"model":        endpoint.ModelName,
-				"endpoint_num": endpointNum,
-				"duration":     time.Since(startTime).Milliseconds(),
-			})
-			lastErr = fmt.Errorf("模型 %s 返回空结果", endpoint.ModelName)
-			api.tryFallback(idx, totalEndpoints, endpointNum, "空结果")
-			continue
-		}
-
-		logging.Info("chat_completion_api_success", map[string]interface{}{
-			"url":          url,
-			"model":        endpoint.ModelName,
-			"endpoint_num": endpointNum,
-			"input_len":    len(userPrompt),
-			"output_len":   len(chatResp.Choices[0].Message.Content),
-			"tokens":       chatResp.Usage.TotalTokens,
-			"duration":     time.Since(startTime).Milliseconds(),
-		})
-
-		return &chatResp, nil
-	}
+		// 内层循环结束（全部失败），记录回退日志，继续尝试下一个端点
+		api.tryFallback(idx, totalEndpoints, endpointNum, fmt.Sprintf("端点 %d 最终失败", endpointNum))
+	} // end endpoint loop
 
 	return nil, fmt.Errorf("所有%d个模型端点均已尝试失败，最后错误: %w", totalEndpoints, lastErr)
 }
