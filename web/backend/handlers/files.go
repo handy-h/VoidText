@@ -48,8 +48,8 @@ func UploadFile(c *gin.Context) {
 
 	// 记录上传文件信息
 	logging.Info("收到文件上传请求", map[string]interface{}{
-		"filename": safeFileName,
-		"size":     f.Size,
+		"filename":  safeFileName,
+		"size":      f.Size,
 		"client_ip": c.ClientIP(),
 	})
 
@@ -94,7 +94,7 @@ func UploadFile(c *gin.Context) {
 	err = c.SaveUploadedFile(f, tempPath)
 	if err != nil {
 		logging.Error("保存上传文件失败", err, map[string]interface{}{
-			"filename": safeFileName,
+			"filename":  safeFileName,
 			"temp_path": tempPath,
 		})
 		c.JSON(http.StatusInternalServerError, errors.NewErrorResponse(
@@ -107,7 +107,7 @@ func UploadFile(c *gin.Context) {
 	if err != nil {
 		os.Remove(tempPath)
 		logging.Error("计算文件MD5失败", err, map[string]interface{}{
-			"filename": safeFileName,
+			"filename":  safeFileName,
 			"temp_path": tempPath,
 		})
 		c.JSON(http.StatusInternalServerError, errors.NewErrorResponse(
@@ -242,7 +242,7 @@ func createNewFileRecord(c *gin.Context, tempPath, fileMd5, fileName string, fil
 	if err := os.Rename(tempPath, finalPath); err != nil {
 		os.Remove(tempPath)
 		logging.Error("移动文件失败", err, map[string]interface{}{
-			"temp_path": tempPath,
+			"temp_path":  tempPath,
 			"final_path": finalPath,
 		})
 		c.JSON(http.StatusInternalServerError, errors.NewErrorResponse(
@@ -286,11 +286,11 @@ func createNewFileRecord(c *gin.Context, tempPath, fileMd5, fileName string, fil
 	}
 
 	logging.Info("文件上传成功", map[string]interface{}{
-		"file_md5": fileMd5,
-		"filename": fileName,
+		"file_md5":  fileMd5,
+		"filename":  fileName,
 		"file_size": fileSize,
-		"author": parsed.Author,
-		"title": parsed.Title,
+		"author":    parsed.Author,
+		"title":     parsed.Title,
 	})
 
 	c.JSON(http.StatusOK, gin.H{
@@ -325,21 +325,21 @@ func ResumeFile(c *gin.Context) {
 			if err != nil {
 				return fmt.Errorf("重置文件状态失败: %w", err)
 			}
-			
+
 			// 删除段级审核记录
 			_, err = tx.Exec("DELETE FROM review_paragraphs WHERE file_md5 = ?", md5)
 			if err != nil {
 				return fmt.Errorf("清除审核记录失败: %w", err)
 			}
-			
+
 			return nil
 		})
-		
+
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": err.Error()})
 			return
 		}
-		
+
 		record.Status = "pending"
 		record.CurrentStep = ""
 		record.Progress = 0
@@ -350,12 +350,12 @@ func ResumeFile(c *gin.Context) {
 				"pending", "", time.Now().Format(time.RFC3339), md5)
 			return err
 		})
-		
+
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "重置文件状态失败: " + err.Error()})
 			return
 		}
-		
+
 		record.Status = "pending"
 		record.ErrorMsg = ""
 	case "processing":
@@ -365,7 +365,7 @@ func ResumeFile(c *gin.Context) {
 				"pending", "", "", time.Now().Format(time.RFC3339), md5)
 			return err
 		})
-		
+
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "重置文件状态失败: " + err.Error()})
 			return
@@ -447,8 +447,8 @@ func GetFileContent(c *gin.Context) {
 		filePath = record.ReviewBaselinePath
 	}
 
-	const defaultLimit = 1 * 1024 * 1024  // 1MB
-	const maxLimit = 10 * 1024 * 1024     // 10MB
+	const defaultLimit = 1 * 1024 * 1024 // 1MB
+	const maxLimit = 10 * 1024 * 1024    // 10MB
 	readLimit := int64(defaultLimit)
 	if q := c.Query("limit"); q != "" {
 		if n, err := strconv.ParseInt(q, 10, 64); err == nil && n > 0 {

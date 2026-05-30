@@ -139,5 +139,3 @@ func truncate(s string, n int) string {
 	}
 	return string(r[:n])
 }
-
-

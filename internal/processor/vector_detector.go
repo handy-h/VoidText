@@ -2,6 +2,7 @@ package processor
 
 import (
 	"fmt"
+	"log"
 	"math"
 	"strings"
 	"time"
@@ -9,6 +10,12 @@ import (
 	"voidtext/internal/external"
 	"voidtext/internal/processor/preprocess"
 )
+
+// 精确匹配最小字符数阈值，避免结构元素（如 "（1）"、"★ ★ ★"）被误判为重复
+const minExactMatchRunes = 5
+
+// 本地模型向量维度（8 语义特征 + 24 哈希特征 = 32 维）
+const localModelDims = 32
 
 // VectorDetector 向量检测器
 type VectorDetector struct {
@@ -103,7 +110,7 @@ func (vd *VectorDetector) splitIntoParagraphs(content string) []string {
 }
 
 // generateVectors 生成段落向量
-// api 模式：调用外部 Embedding 服务；ollama 模式：调用本地 Ollama embedding；local 模式：7 维混合特征
+// api 模式：调用外部 Embedding 服务；ollama 模式：调用本地 Ollama embedding；local 模式：32 维混合特征
 func (vd *VectorDetector) generateVectors(paragraphs []string) ([][]float64, error) {
 	if vd.VectorModelType == "api" && vd.apiClient != nil {
 		resp, err := vd.apiClient.GenerateEmbedding(paragraphs)
@@ -124,18 +131,31 @@ func (vd *VectorDetector) generateVectors(paragraphs []string) ([][]float64, err
 	}
 
 	if vd.VectorModelType == "ollama" && vd.ollamaClient != nil {
-		resp, err := vd.ollamaClient.GenerateEmbedding(paragraphs)
-		if err != nil {
-			return nil, fmt.Errorf("ollama embedding 调用失败: %w", err)
+		// 分批处理，避免一次性发送过多段落导致超时
+		const batchSize = 50
+		total := len(paragraphs)
+		vectors := make([][]float64, total)
+
+		for start := 0; start < total; start += batchSize {
+			end := start + batchSize
+			if end > total {
+				end = total
+			}
+			batch := paragraphs[start:end]
+
+			log.Printf("[向量检测] Ollama embedding 进度: %d/%d 段落", start+len(batch), total)
+			resp, err := vd.ollamaClient.GenerateEmbedding(batch)
+			if err != nil {
+				return nil, fmt.Errorf("ollama embedding 调用失败 (batch %d-%d): %w", start, end, err)
+			}
+			if resp == nil {
+				return nil, fmt.Errorf("ollama embedding 返回空响应 (batch %d-%d)", start, end)
+			}
+			if len(resp.Embeddings) != len(batch) {
+				return nil, fmt.Errorf("ollama embedding 返回数量不匹配: 期望 %d, 实际 %d", len(batch), len(resp.Embeddings))
+			}
+			copy(vectors[start:end], resp.Embeddings)
 		}
-		if resp == nil {
-			return nil, fmt.Errorf("ollama embedding 返回空响应")
-		}
-		if len(resp.Embeddings) != len(paragraphs) {
-			return nil, fmt.Errorf("ollama embedding 返回数量不匹配: 期望 %d, 实际 %d", len(paragraphs), len(resp.Embeddings))
-		}
-		vectors := make([][]float64, len(paragraphs))
-		copy(vectors, resp.Embeddings)
 		return vectors, nil
 	}
 
@@ -144,22 +164,42 @@ func (vd *VectorDetector) generateVectors(paragraphs []string) ([][]float64, err
 		runes := []rune(paragraph)
 		runeLen := float64(len(runes))
 
-		vector := make([]float64, 7)
+		vector := make([]float64, localModelDims)
 
 		// 语义特征（均归一化到 [0,1]）
 		vector[0] = math.Min(runeLen/500.0, 1.0)
 		if runeLen > 0 {
 			vector[1] = float64(strings.Count(paragraph, "。")) / runeLen
 			vector[2] = float64(strings.Count(paragraph, "，")) / runeLen
+			vector[3] = float64(strings.Count(paragraph, "！")) / runeLen
+			vector[4] = float64(strings.Count(paragraph, "？")) / runeLen
+			vector[5] = float64(strings.Count(paragraph, "：")) / runeLen
+			vector[6] = float64(strings.Count(paragraph, "；")) / runeLen
+			// 平均字符值（归一化）
+			var runeSum float64
+			for _, r := range runes {
+				runeSum += float64(r)
+			}
+			vector[7] = math.Min(runeSum/(runeLen*65536.0), 1.0)
 		}
 
-		// 判别特征：FNV-1a 哈希分片为 4 个 uint16 → [0,1]
+		// 判别特征：多个哈希函数分片，提升区分力
 		normalized := vd.normalizeParagraph(paragraph)
-		h := fnv1a64(normalized)
-		vector[3] = float64(h&0xFFFF) / 65536.0
-		vector[4] = float64((h>>16)&0xFFFF) / 65536.0
-		vector[5] = float64((h>>32)&0xFFFF) / 65536.0
-		vector[6] = float64((h>>48)&0xFFFF) / 65536.0
+		// FNV-1a 哈希 → 8 个 uint8 特征
+		h1 := fnv1a64(normalized)
+		for j := 0; j < 8; j++ {
+			vector[8+j] = float64((h1>>(uint(j)*8))&0xFF) / 256.0
+		}
+		// 第二哈希（不同质数）→ 8 个 uint8 特征
+		h2 := fnv1a64WithSeed(normalized, 0x9e3779b97f4a7c15)
+		for j := 0; j < 8; j++ {
+			vector[16+j] = float64((h2>>(uint(j)*8))&0xFF) / 256.0
+		}
+		// 第三哈希（不同质数）→ 8 个 uint8 特征
+		h3 := fnv1a64WithSeed(normalized, 0xbf58476d1ce4e5b9)
+		for j := 0; j < 8; j++ {
+			vector[24+j] = float64((h3>>(uint(j)*8))&0xFF) / 256.0
+		}
 
 		vectors[i] = vector
 	}
@@ -177,6 +217,16 @@ func fnv1a64(s string) uint64 {
 	return h
 }
 
+// fnv1a64WithSeed 使用自定义偏移量计算 FNV-1a 哈希（生成独立分布的哈希值）
+func fnv1a64WithSeed(s string, seed uint64) uint64 {
+	h := seed
+	for i := 0; i < len(s); i++ {
+		h ^= uint64(s[i])
+		h *= 1099511628211
+	}
+	return h
+}
+
 // findDuplicateIndices 查找重复段落的索引
 // 两阶段检测：(1) 精确匹配（快速路径），(2) 向量余弦相似度（近义重复）
 func (vd *VectorDetector) findDuplicateIndices(vectors [][]float64, paragraphs []string) []int {
@@ -186,6 +236,12 @@ func (vd *VectorDetector) findDuplicateIndices(vectors [][]float64, paragraphs [
 
 	for i, paragraph := range paragraphs {
 		normalized := vd.normalizeParagraph(paragraph)
+
+		// 跳过归一化后过短的段落（避免结构元素误判为重复）
+		runeLen := len([]rune(normalized))
+		if runeLen < minExactMatchRunes {
+			continue
+		}
 
 		// 阶段 1：精确匹配（去标点后完全相同）
 		if _, exists := seen[normalized]; exists {
@@ -214,16 +270,16 @@ func (vd *VectorDetector) findDuplicateIndices(vectors [][]float64, paragraphs [
 }
 
 // normalizeParagraph 规范化段落文本
+// 仅移除中文标点符号，保留空格和括号等有意义的格式字符
 func (vd *VectorDetector) normalizeParagraph(paragraph string) string {
-	// 移除标点符号和空白字符进行简化匹配
+	// 移除标点符号进行简化匹配，但保留空格（避免 "★ ★ ★" 和 "★    ★" 碰撞）
 	replacer := strings.NewReplacer(
 		"，", "", "。", "", "！", "", "？", "",
-		"；", "", "：", "", "（", "", "）", "",
-		"【", "", "】", "", "《", "", "》", "",
-		" ", "", "\t", "", "\n", "", "\r", "",
+		"；", "", "：", "", "【", "", "】", "",
+		"《", "", "》", "",
 	)
 
-	return replacer.Replace(paragraph)
+	return strings.TrimSpace(replacer.Replace(paragraph))
 }
 
 // removeDuplicateParagraphs 移除重复段落

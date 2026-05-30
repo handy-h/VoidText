@@ -8,25 +8,25 @@ import (
 
 // FileRecord 文件记录
 type FileRecord struct {
-	ID                   int64  `json:"id"`
-	Md5                  string `json:"md5"`
-	OriginalMd5          string `json:"originalMd5"`
-	Author               string `json:"author"`
-	Title                string `json:"title"`
-	FileName             string `json:"fileName"`
-	FileSize             int64  `json:"fileSize"`
-	FilePath             string `json:"filePath"`
-	ReviewBaselinePath   string `json:"reviewBaselinePath"`
-	Status               string `json:"status"`
-	CurrentStep          string `json:"currentStep"`
-	Progress             int    `json:"progress"`
-	RulesConfig          string `json:"rulesConfig"`
-	CreatedAt            string `json:"createdAt"`
-	UpdatedAt            string `json:"updatedAt"`
-	ErrorMsg             string `json:"errorMsg"`
-	LlmProgressParagraph int    `json:"llmProgressParagraph"`
+	ID                    int64  `json:"id"`
+	Md5                   string `json:"md5"`
+	OriginalMd5           string `json:"originalMd5"`
+	Author                string `json:"author"`
+	Title                 string `json:"title"`
+	FileName              string `json:"fileName"`
+	FileSize              int64  `json:"fileSize"`
+	FilePath              string `json:"filePath"`
+	ReviewBaselinePath    string `json:"reviewBaselinePath"`
+	Status                string `json:"status"`
+	CurrentStep           string `json:"currentStep"`
+	Progress              int    `json:"progress"`
+	RulesConfig           string `json:"rulesConfig"`
+	CreatedAt             string `json:"createdAt"`
+	UpdatedAt             string `json:"updatedAt"`
+	ErrorMsg              string `json:"errorMsg"`
+	LlmProgressParagraph  int    `json:"llmProgressParagraph"`
 	LlmProgressCheckpoint string `json:"llmProgressCheckpoint"`
-	CancelFlag           int    `json:"cancelFlag"`
+	CancelFlag            int    `json:"cancelFlag"`
 }
 
 // CreateFile 创建文件记录

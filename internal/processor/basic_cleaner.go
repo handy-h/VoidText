@@ -17,10 +17,10 @@ var (
 
 // BasicCleanResult 基础清洗结果
 type BasicCleanResult struct {
-	Content     string   `json:"content"`
-	Original    string   `json:"original"`
-	Changes     []preprocess.Change `json:"changes"`
-	Stats       map[string]int `json:"stats"`
+	Content  string              `json:"content"`
+	Original string              `json:"original"`
+	Changes  []preprocess.Change `json:"changes"`
+	Stats    map[string]int      `json:"stats"`
 }
 
 // BasicCleaner 基础文本清洗器
@@ -60,13 +60,13 @@ func (bc *BasicCleaner) Clean(content string) BasicCleanResult {
 // cleanHTMLEntities 清理HTML实体字符
 func (bc *BasicCleaner) cleanHTMLEntities(result BasicCleanResult) BasicCleanResult {
 	htmlEntities := map[string]string{
-		"&nbsp;": " ",
-		"&amp;":  "&",
-		"&lt;":   "<",
-		"&gt;":   ">",
-		"&quot;": "\"",
-		"&apos;": "'",
-		"&#160;": " ",
+		"&nbsp;":  " ",
+		"&amp;":   "&",
+		"&lt;":    "<",
+		"&gt;":    ">",
+		"&quot;":  "\"",
+		"&apos;":  "'",
+		"&#160;":  " ",
 		"&#8203;": "",
 		"&#8204;": "",
 		"&#8205;": "",

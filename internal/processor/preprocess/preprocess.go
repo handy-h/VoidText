@@ -180,7 +180,6 @@ func fixMixedEncoding(content string) string {
 	return strings.Join(fixedLines, "\n")
 }
 
-
 // removeAdvertisements 移除广告内容
 func removeAdvertisements(result PreprocessResult) PreprocessResult {
 	// 常见广告模式
@@ -252,7 +251,7 @@ func cleanupGarbledText(result PreprocessResult) PreprocessResult {
 	// 定义乱码模式
 	// 1. 连续的替换字符（U+FFFD） - 包括单个和多个
 	replacementPattern := regexp.MustCompile(`�+`)
-	
+
 	// 2. 常见的乱码模式（如"锟斤拷"等）
 	commonGarbledPatterns := []string{
 		`(锟斤拷)+`,
@@ -260,25 +259,25 @@ func cleanupGarbledText(result PreprocessResult) PreprocessResult {
 		`(屯屯屯)+`,
 		`(����������������)+`,
 	}
-	
+
 	originalContent := result.Content
 	changes := result.Changes
-	
+
 	// 处理连续的替换字符（至少2个连续的替换字符才认为是乱码）
 	matches := replacementPattern.FindAllStringIndex(originalContent, -1)
 	for i := len(matches) - 1; i >= 0; i-- {
 		match := matches[i]
 		start, end := match[0], match[1]
 		garbledText := originalContent[start:end]
-		
+
 		// 只处理至少2个连续的替换字符
 		if utf8.RuneCountInString(garbledText) >= 2 {
 			// 计算乱码字符数
 			charCount := utf8.RuneCountInString(garbledText)
-			
+
 			// 创建替换文本
 			replacement := fmt.Sprintf("[因无法修复的乱码删除了%d个字符]", charCount)
-			
+
 			// 添加变更记录
 			changes = append(changes, Change{
 				Type:        "garbled_text_removal",
@@ -287,27 +286,25 @@ func cleanupGarbledText(result PreprocessResult) PreprocessResult {
 				Position:    start,
 				Confidence:  1.0,
 			})
-			
+
 			// 替换乱码
 			originalContent = originalContent[:start] + replacement + originalContent[end:]
 		}
 	}
-	
 
-	
 	// 处理常见的乱码模式
 	for _, pattern := range commonGarbledPatterns {
 		regex := regexp.MustCompile(pattern)
 		matches := regex.FindAllStringIndex(originalContent, -1)
-		
+
 		for i := len(matches) - 1; i >= 0; i-- {
 			match := matches[i]
 			start, end := match[0], match[1]
 			garbledText := originalContent[start:end]
-			
+
 			charCount := utf8.RuneCountInString(garbledText)
 			replacement := fmt.Sprintf("[因无法修复的乱码删除了%d个字符]", charCount)
-			
+
 			changes = append(changes, Change{
 				Type:        "garbled_text_removal",
 				Original:    garbledText,
@@ -315,13 +312,12 @@ func cleanupGarbledText(result PreprocessResult) PreprocessResult {
 				Position:    start,
 				Confidence:  1.0,
 			})
-			
+
 			originalContent = originalContent[:start] + replacement + originalContent[end:]
 		}
 	}
-	
+
 	result.Content = originalContent
 	result.Changes = changes
 	return result
 }
-

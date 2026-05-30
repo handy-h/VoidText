@@ -26,22 +26,22 @@ func main() {
 
 	// 初始化日志系统
 	logConfig := logging.Config{
-		Level:              logging.INFO,
-		EnableFileLog:      true,
-		EnableConsoleLog:   os.Getenv("LOG_TO_CONSOLE") == "true",
-		LogFilePath:        filepath.Join(config.AppConfigInstance.DataDir, "logs", "voidtext.log"),
+		Level:               logging.INFO,
+		EnableFileLog:       true,
+		EnableConsoleLog:    os.Getenv("LOG_TO_CONSOLE") == "true",
+		LogFilePath:         filepath.Join(config.AppConfigInstance.DataDir, "logs", "voidtext.log"),
 		EnableStructuredLog: true,
-		MaxFileSize:        10 * 1024 * 1024, // 10MB
-		MaxBackupFiles:     5,
+		MaxFileSize:         10 * 1024 * 1024, // 10MB
+		MaxBackupFiles:      5,
 	}
-	
+
 	if err := logging.Init(logConfig); err != nil {
 		log.Fatalf("Failed to init logging: %v", err)
 	}
 	defer logging.Close()
-	
+
 	logging.Info("应用程序启动", map[string]interface{}{
-		"version": "1.0.0",
+		"version":  "1.0.0",
 		"data_dir": config.AppConfigInstance.DataDir,
 	})
 
@@ -50,7 +50,7 @@ func main() {
 		logging.Fatal("初始化数据库失败", err, nil)
 	}
 	defer database.Close()
-	
+
 	logging.Info("数据库初始化完成", nil)
 
 	// 初始化Web服务

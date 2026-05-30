@@ -48,10 +48,10 @@ func (nf *NewlineFixer) Fix(content string) NewlineFixResult {
 	// 检测是否需要修复换行符
 	needFix := nf.needsNewlineFix(content)
 	logging.Info("newline_fix_detect", map[string]interface{}{
-		"content_len":     len(content),
-		"rune_count":      len([]rune(content)),
-		"newline_count":   strings.Count(content, "\n"),
-		"needs_fix":       needFix,
+		"content_len":   len(content),
+		"rune_count":    len([]rune(content)),
+		"newline_count": strings.Count(content, "\n"),
+		"needs_fix":     needFix,
 	})
 	if !needFix {
 		result.Stats["skipped"] = 1

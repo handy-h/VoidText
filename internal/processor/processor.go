@@ -226,4 +226,3 @@ func ApplyAllSuggestions(content string, suggestions []preprocess.Change) string
 	}
 	return content
 }
-

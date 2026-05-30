@@ -19,7 +19,7 @@ type RateLimiter struct {
 	maxRequests int           // 最大请求数
 	window      time.Duration // 时间窗口
 	cleanup     time.Duration // 清理间隔
-	stopCh      chan struct{}  // 停止清理 goroutine 的信号
+	stopCh      chan struct{} // 停止清理 goroutine 的信号
 }
 
 // rateLimit 单个IP的限流信息

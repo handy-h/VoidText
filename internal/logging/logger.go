@@ -40,7 +40,7 @@ var (
 type Config struct {
 	Level               LogLevel
 	EnableFileLog       bool
-	EnableConsoleLog    bool   // 同时输出到控制台（开发模式）
+	EnableConsoleLog    bool // 同时输出到控制台（开发模式）
 	LogFilePath         string
 	EnableStructuredLog bool
 	MaxFileSize         int64 // 最大文件大小（字节）
@@ -381,5 +381,3 @@ func PromptUpdated(oldVersion, newVersion string, diffLen int) {
 		"diff_len":    diffLen,
 	})
 }
-
-
