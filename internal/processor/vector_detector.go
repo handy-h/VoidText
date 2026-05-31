@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 	"voidtext/internal/config"
 	"voidtext/internal/external"
@@ -17,11 +19,16 @@ const minExactMatchRunes = 5
 // 本地模型向量维度（8 语义特征 + 24 哈希特征 = 32 维）
 const localModelDims = 32
 
+// 滑动窗口大小：只比较最近 N 个段落（重复段落通常距离不远）
+// 设置为 0 则比较所有段落（原始行为）
+const defaultWindowSize = 300
+
 // VectorDetector 向量检测器
 type VectorDetector struct {
 	SimilarityThreshold float64
 	VectorModelType     string
 	VectorModelName     string
+	WindowSize          int // 滑动窗口大小，0 表示比较所有段落
 	apiClient           *external.API
 	ollamaClient        *external.OllamaClient
 }
@@ -40,6 +47,7 @@ func NewVectorDetector(similarityThreshold float64, modelType, modelName string)
 		SimilarityThreshold: similarityThreshold,
 		VectorModelType:     modelType,
 		VectorModelName:     modelName,
+		WindowSize:          defaultWindowSize, // 默认使用滑动窗口优化
 	}
 	if modelType == "api" {
 		vd.apiClient = external.NewEmbeddingAPI()
@@ -68,6 +76,8 @@ func (vd *VectorDetector) DetectDuplicates(content string) (VectorDetectionResul
 		return result, nil
 	}
 
+	startTime := time.Now()
+
 	// 按段落分割文本
 	paragraphs := vd.splitIntoParagraphs(content)
 
@@ -75,19 +85,25 @@ func (vd *VectorDetector) DetectDuplicates(content string) (VectorDetectionResul
 		return result, nil
 	}
 
+	log.Printf("[向量检测] 开始处理 %d 个段落", len(paragraphs))
+
 	// 生成向量表示
 	vectors, err := vd.generateVectors(paragraphs)
 	if err != nil {
 		return result, err
 	}
 
-	// 检测重复段落
+	// 检测重复段落（优化版）
 	duplicateIndices := vd.findDuplicateIndices(vectors, paragraphs)
 
 	// 移除重复段落
 	if len(duplicateIndices) > 0 {
 		result = vd.removeDuplicateParagraphs(result, paragraphs, duplicateIndices)
 	}
+
+	elapsed := time.Since(startTime)
+	log.Printf("[向量检测] 完成，耗时 %.2f 秒，移除 %d 个重复段落",
+		elapsed.Seconds(), len(duplicateIndices))
 
 	return result, nil
 }
@@ -227,42 +243,140 @@ func fnv1a64WithSeed(s string, seed uint64) uint64 {
 	return h
 }
 
-// findDuplicateIndices 查找重复段落的索引
-// 两阶段检测：(1) 精确匹配（快速路径），(2) 向量余弦相似度（近义重复）
-func (vd *VectorDetector) findDuplicateIndices(vectors [][]float64, paragraphs []string) []int {
-	duplicateIndices := []int{}
-	duplicateSet := make(map[int]bool)
-	seen := make(map[string]bool) // normalized -> seen
+// vectorMagnitude 预计算的向量及其模长
+type vectorMagnitude struct {
+	vector    []float64
+	magnitude float64
+}
 
+// findDuplicateIndices 查找重复段落的索引
+// 优化策略：
+// 1. 滑动窗口：只比较最近 WindowSize 个段落（重复段落通常距离不远）
+// 2. 预计算模长：避免重复计算 sqrt
+// 3. 并行计算：使用 goroutine 并行处理相似度计算
+func (vd *VectorDetector) findDuplicateIndices(vectors [][]float64, paragraphs []string) []int {
+	n := len(paragraphs)
+	duplicateSet := make(map[int]bool)
+	seen := make(map[string]int) // normalized -> first index
+
+	// 预计算所有向量的模长
+	vecMags := make([]vectorMagnitude, n)
+	for i, vec := range vectors {
+		mag := 0.0
+		for _, v := range vec {
+			mag += v * v
+		}
+		vecMags[i] = vectorMagnitude{
+			vector:    vec,
+			magnitude: math.Sqrt(mag),
+		}
+	}
+
+	// 阶段 1：精确匹配（快速路径）
 	for i, paragraph := range paragraphs {
 		normalized := vd.normalizeParagraph(paragraph)
 
-		// 跳过归一化后过短的段落（避免结构元素误判为重复）
+		// 跳过归一化后过短的段落
 		runeLen := len([]rune(normalized))
 		if runeLen < minExactMatchRunes {
 			continue
 		}
 
-		// 阶段 1：精确匹配（去标点后完全相同）
-		if _, exists := seen[normalized]; exists {
-			// 仅标记当前为重复，保留 firstIdx 以允许后续余弦比较
-			duplicateIndices = append(duplicateIndices, i)
+		// 精确匹配
+		if firstIdx, exists := seen[normalized]; exists {
 			duplicateSet[i] = true
+			log.Printf("[向量检测] 精确匹配重复: 段落 %d 与 %d 相同", i, firstIdx)
 			continue
 		}
-		seen[normalized] = true
+		seen[normalized] = i
+	}
 
-		// 阶段 2：向量余弦相似度（检测近义重复）
-		for j := 0; j < i; j++ {
-			if duplicateSet[j] {
-				continue // j 已经是重复段落，跳过
+	// 阶段 2：向量余弦相似度（滑动窗口 + 并行计算）
+	type compareTask struct {
+		i int
+		j int
+	}
+
+	type compareResult struct {
+		i          int
+		j          int
+		similarity float64
+	}
+
+	// 确定并行度
+	numWorkers := runtime.NumCPU()
+	if numWorkers > 8 {
+		numWorkers = 8 // 限制最大并行度
+	}
+
+	taskChan := make(chan compareTask, 1000)
+	resultChan := make(chan compareResult, 1000)
+	var wg sync.WaitGroup
+
+	// 启动 worker goroutines
+	for w := 0; w < numWorkers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for task := range taskChan {
+				i, j := task.i, task.j
+				similarity := vd.calculateCosineSimilarityOptimized(
+					vecMags[i], vecMags[j],
+				)
+				if similarity >= vd.SimilarityThreshold {
+					resultChan <- compareResult{i: i, j: j, similarity: similarity}
+				}
 			}
-			similarity := vd.calculateCosineSimilarity(vectors[i], vectors[j])
-			if similarity >= vd.SimilarityThreshold {
-				duplicateIndices = append(duplicateIndices, i)
-				duplicateSet[i] = true
-				break
+		}()
+	}
+
+	// 生成比较任务（滑动窗口）
+	go func() {
+		for i := 0; i < n; i++ {
+			if duplicateSet[i] {
+				continue // 已经是重复段落，跳过
 			}
+
+			// 滑动窗口：只比较最近 WindowSize 个段落
+			// WindowSize = 0 表示比较所有段落（原始行为）
+			start := 0
+			if vd.WindowSize > 0 {
+				start = i - vd.WindowSize
+				if start < 0 {
+					start = 0
+				}
+			}
+
+			for j := start; j < i; j++ {
+				if duplicateSet[j] {
+					continue // j 已经是重复段落，跳过
+				}
+				taskChan <- compareTask{i: i, j: j}
+			}
+		}
+		close(taskChan)
+	}()
+
+	// 收集结果
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	// 处理结果
+	for result := range resultChan {
+		if !duplicateSet[result.i] {
+			duplicateSet[result.i] = true
+			log.Printf("[向量检测] 向量相似重复: 段落 %d 与 %d 相似度 %.4f",
+				result.i, result.j, result.similarity)
+		}
+	}
+
+	// 转换为索引列表
+	duplicateIndices := []int{}
+	for i := 0; i < n; i++ {
+		if duplicateSet[i] {
+			duplicateIndices = append(duplicateIndices, i)
 		}
 	}
 
@@ -338,4 +452,22 @@ func (vd *VectorDetector) calculateCosineSimilarity(vec1, vec2 []float64) float6
 	}
 
 	return dotProduct / (math.Sqrt(magnitude1) * math.Sqrt(magnitude2))
+}
+
+// calculateCosineSimilarityOptimized 计算余弦相似度（优化版，使用预计算的模长）
+func (vd *VectorDetector) calculateCosineSimilarityOptimized(vm1, vm2 vectorMagnitude) float64 {
+	if len(vm1.vector) != len(vm2.vector) {
+		return 0.0
+	}
+
+	if vm1.magnitude == 0 || vm2.magnitude == 0 {
+		return 0.0
+	}
+
+	dotProduct := 0.0
+	for i := range len(vm1.vector) {
+		dotProduct += vm1.vector[i] * vm2.vector[i]
+	}
+
+	return dotProduct / (vm1.magnitude * vm2.magnitude)
 }
