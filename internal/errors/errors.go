@@ -141,7 +141,7 @@ func getStatusCode(code ErrorCode) int {
 	switch code {
 	case ErrBadRequest, ErrValidationFailed:
 		return http.StatusBadRequest
-	case ErrUnauthorized:
+	case ErrUnauthorized, ErrInvalidToken, ErrTokenExpired, ErrMissingAuth:
 		return http.StatusUnauthorized
 	case ErrForbidden:
 		return http.StatusForbidden

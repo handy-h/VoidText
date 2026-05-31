@@ -43,8 +43,10 @@ const DomUtils = {
     element.textContent = text;
   },
   
-  // 安全地设置元素HTML（仅用于信任的内容）
+  // 安全地设置元素HTML（仅用于信任的内容，用户输入请使用 textContent）
   setHTML: function(element, html) {
+    // 注意：此方法使用 innerHTML，存在 XSS 风险，仅应对可信的 HTML 内容使用
+    // 对于用户输入内容，应使用 setTextContent() 或进行 HTML 转义
     element.innerHTML = html;
   },
   

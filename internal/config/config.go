@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/joho/godotenv"
 )
@@ -16,6 +17,7 @@ type ModelEndpoint struct {
 	URL       string
 	APIKey    string
 	ModelName string
+	MaxTokens int // 该端点的最大输出 token 数，0 表示使用全局默认值
 }
 
 // AppConfig 应用配置
@@ -61,9 +63,18 @@ type AppConfig struct {
 }
 
 var AppConfigInstance AppConfig
+var configLoadOnce sync.Once
 
-// Load 加载配置
+// Load 加载配置（线程安全，多次调用仅首次生效）
 func Load() error {
+	var loadErr error
+	configLoadOnce.Do(func() {
+		loadErr = doLoad()
+	})
+	return loadErr
+}
+
+func doLoad() error {
 	// 按优先级依次尝试加载 .env：可执行文件目录 → 工作目录
 	paths := []string{""}
 	if execPath, err := os.Executable(); err == nil {
@@ -203,6 +214,7 @@ func getEnvInt(key string, fallback int) int {
 		if n, err := strconv.Atoi(val); err == nil {
 			return n
 		}
+		log.Printf("[配置] 环境变量 %s 的值 '%s' 无法解析为整数，使用默认值 %d", key, val, fallback)
 	}
 	return fallback
 }
@@ -212,6 +224,7 @@ func getEnvInt64(key string, fallback int64) int64 {
 		if n, err := strconv.ParseInt(val, 10, 64); err == nil {
 			return n
 		}
+		log.Printf("[配置] 环境变量 %s 的值 '%s' 无法解析为 int64，使用默认值 %d", key, val, fallback)
 	}
 	return fallback
 }
@@ -221,6 +234,7 @@ func getEnvBool(key string, fallback bool) bool {
 		if b, err := strconv.ParseBool(val); err == nil {
 			return b
 		}
+		log.Printf("[配置] 环境变量 %s 的值 '%s' 无法解析为布尔值，使用默认值 %v", key, val, fallback)
 	}
 	return fallback
 }
@@ -230,6 +244,7 @@ func getEnvFloat(key string, fallback float64) float64 {
 		if f, err := strconv.ParseFloat(val, 64); err == nil {
 			return f
 		}
+		log.Printf("[配置] 环境变量 %s 的值 '%s' 无法解析为浮点数，使用默认值 %f", key, val, fallback)
 	}
 	return fallback
 }

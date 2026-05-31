@@ -48,6 +48,86 @@ type RulesConfig struct {
 	AdBlacklist           []string          `json:"adBlacklist"`
 }
 
+// UnmarshalJSON 自定义反序列化，兼容 typoMap/adBlacklist 为字符串或数组/对象的格式
+func (r *RulesConfig) UnmarshalJSON(data []byte) error {
+	// 用中间结构避免无限递归
+	type Alias RulesConfig
+	var raw struct {
+		Alias
+		TypoMap     json.RawMessage `json:"typoMap"`
+		AdBlacklist json.RawMessage `json:"adBlacklist"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*r = RulesConfig(raw.Alias)
+
+	// 解析 typoMap：可能是 map[string]string 或字符串（"key=value,..." 或 JSON 对象字符串）
+	if len(raw.TypoMap) > 0 {
+		r.TypoMap = make(map[string]string)
+		var m map[string]string
+		if err := json.Unmarshal(raw.TypoMap, &m); err == nil {
+			r.TypoMap = m
+		} else {
+			// 尝试作为字符串解析："错字=正字,错字2=正字2"
+			var s string
+			if err2 := json.Unmarshal(raw.TypoMap, &s); err2 == nil && s != "" {
+				r.TypoMap = parseTypoMapString(s)
+			}
+		}
+	} else {
+		r.TypoMap = make(map[string]string)
+	}
+
+	// 解析 adBlacklist：可能是 []string 或字符串（"广告1,广告2"）
+	if len(raw.AdBlacklist) > 0 {
+		var arr []string
+		if err := json.Unmarshal(raw.AdBlacklist, &arr); err == nil {
+			r.AdBlacklist = arr
+		} else {
+			var s string
+			if err2 := json.Unmarshal(raw.AdBlacklist, &s); err2 == nil && s != "" {
+				r.AdBlacklist = parseBlacklistString(s)
+			}
+		}
+	} else {
+		r.AdBlacklist = []string{}
+	}
+
+	return nil
+}
+
+// parseTypoMapString 解析 "错字=正字,错字2=正字2" 格式的错别字映射
+func parseTypoMapString(s string) map[string]string {
+	result := make(map[string]string)
+	for _, pair := range strings.Split(s, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		parts := strings.SplitN(pair, "=", 2)
+		if len(parts) == 2 {
+			result[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+		}
+	}
+	return result
+}
+
+// parseBlacklistString 解析 "广告1,广告2" 格式的黑名单
+func parseBlacklistString(s string) []string {
+	var result []string
+	for _, item := range strings.Split(s, ",") {
+		item = strings.TrimSpace(item)
+		if item != "" {
+			result = append(result, item)
+		}
+	}
+	if result == nil {
+		return []string{}
+	}
+	return result
+}
+
 // DefaultRulesConfig 默认规则配置
 func DefaultRulesConfig() RulesConfig {
 	return RulesConfig{
@@ -108,14 +188,14 @@ func GetStepIndex(step string) int {
 	return 0
 }
 
-// CalculateProgress 计算进度百分比
+// CalculateProgress 计算进度百分比（使用浮点计算避免整数除法精度丢失）
 func CalculateProgress(step string, stepProgress int) int {
 	stepIdx := GetStepIndex(step)
 	stepsTotal := len(stepOrder)
-	stepWeight := 100 / stepsTotal
-	baseProgress := stepIdx * stepWeight
-	stepContribution := stepProgress * stepWeight / 100
-	return baseProgress + stepContribution
+	stepWeight := 100.0 / float64(stepsTotal)
+	baseProgress := float64(stepIdx) * stepWeight
+	stepContribution := float64(stepProgress) * stepWeight / 100.0
+	return int(baseProgress + stepContribution)
 }
 
 // ProcessStep 执行单个处理步骤
@@ -215,6 +295,21 @@ func processCleaningStep(fileMd5 string, preprocessResult preprocess.PreprocessR
 
 	if len(rulesConfig.TypoMap) > 0 {
 		for wrong, correct := range rulesConfig.TypoMap {
+			// 对包含 ASCII 字符的规则使用词边界，降低子串误替换风险
+			hasASCII := false
+			for _, r := range wrong {
+				if r < 128 {
+					hasASCII = true
+					break
+				}
+			}
+			if hasASCII {
+				re, err := regexp.Compile(`\b` + regexp.QuoteMeta(wrong) + `\b`)
+				if err == nil {
+					cleanResult.Content = re.ReplaceAllString(cleanResult.Content, correct)
+					continue
+				}
+			}
 			cleanResult.Content = strings.ReplaceAll(cleanResult.Content, wrong, correct)
 		}
 	}
@@ -402,6 +497,18 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, record 
 			NextStep:    nextStep,
 			Progress:    CalculateProgress(nextStep, 0),
 			Message:     "LLM修复已跳过",
+		}, nil
+	}
+
+	// 步前取消检查：覆盖小文件等无法触发 step 间检查的场景
+	if cancelled, _ := database.IsFileCancelled(fileMd5); cancelled {
+		database.SetCancelFlag(fileMd5, 0)
+		database.UpdateFileStatus(fileMd5, "cancelled", StepLlmFix, 0, "用户取消")
+		return &PipelineResult{
+			CurrentStep: StepLlmFix,
+			NextStep:    "",
+			Progress:    CalculateProgress(StepLlmFix, 0),
+			Message:     "LLM修复已取消",
 		}, nil
 	}
 
@@ -615,7 +722,8 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, record 
 			}
 		}
 
-		if completed%checkpointInterval == 0 {
+		// 更频繁的取消检查：每 10 个段落检查一次（原 50），确保小文件也能响应取消
+		if completed%10 == 0 {
 			cancelled, _ := database.IsFileCancelled(fileMd5)
 			if cancelled {
 				cancelRequested = true

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"math/rand"
 	"net"
 	"net/http"
@@ -74,14 +73,18 @@ type ExponentialBackoff struct {
 
 // Next 计算下一次重试的延迟时间
 // 公式：delay = baseDelay * 2^retry + jitter
-// 添加jitter避免惊群效应
+// 添加jitter避免惊群效应；retry 上限 30 防止位移溢出
 func (eb *ExponentialBackoff) Next(retry int) time.Duration {
 	if retry < 0 {
 		retry = 0
 	}
+	// 限制 retry 值防止位移溢出（2^31 已远超 practical retry 上限）
+	if retry > 30 {
+		retry = 30
+	}
 
-	// 计算指数退避延迟
-	delay := eb.BaseDelay * time.Duration(math.Pow(2, float64(retry)))
+	// 计算指数退避延迟（使用位运算避免 math.Pow 在 retry>=62 时的 +Inf 溢出）
+	delay := eb.BaseDelay * time.Duration(1<<uint(retry))
 	if delay > eb.MaxDelay {
 		delay = eb.MaxDelay
 	}
@@ -360,6 +363,7 @@ type ChatCompletionResponse struct {
 
 // doRequestWithRetry 执行HTTP请求并自动重试
 // 使用指数退避策略处理429限流和5xx服务器错误
+// 注意：会读取并缓存 req.Body，以便每次重试都能重建请求体
 func (api *API) doRequestWithRetry(req *http.Request) (*http.Response, error) {
 	var lastErr error
 	var resp *http.Response
@@ -377,6 +381,17 @@ func (api *API) doRequestWithRetry(req *http.Request) (*http.Response, error) {
 		}
 	}
 
+	// 在循环外缓存 Body bytes，每次重试时重建，避免 Clone() 不复制 Body 导致重试发送空内容
+	var bodyBytes []byte
+	if req.Body != nil {
+		var readErr error
+		bodyBytes, readErr = io.ReadAll(req.Body)
+		req.Body.Close()
+		if readErr != nil {
+			return nil, fmt.Errorf("读取请求体失败: %w", readErr)
+		}
+	}
+
 	for retry := 0; retry <= config.MaxRetries; retry++ {
 		if retry > 0 {
 			// 计算退避延迟
@@ -391,6 +406,11 @@ func (api *API) doRequestWithRetry(req *http.Request) (*http.Response, error) {
 
 		// 克隆请求以避免重试时修改原始请求
 		clonedReq := req.Clone(req.Context())
+		// 重建 Body：Clone 不复制 Body，需手动从缓存的 bytes 重建
+		if bodyBytes != nil {
+			clonedReq.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+			clonedReq.ContentLength = int64(len(bodyBytes))
+		}
 
 		// 添加智能请求头优化
 		clonedReq.Header.Set("User-Agent", "TxtCleaning/1.0")
@@ -427,11 +447,11 @@ func (api *API) doRequestWithRetry(req *http.Request) (*http.Response, error) {
 			return resp, nil
 		}
 
-		// 读取错误响应体
-		bodyBytes, _ := io.ReadAll(resp.Body)
+		// 读取错误响应体（使用独立变量名，避免覆盖循环外缓存的原始请求体）
+		respBody, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 
-		errorBody := string(bodyBytes)
+		errorBody := string(respBody)
 		if runes := []rune(errorBody); len(runes) > 500 {
 			errorBody = string(runes[:500]) + "..."
 		}
@@ -531,7 +551,7 @@ func (api *API) doJSONRequestWithRetryKeyed(url string, requestData interface{},
 
 // GenerateEmbedding 生成文本嵌入（带重试机制）
 func (api *API) GenerateEmbedding(texts []string) (*EmbeddingResponse, error) {
-	if api.baseURL == "" || api.apiKey == "" {
+	if api.baseURL == "" || (!api.isLocalModel && api.apiKey == "") {
 		logging.Warn("api_disabled", map[string]interface{}{
 			"service": "embedding",
 			"reason":  "API未配置",
@@ -776,6 +796,11 @@ func (api *API) GenerateChatCompletion(systemPrompt, userPrompt string, maxToken
 		startTime := time.Now()
 		endpointNum := idx + 1
 		currentMaxTokens := maxTokens
+
+		// 按端点独立限制 maxTokens
+		if endpoint.MaxTokens > 0 && currentMaxTokens > endpoint.MaxTokens {
+			currentMaxTokens = endpoint.MaxTokens
+		}
 
 		// 内层循环：max_tokens 超限时自动减半重试（最多 3 次）
 		for maxTokensRetry := 0; maxTokensRetry <= 3; maxTokensRetry++ {

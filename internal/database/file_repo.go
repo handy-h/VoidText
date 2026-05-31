@@ -171,13 +171,40 @@ func ListAllFiles(limit, offset int) ([]FileRecord, int, error) {
 	return records, total, err
 }
 
-// DeleteFile 删除文件记录
+// DeleteFile 删除文件记录及其关联数据（级联删除，避免孤儿记录）
 func DeleteFile(md5 string) error {
-	_, err := db.Exec(`DELETE FROM files WHERE md5 = ?`, md5)
+	tx, err := db.Begin()
 	if err != nil {
+		return fmt.Errorf("开始事务失败: %w", err)
+	}
+	defer tx.Rollback()
+
+	// 删除段级审核记录
+	if _, err := tx.Exec(`DELETE FROM review_paragraphs WHERE file_md5 = ?`, md5); err != nil {
+		return fmt.Errorf("删除段级审核记录失败: %w", err)
+	}
+	// 删除处理日志
+	if _, err := tx.Exec(`DELETE FROM processing_logs WHERE file_md5 = ?`, md5); err != nil {
+		return fmt.Errorf("删除处理日志失败: %w", err)
+	}
+	// 删除版本记录
+	if _, err := tx.Exec(`DELETE FROM versions WHERE original_md5 = ?`, md5); err != nil {
+		return fmt.Errorf("删除版本记录失败: %w", err)
+	}
+	// 删除块修复缓存
+	if _, err := tx.Exec(`DELETE FROM chunk_repair_cache WHERE file_md5 = ?`, md5); err != nil {
+		return fmt.Errorf("删除块修复缓存失败: %w", err)
+	}
+	// 删除重试队列
+	if _, err := tx.Exec(`DELETE FROM retry_queue WHERE file_md5 = ?`, md5); err != nil {
+		return fmt.Errorf("删除重试队列失败: %w", err)
+	}
+	// 最后删除文件记录
+	if _, err := tx.Exec(`DELETE FROM files WHERE md5 = ?`, md5); err != nil {
 		return fmt.Errorf("删除文件记录失败: %w", err)
 	}
-	return nil
+
+	return tx.Commit()
 }
 
 func scanFileRows(rows *sql.Rows) ([]FileRecord, error) {

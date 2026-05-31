@@ -110,7 +110,10 @@ func (vd *VectorDetector) DetectDuplicates(content string) (VectorDetectionResul
 
 // splitIntoParagraphs 将文本分割为段落
 func (vd *VectorDetector) splitIntoParagraphs(content string) []string {
-	// 按换行符分割
+	// 统一换行符
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	content = strings.ReplaceAll(content, "\r", "\n")
+
 	paragraphs := strings.Split(content, "\n")
 
 	// 过滤空段落
@@ -148,7 +151,7 @@ func (vd *VectorDetector) generateVectors(paragraphs []string) ([][]float64, err
 
 	if vd.VectorModelType == "ollama" && vd.ollamaClient != nil {
 		// 分批处理，避免一次性发送过多段落导致超时
-		const batchSize = 50
+		const batchSize = 200
 		total := len(paragraphs)
 		vectors := make([][]float64, total)
 
@@ -291,7 +294,8 @@ func (vd *VectorDetector) findDuplicateIndices(vectors [][]float64, paragraphs [
 		seen[normalized] = i
 	}
 
-	// 阶段 2：向量余弦相似度（滑动窗口 + 并行计算）
+	// 阶段 2：向量余弦相似度（流式生成任务 + 并行计算）
+	// 任务通过 channel 实时生成，避免 O(n²) 任务切片占用大量内存
 	type compareTask struct {
 		i int
 		j int
@@ -306,7 +310,7 @@ func (vd *VectorDetector) findDuplicateIndices(vectors [][]float64, paragraphs [
 	// 确定并行度
 	numWorkers := runtime.NumCPU()
 	if numWorkers > 8 {
-		numWorkers = 8 // 限制最大并行度
+		numWorkers = 8
 	}
 
 	taskChan := make(chan compareTask, 1000)
@@ -319,26 +323,33 @@ func (vd *VectorDetector) findDuplicateIndices(vectors [][]float64, paragraphs [
 		go func() {
 			defer wg.Done()
 			for task := range taskChan {
-				i, j := task.i, task.j
 				similarity := vd.calculateCosineSimilarityOptimized(
-					vecMags[i], vecMags[j],
+					vecMags[task.i], vecMags[task.j],
 				)
 				if similarity >= vd.SimilarityThreshold {
-					resultChan <- compareResult{i: i, j: j, similarity: similarity}
+					resultChan <- compareResult{i: task.i, j: task.j, similarity: similarity}
 				}
 			}
 		}()
 	}
 
-	// 生成比较任务（滑动窗口）
+	workersDone := make(chan struct{})
 	go func() {
+		wg.Wait()
+		close(workersDone)
+	}()
+
+	// 流式发送任务（在 goroutine 中实时生成，避免预存全部任务）
+	go func() {
+		defer close(taskChan)
 		for i := 0; i < n; i++ {
 			if duplicateSet[i] {
-				continue // 已经是重复段落，跳过
+				continue
 			}
-
-			// 滑动窗口：只比较最近 WindowSize 个段落
-			// WindowSize = 0 表示比较所有段落（原始行为）
+			// 跳过短段落，避免无意义的向量比较
+			if len([]rune(vd.normalizeParagraph(paragraphs[i]))) < minExactMatchRunes {
+				continue
+			}
 			start := 0
 			if vd.WindowSize > 0 {
 				start = i - vd.WindowSize
@@ -346,24 +357,30 @@ func (vd *VectorDetector) findDuplicateIndices(vectors [][]float64, paragraphs [
 					start = 0
 				}
 			}
-
 			for j := start; j < i; j++ {
 				if duplicateSet[j] {
-					continue // j 已经是重复段落，跳过
+					continue
 				}
-				taskChan <- compareTask{i: i, j: j}
+				// 跳过短段落
+				if len([]rune(vd.normalizeParagraph(paragraphs[j]))) < minExactMatchRunes {
+					continue
+				}
+				select {
+				case taskChan <- compareTask{i: i, j: j}:
+				case <-workersDone:
+					return
+				}
 			}
 		}
-		close(taskChan)
 	}()
 
-	// 收集结果
+	// 收集结果（等待 workersDone 信号后关闭 resultChan）
 	go func() {
-		wg.Wait()
+		<-workersDone
 		close(resultChan)
 	}()
 
-	// 处理结果
+	// 处理结果（主 goroutine 消费）
 	for result := range resultChan {
 		if !duplicateSet[result.i] {
 			duplicateSet[result.i] = true
@@ -386,11 +403,15 @@ func (vd *VectorDetector) findDuplicateIndices(vectors [][]float64, paragraphs [
 // normalizeParagraph 规范化段落文本
 // 仅移除中文标点符号，保留空格和括号等有意义的格式字符
 func (vd *VectorDetector) normalizeParagraph(paragraph string) string {
-	// 移除标点符号进行简化匹配，但保留空格（避免 "★ ★ ★" 和 "★    ★" 碰撞）
 	replacer := strings.NewReplacer(
 		"，", "", "。", "", "！", "", "？", "",
 		"；", "", "：", "", "【", "", "】", "",
 		"《", "", "》", "",
+		"、", "", "—", "", "…", "", "～", "",
+		"「", "", "」", "",
+		"『", "", "』", "", "〈", "", "〉", "",
+		"\u201c", "", "\u201d", "", "\u2018", "", "\u2019", "",
+		"·", "",
 	)
 
 	return strings.TrimSpace(replacer.Replace(paragraph))
@@ -421,7 +442,7 @@ func (vd *VectorDetector) removeDuplicateParagraphs(result VectorDetectionResult
 			})
 		}
 
-		currentPos += len(paragraph) + 1
+		currentPos += len([]rune(paragraph)) + 1
 	}
 
 	result.Content = strings.Join(filteredParagraphs, "\n")
@@ -429,29 +450,6 @@ func (vd *VectorDetector) removeDuplicateParagraphs(result VectorDetectionResult
 	result.Stats["duplicate_chars_removed"] = charsRemoved
 
 	return result
-}
-
-// calculateCosineSimilarity 计算余弦相似度（简化实现）
-func (vd *VectorDetector) calculateCosineSimilarity(vec1, vec2 []float64) float64 {
-	if len(vec1) != len(vec2) {
-		return 0.0
-	}
-
-	dotProduct := 0.0
-	magnitude1 := 0.0
-	magnitude2 := 0.0
-
-	for i := range len(vec1) {
-		dotProduct += vec1[i] * vec2[i]
-		magnitude1 += vec1[i] * vec1[i]
-		magnitude2 += vec2[i] * vec2[i]
-	}
-
-	if magnitude1 == 0 || magnitude2 == 0 {
-		return 0.0
-	}
-
-	return dotProduct / (math.Sqrt(magnitude1) * math.Sqrt(magnitude2))
 }
 
 // calculateCosineSimilarityOptimized 计算余弦相似度（优化版，使用预计算的模长）

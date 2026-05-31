@@ -2,12 +2,15 @@ package handlers
 
 import (
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -19,15 +22,30 @@ import (
 	"voidtext/internal/logging"
 )
 
+// uploadCounter 用于生成唯一临时文件名，防止高并发下冲突
+var uploadCounter int64
+
 // sanitizeFileName 提取纯文件名，防止路径穿越攻击
 func sanitizeFileName(name string) string {
 	clean := filepath.Base(filepath.Clean(name))
 	clean = strings.ReplaceAll(clean, "/", "_")
 	clean = strings.ReplaceAll(clean, "\\", "_")
-	if clean == "." || clean == "" {
+	if clean == "." || clean == ".." || clean == "" {
 		clean = "upload.txt"
 	}
-	return clean
+	// 白名单过滤：仅保留字母、数字、中文、空格、连字符、下划线、点
+	var sb strings.Builder
+	for _, r := range clean {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
+			r >= 0x4e00 && r <= 0x9fff || r == ' ' || r == '-' || r == '_' || r == '.' {
+			sb.WriteRune(r)
+		}
+	}
+	result := sb.String()
+	if result == "" {
+		result = "upload.txt"
+	}
+	return result
 }
 
 // UploadFile 上传文件（支持MD5识别和智能行为）
@@ -90,7 +108,7 @@ func UploadFile(c *gin.Context) {
 		return
 	}
 
-	tempPath := filepath.Join(tempDir, fmt.Sprintf("%d_%s", time.Now().UnixNano(), safeFileName))
+	tempPath := filepath.Join(tempDir, fmt.Sprintf("%d_%d_%s", time.Now().UnixNano(), atomic.AddInt64(&uploadCounter, 1), safeFileName))
 	err = c.SaveUploadedFile(f, tempPath)
 	if err != nil {
 		logging.Error("保存上传文件失败", err, map[string]interface{}{
@@ -402,7 +420,8 @@ func ListFiles(c *gin.Context) {
 
 	records, total, err := database.ListAllFiles(limit, offset)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "读取文件列表失败: " + err.Error()})
+		log.Printf("[文件列表] 查询失败: %v", err) // 内部记录详细错误
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "读取文件列表失败"})
 		return
 	}
 
@@ -466,9 +485,10 @@ func GetFileContent(c *gin.Context) {
 	}
 	defer f.Close()
 
-	buf := make([]byte, readLimit)
-	n, err := f.Read(buf)
-	if err != nil && n == 0 {
+	// 使用 LimitReader + ReadAll 语义更清晰，避免 io.ReadFull 对小文件返回 ErrUnexpectedEOF
+	limitedReader := io.LimitReader(f, readLimit)
+	content, err := io.ReadAll(limitedReader)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "读取文件失败: " + err.Error()})
 		return
 	}
@@ -481,8 +501,8 @@ func GetFileContent(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success":   true,
-		"content":   string(buf[:n]),
-		"truncated": int64(n) < fileSize,
+		"content":   string(content),
+		"truncated": int64(len(content)) < fileSize,
 		"fileSize":  fileSize,
 	})
 }
@@ -546,21 +566,18 @@ func DeleteFile(c *gin.Context) {
 		return
 	}
 
-	keepFile := c.Query("keepFile") == "true"
-
 	// 使用事务删除所有相关数据
 	if err := database.DeleteFileWithRelatedData(md5); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "删除记录失败: " + err.Error()})
 		return
 	}
 
-	if !keepFile {
-		if err := os.Remove(record.FilePath); err != nil && !os.IsNotExist(err) {
-			logging.Warn("删除文件失败", map[string]interface{}{
-				"file_path": record.FilePath,
-				"error":     err.Error(),
-			})
-		}
+	// 同步删除物理文件，避免产生无法管理的孤儿文件
+	if err := os.Remove(record.FilePath); err != nil && !os.IsNotExist(err) {
+		logging.Warn("删除文件失败", map[string]interface{}{
+			"file_path": record.FilePath,
+			"error":     err.Error(),
+		})
 	}
 
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "文件删除成功"})

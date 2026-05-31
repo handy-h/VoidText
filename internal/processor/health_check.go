@@ -2,6 +2,7 @@ package processor
 
 import (
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
@@ -44,7 +45,7 @@ func GetHealthManager() *HealthCheckManager {
 		globalHealthManager = &HealthCheckManager{
 			statuses:      make(map[string]*HealthStatus),
 			checkInterval: getDefaultCheckInterval(),
-			stopChan:      make(chan bool),
+			stopChan:      make(chan bool, 1), // 缓冲通道：防止 Stop() 在 goroutine 不监听时永久阻塞
 		}
 
 		// 初始化Ollama客户端（如果启用本地模型）
@@ -196,13 +197,29 @@ func (hcm *HealthCheckManager) checkOllama() (bool, string) {
 
 // checkRemoteAPI 检查远程API
 func (hcm *HealthCheckManager) checkRemoteAPI() (bool, string) {
-	// 简化检查：如果配置了API URL和Key，则认为可用
 	cfg := config.AppConfigInstance
 	if cfg.LLMApiURL == "" || cfg.LLMApiKey == "" {
 		return false, "远程API未配置"
 	}
 
-	// 可以添加更复杂的检查，如发送测试请求
+	// 发送轻量级探测请求验证连通性和认证有效性
+	client := &http.Client{Timeout: 5 * time.Second}
+	req, err := http.NewRequest("GET", cfg.LLMApiURL+"/models", nil)
+	if err != nil {
+		return false, fmt.Sprintf("创建探测请求失败: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+cfg.LLMApiKey)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, fmt.Sprintf("远程API探测失败: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Sprintf("远程API返回非200状态码: %d", resp.StatusCode)
+	}
+
 	return true, ""
 }
 

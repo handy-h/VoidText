@@ -55,13 +55,13 @@ config/prompts/                提示词文件（热重载，命名：{name}_{ve
 
 ### 五步处理流水线（`internal/processor/pipeline.go`）
 
-| 步骤 | 功能 | 核心文件 |
-|------|------|----------|
-| `cleaning` | 基础清洗：编码转换、广告移除、繁简转换 | `basic_cleaner.go`, `preprocess/` |
-| `indexing` | 向量相似度检测，移除重复段落 | `vector_detector.go` |
-| `llm_fix` | LLM 纠错（本地 Ollama → 远程 API → 本地字典） | `model_repairer.go`, `external/` |
-| `review` | 人工审核修改建议（通过/拒绝/编辑） | `database/review_repo.go` |
-| `finalizing` | 合并结果，生成最终文件 | `postprocess/` |
+| 步骤         | 功能                                          | 核心文件                          |
+| ------------ | --------------------------------------------- | --------------------------------- |
+| `cleaning`   | 基础清洗：编码转换、广告移除、繁简转换        | `basic_cleaner.go`, `preprocess/` |
+| `indexing`   | 向量相似度检测，移除重复段落                  | `vector_detector.go`              |
+| `llm_fix`    | LLM 纠错（本地 Ollama → 远程 API → 本地字典） | `model_repairer.go`, `external/`  |
+| `review`     | 人工审核修改建议（通过/拒绝/编辑）            | `database/review_repo.go`         |
+| `finalizing` | 合并结果，生成最终文件                        | `postprocess/`                    |
 
 ### 并发模型
 
@@ -117,3 +117,4 @@ config/prompts/                提示词文件（热重载，命名：{name}_{ve
 - `ENABLE_EVOLVER=true` 启用自进化监控（调用 `scripts/evolver.py`，需 Python）
 - 前端是纯原生 JS SPA，无构建步骤，修改后刷新浏览器即可生效
 - 规则引擎配置在 `rules.json`，支持运行时通过 API 修改
+- 【重要】优先通过 code-context MCP 查询语义相关的代码片段，比纯 grep 更准确。

@@ -10,28 +10,9 @@ import (
 	"voidtext/internal/logging"
 )
 
-// ErrorHandler 错误处理中间件
+// ErrorHandler 错误处理中间件（仅处理 Gin context 中的错误，panic 由 Recovery 中间件统一处理）
 func ErrorHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		defer func() {
-			if r := recover(); r != nil {
-				// 记录panic信息
-				stack := debug.Stack()
-				logging.Error("处理请求时发生panic", nil, map[string]interface{}{
-					"method": c.Request.Method,
-					"path":   c.Request.URL.Path,
-					"panic":  r,
-					"stack":  string(stack),
-				})
-
-				// 返回500错误
-				c.JSON(http.StatusInternalServerError, errors.NewErrorResponse(
-					errors.New(errors.ErrInternalServer, "服务器内部错误"),
-				))
-				c.Abort()
-			}
-		}()
-
 		c.Next()
 
 		// 检查是否有错误，且尚未写入响应（防止双重响应）

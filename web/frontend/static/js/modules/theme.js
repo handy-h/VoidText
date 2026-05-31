@@ -199,12 +199,13 @@ const ThemeModule = (function() {
     { key: '--annihilation-cyan', label: '强调/高亮色' }
   ];
 
-  let currentTheme = 'dark';
+  const DEFAULT_THEME = 'dark'; // 统一默认主题，与 localStorage 回退值保持一致
+  let currentTheme = DEFAULT_THEME;
   let editorState = null; // 编辑器临时状态
 
   // ==================== 初始化 ====================
   function init() {
-    const savedTheme = localStorage.getItem(STORAGE_KEY) || 'light';
+    const savedTheme = localStorage.getItem(STORAGE_KEY) || DEFAULT_THEME;
     applyTheme(savedTheme);
   }
 
@@ -328,9 +329,9 @@ const ThemeModule = (function() {
     localStorage.setItem(CUSTOM_LIST_KEY, JSON.stringify(list));
     localStorage.removeItem(CUSTOM_PREFIX + name);
 
-    // 如果当前正在使用该主题，回退到默认
+    // 如果当前正在使用该主题，回退到默认主题
     if (currentTheme === 'custom-' + name) {
-      applyTheme('dark');
+      applyTheme(DEFAULT_THEME);
     }
 
     return true;

@@ -157,7 +157,11 @@ func CancelProcessing(c *gin.Context) {
 	fileMd5 := c.Param("md5")
 
 	record, err := database.GetFileByMd5(fileMd5)
-	if err != nil || record == nil {
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "查询文件记录失败"})
+		return
+	}
+	if record == nil {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "文件不存在"})
 		return
 	}
@@ -247,7 +251,11 @@ func GetReviewItems(c *gin.Context) {
 	statusFilter := c.Query("status")
 
 	record, err := database.GetFileByMd5(fileMd5)
-	if err != nil || record == nil {
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "查询文件记录失败"})
+		return
+	}
+	if record == nil {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "文件不存在"})
 		return
 	}
@@ -494,8 +502,14 @@ func updateReviewProgress(fileMd5 string) {
 
 // buildReportHTML 构建HTML格式报告
 func buildReportHTML(data gin.H) string {
-	file := data["file"].(gin.H)
-	review := data["review"].(gin.H)
+	file, ok := data["file"].(gin.H)
+	if !ok {
+		return "<html><body><h1>报告数据异常</h1></body></html>"
+	}
+	review, ok := data["review"].(gin.H)
+	if !ok {
+		return "<html><body><h1>报告数据异常</h1></body></html>"
+	}
 
 	// 对用户输入进行 HTML 转义，防止 XSS 攻击
 	title := html.EscapeString(fmt.Sprintf("%v", file["title"]))

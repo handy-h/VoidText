@@ -34,6 +34,9 @@ var (
 
 	// 是否启用结构化日志
 	enableStructuredLog = false
+
+	// 防止重复初始化
+	initialized = false
 )
 
 // Config 日志配置
@@ -47,8 +50,12 @@ type Config struct {
 	MaxBackupFiles      int   // 最大备份文件数
 }
 
-// Init 初始化日志系统
+// Init 初始化日志系统（重复调用安全：第二次及之后调用不会重新打开文件句柄）
 func Init(config Config) error {
+	if initialized {
+		return nil // 已初始化，避免重复打开文件句柄导致泄漏
+	}
+
 	currentLevel = config.Level
 	enableStructuredLog = config.EnableStructuredLog
 
@@ -77,6 +84,7 @@ func Init(config Config) error {
 		log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
 	}
 
+	initialized = true
 	return nil
 }
 
@@ -226,7 +234,11 @@ func Fatal(msg string, err error, fields ...map[string]interface{}) {
 	}
 
 	log.Println(formatMessage("FATAL", msg, fieldMap))
-	os.Exit(1)
+	// 同步日志文件，确保致命错误前的日志不丢失；随后 panic 以触发 defer 清理
+	if logFile != nil {
+		_ = logFile.Sync()
+	}
+	panic(msg)
 }
 
 // WithFields 创建带字段的日志记录器

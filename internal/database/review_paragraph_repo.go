@@ -184,5 +184,9 @@ func scanReviewParagraphRows(rows *sql.Rows) ([]ReviewParagraphRecord, error) {
 		}
 		records = append(records, r)
 	}
+	// 检查迭代过程中是否有错误（网络断开、磁盘错误等会导致 rows.Next() 提前返回 false）
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("遍历段级审核记录时出错: %w", err)
+	}
 	return records, nil
 }

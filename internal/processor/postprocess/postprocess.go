@@ -54,24 +54,22 @@ func optimizeFormat(result PostprocessResult) PostprocessResult {
 }
 
 // organizeChapters 整理章节结构
+// 修复：使用累积偏移量跟踪操作后字符串长度变化，
+// 避免多次插入换行后索引错乱导致内容丢失
+// 优化：将所有章节模式合并为一个正则，避免多次扫描文本
 func organizeChapters(result PostprocessResult) PostprocessResult {
-	// 章节模式
-	chapterPatterns := []string{
-		`第[一二三四五六七八九十百千]+章`,
-		`第[0-9]+章`,
-		`Chapter [0-9]+`,
-		`章节 [0-9]+`,
-	}
+	// 合并所有章节模式为单一正则（优先级由高到低）
+	chapterRegex := regexp.MustCompile(`第[一二三四五六七八九十百千]+章|第[0-9]+章|Chapter [0-9]+|章节 [0-9]+`)
+	matches := chapterRegex.FindAllStringIndex(result.Content, -1)
 
-	for _, pattern := range chapterPatterns {
-		regex := regexp.MustCompile(pattern)
-		matches := regex.FindAllStringIndex(result.Content, -1)
-
-		for _, match := range matches {
-			result.Stats["chapters"]++
-			if match[0] > 0 && result.Content[match[0]-1] != '\n' {
-				result.Content = result.Content[:match[0]] + "\n\n" + result.Content[match[0]:]
-			}
+	offset := 0 // 累积偏移量，跟踪前序插入导致的字符串位置变化
+	for _, match := range matches {
+		result.Stats["chapters"]++
+		actualPos := match[0] + offset
+		if actualPos > 0 && result.Content[actualPos-1] != '\n' {
+			insertion := "\n\n"
+			result.Content = result.Content[:actualPos] + insertion + result.Content[actualPos:]
+			offset += len(insertion) // 更新偏移量
 		}
 	}
 
@@ -79,8 +77,10 @@ func organizeChapters(result PostprocessResult) PostprocessResult {
 }
 
 // normalizePunctuation 规范化标点符号
+// 修复：英文句号替换为中文句号时排除数字间的小数点（如 3.14），
+// 使用负向前瞻/后顾断言，只替换非数字之间的句号
 func normalizePunctuation(result PostprocessResult) PostprocessResult {
-	// 中文标点符号规范化
+	// 中文标点符号规范化（英文标点 → 中文标点）
 	punctuationMap := map[string]string{
 		",":  "，",
 		".":  "。",
@@ -93,7 +93,13 @@ func normalizePunctuation(result PostprocessResult) PostprocessResult {
 	}
 
 	for en, zh := range punctuationMap {
-		result.Content = strings.ReplaceAll(result.Content, en, zh)
+		if en == "." {
+			// 小数点保护：只替换非数字间的英文句号，避免 3.14 → 3。14
+			decimalPattern := regexp.MustCompile(`(?<![0-9])\.(?![0-9])`)
+			result.Content = decimalPattern.ReplaceAllString(result.Content, zh)
+		} else {
+			result.Content = strings.ReplaceAll(result.Content, en, zh)
+		}
 	}
 
 	// 移除重复的标点符号

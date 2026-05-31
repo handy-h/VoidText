@@ -13,6 +13,25 @@ var (
 	controlRegex      = regexp.MustCompile(`[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]`)
 	multiNewlineRegex = regexp.MustCompile(`\n{3,}`)
 	spaceRegex        = regexp.MustCompile(`[ \t]{2,}`)
+
+	// 广告过滤正则（预编译，避免每次清洗时重新编译）
+	adRegexes = []struct {
+		regex *regexp.Regexp
+		name  string
+	}{
+		{regexp.MustCompile(`关注微信公众号[\""]?[^\""\n]*[\""]?获取更多免费小说[！!]?`), "微信公众号广告"},
+		{regexp.MustCompile(`关注[^\n]{0,20}公众号[^\n]*`), "公众号推广"},
+		{regexp.MustCompile(`本文由[^\n]{2,30}提供[^\n]*`), "来源声明"},
+		{regexp.MustCompile(`更多精彩内容请访问[^\n]*`), "网站推广"},
+		{regexp.MustCompile(`下载[^\n]{0,10}APP[^\n]*`), "APP推广"},
+		{regexp.MustCompile(`www\.[a-zA-Z0-9]+\.[a-zA-Z]{2,}\S*`), "网址广告"},
+		{regexp.MustCompile(`https?://\S+`), "链接广告"},
+		{regexp.MustCompile(`欢迎加入[^\n]{0,20}(群|频道|社区)[^\n]*`), "群推广"},
+		{regexp.MustCompile(`QQ群[:：]\d+[^\n]*`), "QQ群推广"},
+		{regexp.MustCompile(`本章未完[，,]点击下一页继续[^\n]*`), "翻页提示"},
+		{regexp.MustCompile(`天才一秒记住[^\n]*`), "网站推广"},
+		{regexp.MustCompile(`手机用户请浏览[^\n]*`), "手机推广"},
+	}
 )
 
 // BasicCleanResult 基础清洗结果
@@ -193,6 +212,35 @@ func (bc *BasicCleaner) traditionalToSimple(result BasicCleanResult) BasicCleanR
 		'時': '时', '間': '间', '說': '说', '話': '话',
 		'見': '见', '視': '视', '聽': '听', '覺': '觉',
 		'點': '点', '線': '线', '麵': '面', '機': '机',
+		// 扩展常用繁简映射（覆盖小说常见用字）
+		'龍': '龙', '馬': '马', '魚': '鱼', '鳥': '鸟',
+		'熱': '热', '愛': '爱', '後': '后', '從': '从',
+		'來': '来', '這': '这', '個': '个', '們': '们',
+		'嗎': '吗', '為': '为', '過': '过', '發': '发',
+		'現': '现', '進': '进', '問': '问', '對': '对',
+		'頭': '头', '實': '实', '義': '义', '務': '务',
+		'處': '处', '總': '总', '親': '亲', '結': '结',
+		'無': '无', '裡': '里', '當': '当', '讓': '让',
+		'還': '还', '應': '应', '該': '该', '氣': '气',
+		'車': '车', '軍': '军', '辦': '办', '強': '强',
+		'戰': '战', '師': '师', '醫': '医', '藥': '药',
+		'護': '护', '衛': '卫', '員': '员', '費': '费',
+		'買': '买', '賣': '卖', '貨': '货', '質': '质',
+		'詞': '词', '語': '语', '識': '识', '評': '评',
+		'試': '试', '證': '证', '認': '认', '誤': '误',
+		'誌': '志', '記': '记', '許': '许', '論': '论',
+		'設': '设', '計': '计', '變': '变', '達': '达',
+		'遠': '远', '運': '运', '連': '连', '選': '选',
+		'遺': '遗', '陳': '陈', '陸': '陆', '隊': '队',
+		'階': '阶', '隻': '只', '雙': '双', '難': '难',
+		'雲': '云', '須': '须', '項': '项', '順': '顺',
+		'預': '预', '頑': '顽', '頓': '顿', '頻': '频',
+		'題': '题', '額': '额', '顏': '颜', '風': '风',
+		'飛': '飞', '飯': '饭', '飲': '饮', '飼': '饲',
+		'館': '馆', '駐': '驻', '駕': '驾', '騎': '骑',
+		'驅': '驱', '驗': '验', '髮': '发', '鬥': '斗',
+		'鬱': '郁', '鮮': '鲜', '麗': '丽', '麥': '麦',
+		'黃': '黄', '黨': '党', '齊': '齐', '齣': '出',
 	}
 
 	var builder strings.Builder
@@ -223,29 +271,10 @@ func (bc *BasicCleaner) traditionalToSimple(result BasicCleanResult) BasicCleanR
 	return result
 }
 
-// removeAdvertisements 移除广告内容
+// removeAdvertisements 移除广告内容（使用预编译正则，避免每次调用重复编译）
 func (bc *BasicCleaner) removeAdvertisements(result BasicCleanResult) BasicCleanResult {
-	adPatterns := []struct {
-		pattern string
-		name    string
-	}{
-		{`关注微信公众号[\""]?[^\""\n]*[\""]?获取更多免费小说[！!]?`, "微信公众号广告"},
-		{`关注[^\n]{0,20}公众号[^\n]*`, "公众号推广"},
-		{`本文由[^\n]{2,30}提供[^\n]*`, "来源声明"},
-		{`更多精彩内容请访问[^\n]*`, "网站推广"},
-		{`下载[^\n]{0,10}APP[^\n]*`, "APP推广"},
-		{`www\.[a-zA-Z0-9]+\.[a-zA-Z]{2,}\S*`, "网址广告"},
-		{`https?://\S+`, "链接广告"},
-		{`欢迎加入[^\n]{0,20}(群|频道|社区)[^\n]*`, "群推广"},
-		{`QQ群[:：]\d+[^\n]*`, "QQ群推广"},
-		{`本章未完[，,]点击下一页继续[^\n]*`, "翻页提示"},
-		{`天才一秒记住[^\n]*`, "网站推广"},
-		{`手机用户请浏览[^\n]*`, "手机推广"},
-	}
-
-	for _, ad := range adPatterns {
-		regex := regexp.MustCompile(ad.pattern)
-		matches := regex.FindAllStringIndex(result.Content, -1)
+	for _, ad := range adRegexes {
+		matches := ad.regex.FindAllStringIndex(result.Content, -1)
 
 		for i := len(matches) - 1; i >= 0; i-- {
 			match := matches[i]

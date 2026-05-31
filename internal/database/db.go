@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 
@@ -25,16 +26,21 @@ func Init(dataDir string) error {
 		return fmt.Errorf("打开数据库失败: %w", err)
 	}
 
+	// WAL 模式下读操作不阻塞写操作，设置合理连接数
+	// SQLite 仅支持单写入者，MaxOpenConns 不宜过大，避免 SQLITE_BUSY
 	db.SetMaxOpenConns(4)
-	db.SetMaxIdleConns(4)
+	db.SetMaxIdleConns(2)
 
 	// 启用 WAL 模式，允许并发读写，改善 LLM 修复期间的 HTTP 响应速度
-	// 配合 MaxOpenConns(4) 支持并发读取，充分发挥 WAL 优势
 	if _, err := db.Exec(`PRAGMA journal_mode=WAL`); err != nil {
 		return fmt.Errorf("启用WAL模式失败: %w", err)
 	}
 	if _, err := db.Exec(`PRAGMA synchronous=NORMAL`); err != nil {
 		return fmt.Errorf("设置同步模式失败: %w", err)
+	}
+	// 设置繁忙超时，避免 SQLITE_BUSY 立即失败（等待最多 5 秒）
+	if _, err := db.Exec(`PRAGMA busy_timeout=5000`); err != nil {
+		return fmt.Errorf("设置繁忙超时失败: %w", err)
 	}
 
 	if err := db.Ping(); err != nil {
@@ -191,15 +197,44 @@ func createTables() error {
 	return nil
 }
 
-// migrateSchema 执行数据库迁移
-func migrateSchema(db *sql.DB) {
-	migrations := []string{
-		`ALTER TABLE files ADD COLUMN llm_progress_paragraph INTEGER NOT NULL DEFAULT 0`,
-		`ALTER TABLE files ADD COLUMN llm_progress_checkpoint TEXT`,
-		`ALTER TABLE files ADD COLUMN cancel_flag INTEGER NOT NULL DEFAULT 0`,
-		`ALTER TABLE files ADD COLUMN review_baseline_path TEXT`,
+// columnExists 通过 PRAGMA table_info 检查列是否已存在
+func columnExists(db *sql.DB, table, column string) bool {
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return false
 	}
-	for _, stmt := range migrations {
-		db.Exec(stmt) // 忽略已存在的列错误
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, typ string
+		var dfltValue interface{}
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &dfltValue, &pk); err == nil {
+			if name == column {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// migrateSchema 执行数据库迁移（先查询列是否存在，避免依赖错误消息文本）
+func migrateSchema(db *sql.DB) {
+	migrations := []struct {
+		stmt   string
+		column string
+	}{
+		{`ALTER TABLE files ADD COLUMN llm_progress_paragraph INTEGER NOT NULL DEFAULT 0`, "llm_progress_paragraph"},
+		{`ALTER TABLE files ADD COLUMN llm_progress_checkpoint TEXT`, "llm_progress_checkpoint"},
+		{`ALTER TABLE files ADD COLUMN cancel_flag INTEGER NOT NULL DEFAULT 0`, "cancel_flag"},
+		{`ALTER TABLE files ADD COLUMN review_baseline_path TEXT`, "review_baseline_path"},
+	}
+	for _, m := range migrations {
+		if columnExists(db, "files", m.column) {
+			continue
+		}
+		_, err := db.Exec(m.stmt)
+		if err != nil {
+			log.Printf("[数据库迁移] 警告：执行迁移语句失败: %v (语句: %s)", err, m.stmt)
+		}
 	}
 }

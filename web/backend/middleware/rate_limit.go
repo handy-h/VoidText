@@ -147,17 +147,17 @@ var (
 // GetRateLimiter 获取全局限流器实例
 func GetRateLimiter() *RateLimiter {
 	rateLimiterOnce.Do(func() {
-		config := config.GetRateLimitConfig()
-		if !config.Enabled {
+		rateCfg := config.GetRateLimitConfig() // 重命名避免遮蔽导入的 config 包
+		if !rateCfg.Enabled {
 			// 如果限流被禁用，创建一个不限制的限流器
 			globalRateLimiter = NewRateLimiter(1000000, time.Hour, time.Hour)
 			return
 		}
 
 		globalRateLimiter = NewRateLimiter(
-			config.Global.MaxRequests,
-			config.Global.Window,
-			config.Global.Cleanup,
+			rateCfg.Global.MaxRequests,
+			rateCfg.Global.Window,
+			rateCfg.Global.Cleanup,
 		)
 	})
 	return globalRateLimiter
@@ -337,6 +337,18 @@ func StrictRateLimit() gin.HandlerFunc {
 		return func(c *gin.Context) { c.Next() }
 	}
 	return IPBasedRateLimit(config.Strict.MaxRequests, config.Strict.Window)
+}
+
+// CloseAllRateLimiters 关闭所有已创建的限流器（程序退出时调用）
+func CloseAllRateLimiters() {
+	if globalRateLimiter != nil {
+		globalRateLimiter.Close()
+	}
+	sharedLimitersMu.Lock()
+	defer sharedLimitersMu.Unlock()
+	for _, l := range sharedLimiters {
+		l.Close()
+	}
 }
 
 // EndpointRateLimit 端点限流中间件

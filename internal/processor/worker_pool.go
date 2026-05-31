@@ -18,6 +18,7 @@ type WorkerPool struct {
 	workerWg      sync.WaitGroup
 	ctx           context.Context
 	cancel        context.CancelFunc
+	closed        bool
 }
 
 // Job 任务接口
@@ -42,10 +43,19 @@ func (j *FileProcessingJob) Execute() error {
 		}
 	}
 
-	// 执行审核步骤
-	_, err := ProcessStep(j.fileMd5, StepReview)
-	if err != nil {
-		return fmt.Errorf("审核步骤处理失败: %w", err)
+	// 审核步骤仅在调用方未显式包含 StepReview 时自动执行，避免双重执行
+	hasReview := false
+	for _, step := range j.steps {
+		if step == StepReview {
+			hasReview = true
+			break
+		}
+	}
+	if !hasReview {
+		_, err := ProcessStep(j.fileMd5, StepReview)
+		if err != nil {
+			return fmt.Errorf("审核步骤处理失败: %w", err)
+		}
 	}
 
 	return nil
@@ -79,52 +89,54 @@ func NewWorkerPool(maxWorkers int) *WorkerPool {
 func (p *WorkerPool) worker(id int) {
 	defer p.workerWg.Done()
 
-	for {
-		select {
-		case <-p.ctx.Done():
-			return
-		case job, ok := <-p.jobQueue:
-			if !ok {
-				return
-			}
+	for job := range p.jobQueue {
+		p.mu.Lock()
+		p.activeWorkers++
+		p.mu.Unlock()
 
-			p.mu.Lock()
-			p.activeWorkers++
-			p.mu.Unlock()
+		log.Printf("Worker %d 开始处理任务: %s", id, job.ID())
+		startTime := time.Now()
 
-			log.Printf("Worker %d 开始处理任务: %s", id, job.ID())
-			startTime := time.Now()
+		err := job.Execute()
 
-			err := job.Execute()
+		p.mu.Lock()
+		p.activeWorkers--
+		p.mu.Unlock()
 
-			p.mu.Lock()
-			p.activeWorkers--
-			p.mu.Unlock()
+		duration := time.Since(startTime)
+		if err != nil {
+			log.Printf("Worker %d 任务 %s 处理失败 (耗时: %v): %v", id, job.ID(), duration, err)
+		} else {
+			log.Printf("Worker %d 任务 %s 处理完成 (耗时: %v)", id, job.ID(), duration)
+		}
 
-			duration := time.Since(startTime)
-			if err != nil {
-				log.Printf("Worker %d 任务 %s 处理失败 (耗时: %v): %v", id, job.ID(), duration, err)
-			} else {
-				log.Printf("Worker %d 任务 %s 处理完成 (耗时: %v)", id, job.ID(), duration)
-			}
-
-			// 调用完成回调
-			if processingJob, ok := job.(*FileProcessingJob); ok && processingJob.onComplete != nil {
-				processingJob.onComplete(err)
-			}
+		// 调用完成回调
+		if processingJob, ok := job.(*FileProcessingJob); ok && processingJob.onComplete != nil {
+			processingJob.onComplete(err)
 		}
 	}
 }
 
 // Submit 提交任务
-func (p *WorkerPool) Submit(job Job) error {
+func (p *WorkerPool) Submit(job Job) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("工作池已关闭")
+		}
+	}()
+
+	p.mu.RLock()
+	if p.closed {
+		p.mu.RUnlock()
+		return fmt.Errorf("工作池已关闭")
+	}
+	p.mu.RUnlock()
+
 	select {
 	case p.jobQueue <- job:
 		return nil
 	case <-time.After(5 * time.Second):
 		return fmt.Errorf("任务队列已满，提交超时")
-	case <-p.ctx.Done():
-		return fmt.Errorf("工作池已关闭")
 	}
 }
 
@@ -140,10 +152,22 @@ func (p *WorkerPool) QueueSize() int {
 	return len(p.jobQueue)
 }
 
-// Shutdown 关闭工作池
+// Shutdown 关闭工作池（支持重复调用）
+// 先关闭任务接收通道，等待所有 worker 处理完当前任务后退出
 func (p *WorkerPool) Shutdown() {
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return
+	}
+	p.closed = true
+	p.mu.Unlock()
+
+	// 先取消 context，让正在阻塞的 Submit 及时返回
 	p.cancel()
+	// 关闭任务队列，worker 处理完当前任务后退出
 	close(p.jobQueue)
+	// 等待所有 worker 退出
 	p.workerWg.Wait()
 	log.Println("工作池已关闭")
 }

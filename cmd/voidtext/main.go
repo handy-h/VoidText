@@ -16,12 +16,14 @@ import (
 	"voidtext/internal/logging"
 	"voidtext/internal/processor"
 	"voidtext/web/backend"
+	"voidtext/web/backend/middleware"
 )
 
 func main() {
 	// 初始化配置
 	if err := config.Load(); err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		// 配置加载阶段尚未初始化 logging，仍使用标准 log
+		log.Fatalf("加载配置失败: %v", err)
 	}
 
 	// 初始化日志系统
@@ -61,6 +63,7 @@ func main() {
 	// 初始化Web服务
 	processor.GetHealthManager().Start()
 	server := backend.NewServer()
+	defer middleware.CloseAllRateLimiters()
 
 	// 启动服务器
 	srv := &http.Server{
@@ -70,9 +73,10 @@ func main() {
 
 	// 在goroutine中启动服务器
 	go func() {
-		log.Printf("Server started on port %d", config.AppConfigInstance.Port)
+		logging.Info("服务器启动", map[string]interface{}{"port": config.AppConfigInstance.Port})
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Failed to start server: %v", err)
+			// 使用 logging.Fatal 替代 log.Fatalf，确保 defer 能正常执行（数据库关闭、日志刷新等）
+			logging.Fatal("服务器启动失败", err, nil)
 		}
 	}()
 
@@ -80,21 +84,24 @@ func main() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
-	log.Println("Shutting down server...")
+	logging.Info("正在关闭服务器...", nil)
 
-	// 设置5秒的超时时间
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	// 优雅地关闭服务器
-	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatalf("Server forced to shutdown: %v", err)
-	}
-
-	// 关闭工作池
-	log.Println("正在关闭工作池...")
+	// 1. 先关闭工作池（等待现有任务完成，阻止新任务提交）
+	logging.Info("正在关闭工作池...", nil)
 	pool := processor.GetWorkerPool()
 	pool.Shutdown()
 
-	log.Println("Server exited")
+	// 2. 再关闭 HTTP 服务器（设置独立超时，避免与工作池竞争）
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		// 使用 logging.Error 替代 log.Fatalf，确保后续 defer 清理能执行
+		logging.Error("服务器强制关闭", err, nil)
+	}
+
+	// 3. 关闭健康检查管理器
+	processor.GetHealthManager().Stop()
+
+	logging.Info("服务器已退出", nil)
 }
