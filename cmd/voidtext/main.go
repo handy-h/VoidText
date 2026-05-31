@@ -53,6 +53,11 @@ func main() {
 
 	logging.Info("数据库初始化完成", nil)
 
+	// 清理服务器重启后残留的 processing 状态
+	if err := database.CleanupStaleProcessingStatus(); err != nil {
+		logging.Warn("清理残留状态失败", map[string]interface{}{"error": err.Error()})
+	}
+
 	// 初始化Web服务
 	processor.GetHealthManager().Start()
 	server := backend.NewServer()

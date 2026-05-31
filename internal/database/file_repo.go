@@ -229,6 +229,30 @@ func UpdateLlmProgress(md5 string, paragraphIndex int, checkpoint string) error 
 	return nil
 }
 
+// CleanupStaleProcessingStatus 清理残留的 processing 状态
+// 服务器重启后，内存中的处理任务会丢失，但数据库状态可能还是 processing
+// 此函数将所有 processing 状态重置为 pending，允许重新处理
+func CleanupStaleProcessingStatus() error {
+	result, err := db.Exec(`
+		UPDATE files
+		SET status = 'pending',
+		    error_msg = '服务器重启，状态已重置',
+		    updated_at = ?
+		WHERE status = 'processing'`,
+		time.Now().Format(time.RFC3339),
+	)
+	if err != nil {
+		return fmt.Errorf("清理残留状态失败: %w", err)
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected > 0 {
+		fmt.Printf("[启动清理] 已重置 %d 个残留的 processing 状态为 pending\n", rowsAffected)
+	}
+
+	return nil
+}
+
 // SetCancelFlag 设置文件取消标志
 func SetCancelFlag(md5 string, flag int) error {
 	_, err := db.Exec(`UPDATE files SET cancel_flag = ? WHERE md5 = ?`, flag, md5)
