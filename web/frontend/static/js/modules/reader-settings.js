@@ -6,10 +6,15 @@
 const ReaderSettingsModule = (function() {
   // localStorage 键名
   const FONT_FAMILY_KEY = 'voidtext-font-family';
-  const CUSTOM_FONT_URLS_KEY = 'voidtext-custom-font-urls';
+  const CUSTOM_FONT_META_KEY = 'voidtext-custom-font-meta'; // 只存名称元数据，blob 存 IndexedDB
   const LETTER_SPACING_KEY = 'voidtext-reader-letter-spacing';
   const LINE_HEIGHT_KEY = 'voidtext-reader-line-height';
   const PARAGRAPH_GAP_KEY = 'voidtext-reader-paragraph-gap';
+
+  // IndexedDB 配置
+  const FONT_DB_NAME = 'voidtext-fonts';
+  const FONT_DB_VERSION = 1;
+  const FONT_STORE_NAME = 'fonts';
 
   // 字体选项
   const FONT_OPTIONS = [
@@ -29,9 +34,10 @@ const ReaderSettingsModule = (function() {
   };
 
   // 自定义字体缓存
-  var customFonts = [];
-  var panelVisible = false;
-  var addFontDialogOpen = false;
+  let customFonts = [];
+  let panelVisible = false;
+  let addFontDialogOpen = false;
+  const fontBlobUrls = new Map(); // name -> blobUrl，用于 revoke
 
   // ==================== 初始化 ====================
   function init() {
@@ -40,9 +46,12 @@ const ReaderSettingsModule = (function() {
 
     // 应用保存的设置
     applyFontFamily(localStorage.getItem(FONT_FAMILY_KEY) || '默认无衬线');
-    applyLetterSpacing(parseFloat(localStorage.getItem(LETTER_SPACING_KEY)) || DEFAULTS.letterSpacing);
-    applyLineHeight(parseFloat(localStorage.getItem(LINE_HEIGHT_KEY)) || DEFAULTS.lineHeight);
-    applyParagraphGap(parseFloat(localStorage.getItem(PARAGRAPH_GAP_KEY)) || DEFAULTS.paragraphGap);
+    const ls = parseFloat(localStorage.getItem(LETTER_SPACING_KEY));
+    applyLetterSpacing(Number.isNaN(ls) ? DEFAULTS.letterSpacing : ls);
+    const lh = parseFloat(localStorage.getItem(LINE_HEIGHT_KEY));
+    applyLineHeight(Number.isNaN(lh) ? DEFAULTS.lineHeight : lh);
+    const pg = parseFloat(localStorage.getItem(PARAGRAPH_GAP_KEY));
+    applyParagraphGap(Number.isNaN(pg) ? DEFAULTS.paragraphGap : pg);
 
     // 绑定事件
     bindEvents();
@@ -50,14 +59,14 @@ const ReaderSettingsModule = (function() {
 
   // ==================== 事件绑定（拆分为子函数） ====================
   function bindSettingsPanelEvents() {
-    var settingsBtn = document.getElementById('btn-reader-settings');
+    const settingsBtn = document.getElementById('btn-reader-settings');
     if (settingsBtn) {
       settingsBtn.addEventListener('click', togglePanel);
     }
 
     document.addEventListener('click', function(e) {
-      var panel = document.getElementById('reader-settings-panel');
-      var btn = document.getElementById('btn-reader-settings');
+      const panel = document.getElementById('reader-settings-panel');
+      const btn = document.getElementById('btn-reader-settings');
       if (panelVisible && panel && btn && !panel.contains(e.target) && !btn.contains(e.target)) {
         closePanel();
       }
@@ -75,7 +84,7 @@ const ReaderSettingsModule = (function() {
   }
 
   function bindFontEvents() {
-    var fontSelect = document.getElementById('font-family-select');
+    const fontSelect = document.getElementById('font-family-select');
     if (fontSelect) {
       fontSelect.addEventListener('change', function() {
         applyFontFamily(this.value);
@@ -83,7 +92,7 @@ const ReaderSettingsModule = (function() {
       });
     }
 
-    var addFontBtn = document.getElementById('btn-add-font');
+    const addFontBtn = document.getElementById('btn-add-font');
     if (addFontBtn) {
       addFontBtn.addEventListener('click', openAddFontDialog);
     }
@@ -105,61 +114,61 @@ const ReaderSettingsModule = (function() {
       localStorage.setItem(PARAGRAPH_GAP_KEY, val.toString());
     }, function(val) { return val.toFixed(1) + 'em'; });
 
-    var resetBtn = document.getElementById('btn-reset-settings');
+    const resetBtn = document.getElementById('btn-reset-settings');
     if (resetBtn) {
       resetBtn.addEventListener('click', resetAllSettings);
     }
   }
 
   function bindEditorModalEvents() {
-    var editorClose = document.getElementById('theme-editor-close');
+    const editorClose = document.getElementById('theme-editor-close');
     if (editorClose) {
       editorClose.addEventListener('click', function() {
-        ThemeModule.closeThemeEditor();
+        if (typeof ThemeModule !== 'undefined') ThemeModule.closeThemeEditor();
       });
     }
 
-    var editorSave = document.getElementById('theme-editor-save');
+    const editorSave = document.getElementById('theme-editor-save');
     if (editorSave) {
       editorSave.addEventListener('click', function() {
-        ThemeModule.saveEditorTheme();
+        if (typeof ThemeModule !== 'undefined') ThemeModule.saveEditorTheme();
       });
     }
 
-    var editorCancel = document.getElementById('theme-editor-cancel');
+    const editorCancel = document.getElementById('theme-editor-cancel');
     if (editorCancel) {
       editorCancel.addEventListener('click', function() {
-        ThemeModule.closeThemeEditor();
+        if (typeof ThemeModule !== 'undefined') ThemeModule.closeThemeEditor();
       });
     }
 
-    var editorOverlay = document.getElementById('theme-editor-overlay');
+    const editorOverlay = document.getElementById('theme-editor-overlay');
     if (editorOverlay) {
       editorOverlay.addEventListener('click', function(e) {
         if (e.target === editorOverlay) {
-          ThemeModule.closeThemeEditor();
+          if (typeof ThemeModule !== 'undefined') ThemeModule.closeThemeEditor();
         }
       });
     }
   }
 
   function bindFontDialogEvents() {
-    var addFontSave = document.getElementById('add-font-save');
+    const addFontSave = document.getElementById('add-font-save');
     if (addFontSave) {
       addFontSave.addEventListener('click', handleAddFont);
     }
 
-    var addFontCancel = document.getElementById('add-font-cancel');
+    const addFontCancel = document.getElementById('add-font-cancel');
     if (addFontCancel) {
       addFontCancel.addEventListener('click', closeAddFontDialog);
     }
 
-    var addFontCloseBtn = document.getElementById('add-font-close-btn');
+    const addFontCloseBtn = document.getElementById('add-font-close-btn');
     if (addFontCloseBtn) {
       addFontCloseBtn.addEventListener('click', closeAddFontDialog);
     }
 
-    var addFontOverlay = document.getElementById('add-font-overlay');
+    const addFontOverlay = document.getElementById('add-font-overlay');
     if (addFontOverlay) {
       addFontOverlay.addEventListener('click', function(e) {
         if (e.target === addFontOverlay) {
@@ -187,11 +196,11 @@ const ReaderSettingsModule = (function() {
   }
 
   function openPanel() {
-    var panel = document.getElementById('reader-settings-panel');
-    var btn = document.getElementById('btn-reader-settings');
+    const panel = document.getElementById('reader-settings-panel');
+    const btn = document.getElementById('btn-reader-settings');
     if (panel && btn) {
       // 渲染主题按钮
-      ThemeModule.renderThemeButtons();
+      if (typeof ThemeModule !== 'undefined') ThemeModule.renderThemeButtons();
       // 渲染字体选项
       renderFontOptions();
       // 渲染自定义字体列表
@@ -206,8 +215,8 @@ const ReaderSettingsModule = (function() {
   }
 
   function closePanel() {
-    var panel = document.getElementById('reader-settings-panel');
-    var btn = document.getElementById('btn-reader-settings');
+    const panel = document.getElementById('reader-settings-panel');
+    const btn = document.getElementById('btn-reader-settings');
     if (panel && btn) {
       panel.classList.add('hidden');
       btn.classList.remove('active');
@@ -217,14 +226,14 @@ const ReaderSettingsModule = (function() {
 
   // ==================== 字体选择 ====================
   function renderFontOptions() {
-    var select = document.getElementById('font-family-select');
+    const select = document.getElementById('font-family-select');
     if (!select) return;
 
-    var currentValue = localStorage.getItem(FONT_FAMILY_KEY) || '默认无衬线';
+    const currentValue = localStorage.getItem(FONT_FAMILY_KEY) || '默认无衬线';
     select.innerHTML = '';
 
     FONT_OPTIONS.forEach(function(font) {
-      var option = document.createElement('option');
+      const option = document.createElement('option');
       option.value = font.name;
       option.textContent = font.name;
       option.style.fontFamily = font.family;
@@ -234,7 +243,7 @@ const ReaderSettingsModule = (function() {
 
     // 自定义字体选项
     customFonts.forEach(function(cf) {
-      var option = document.createElement('option');
+      const option = document.createElement('option');
       option.value = cf.name;
       option.textContent = cf.name + ' (自定义)';
       option.style.fontFamily = '"' + cf.name + '"';
@@ -244,7 +253,7 @@ const ReaderSettingsModule = (function() {
   }
 
   function applyFontFamily(fontName) {
-    var fontFamily = null;
+    let fontFamily = null;
 
     // 从内置列表查找
     FONT_OPTIONS.forEach(function(f) {
@@ -263,28 +272,80 @@ const ReaderSettingsModule = (function() {
     document.documentElement.style.setProperty('--reader-font-family', fontFamily);
   }
 
+  // ==================== IndexedDB 工具 ====================
+  function openFontDB() {
+    return new Promise(function(resolve, reject) {
+      var req = indexedDB.open(FONT_DB_NAME, FONT_DB_VERSION);
+      req.onupgradeneeded = function(e) {
+        var db = e.target.result;
+        if (!db.objectStoreNames.contains(FONT_STORE_NAME)) {
+          db.createObjectStore(FONT_STORE_NAME);
+        }
+      };
+      req.onsuccess = function() { resolve(req.result); };
+      req.onerror = function() { reject(req.error); };
+    });
+  }
+
+  function fontDBPut(name, blob) {
+    return openFontDB().then(function(db) {
+      return new Promise(function(resolve, reject) {
+        var tx = db.transaction(FONT_STORE_NAME, 'readwrite');
+        tx.objectStore(FONT_STORE_NAME).put(blob, name);
+        tx.oncomplete = function() { resolve(); };
+        tx.onerror = function() { reject(tx.error); };
+      });
+    });
+  }
+
+  function fontDBGet(name) {
+    return openFontDB().then(function(db) {
+      return new Promise(function(resolve, reject) {
+        var tx = db.transaction(FONT_STORE_NAME, 'readonly');
+        var req = tx.objectStore(FONT_STORE_NAME).get(name);
+        req.onsuccess = function() { resolve(req.result); };
+        req.onerror = function() { reject(req.error); };
+      });
+    });
+  }
+
+  function fontDBDelete(name) {
+    return openFontDB().then(function(db) {
+      return new Promise(function(resolve, reject) {
+        var tx = db.transaction(FONT_STORE_NAME, 'readwrite');
+        tx.objectStore(FONT_STORE_NAME).delete(name);
+        tx.oncomplete = function() { resolve(); };
+        tx.onerror = function() { reject(tx.error); };
+      });
+    });
+  }
+
   // ==================== 自定义字体 ====================
   function loadCustomFonts() {
     try {
-      customFonts = JSON.parse(localStorage.getItem(CUSTOM_FONT_URLS_KEY) || '[]');
+      customFonts = JSON.parse(localStorage.getItem(CUSTOM_FONT_META_KEY) || '[]');
     } catch (e) {
       customFonts = [];
     }
 
-    // 注册所有自定义字体
+    // 从 IndexedDB 加载所有字体 blob 并注册
     customFonts.forEach(function(cf) {
-      registerFontFace(cf.name, cf.url);
+      fontDBGet(cf.name).then(function(blob) {
+        if (blob) registerFontFaceFromBlob(cf.name, blob);
+      }).catch(function() {});
     });
   }
 
-  function registerFontFace(name, url) {
+  function registerFontFaceFromBlob(name, blob) {
     try {
-      var font = new FontFace(name, 'url(' + encodeURI(url) + ')');
-      var FONT_TIMEOUT_MS = 30000;
-      var timeoutPromise = new Promise(function(_, reject) {
-        setTimeout(function() { reject(new Error('字体加载超时 (' + FONT_TIMEOUT_MS + 'ms)')); }, FONT_TIMEOUT_MS);
-      });
-      Promise.race([font.load(), timeoutPromise]).then(function(loaded) {
+      // 先释放旧的 blob URL，防止内存泄漏
+      if (fontBlobUrls.has(name)) {
+        URL.revokeObjectURL(fontBlobUrls.get(name));
+      }
+      const url = URL.createObjectURL(blob);
+      fontBlobUrls.set(name, url);
+      const font = new FontFace(name, 'url(' + url + ')');
+      font.load().then(function(loaded) {
         document.fonts.add(loaded);
       }).catch(function(err) {
         console.warn('字体加载失败:', name, err.message || err);
@@ -294,26 +355,34 @@ const ReaderSettingsModule = (function() {
     }
   }
 
-  function addCustomFont(name, url) {
-    // 检查重名
+  function addCustomFontFromBlob(name, blob) {
     var exists = customFonts.some(function(cf) { return cf.name === name; });
-    if (exists) return false;
+    if (exists) return Promise.resolve(false);
 
-    customFonts.push({ name: name, url: url });
-    localStorage.setItem(CUSTOM_FONT_URLS_KEY, JSON.stringify(customFonts));
-    registerFontFace(name, url);
-    return true;
+    customFonts.push({ name: name });
+    localStorage.setItem(CUSTOM_FONT_META_KEY, JSON.stringify(customFonts));
+    return fontDBPut(name, blob).then(function() {
+      registerFontFaceFromBlob(name, blob);
+      return true;
+    });
   }
 
   function removeCustomFont(name) {
-    var idx = customFonts.findIndex(function(cf) { return cf.name === name; });
+    const idx = customFonts.findIndex(function(cf) { return cf.name === name; });
     if (idx === -1) return false;
 
     customFonts.splice(idx, 1);
-    localStorage.setItem(CUSTOM_FONT_URLS_KEY, JSON.stringify(customFonts));
+    localStorage.setItem(CUSTOM_FONT_META_KEY, JSON.stringify(customFonts));
+    fontDBDelete(name).catch(function() {});
+
+    // 释放 blob URL，防止内存泄漏
+    if (fontBlobUrls.has(name)) {
+      URL.revokeObjectURL(fontBlobUrls.get(name));
+      fontBlobUrls.delete(name);
+    }
 
     // 如果当前正在使用该字体，回退到默认
-    var current = localStorage.getItem(FONT_FAMILY_KEY);
+    const current = localStorage.getItem(FONT_FAMILY_KEY);
     if (current === name) {
       applyFontFamily('默认无衬线');
       localStorage.setItem(FONT_FAMILY_KEY, '默认无衬线');
@@ -323,22 +392,22 @@ const ReaderSettingsModule = (function() {
   }
 
   function renderCustomFontList() {
-    var container = document.getElementById('custom-font-list');
+    const container = document.getElementById('custom-font-list');
     if (!container) return;
 
     container.innerHTML = '';
 
     customFonts.forEach(function(cf) {
-      var item = document.createElement('div');
+      const item = document.createElement('div');
       item.className = 'custom-font-item';
 
-      var nameSpan = document.createElement('span');
+      const nameSpan = document.createElement('span');
       nameSpan.className = 'custom-font-item-name';
       nameSpan.textContent = cf.name;
       nameSpan.style.fontFamily = '"' + cf.name + '"';
       item.appendChild(nameSpan);
 
-      var deleteBtn = document.createElement('button');
+      const deleteBtn = document.createElement('button');
       deleteBtn.className = 'custom-font-item-delete';
       deleteBtn.textContent = '✕';
       deleteBtn.title = '删除字体';
@@ -354,15 +423,15 @@ const ReaderSettingsModule = (function() {
   }
 
   function openAddFontDialog() {
-    var overlay = document.getElementById('add-font-overlay');
+    const overlay = document.getElementById('add-font-overlay');
     if (!overlay) return;
 
-    var nameInput = document.getElementById('add-font-name');
-    var urlInput = document.getElementById('add-font-url');
-    var errorDiv = document.getElementById('add-font-error');
+    const nameInput = document.getElementById('add-font-name');
+    const fileInput = document.getElementById('add-font-file');
+    const errorDiv = document.getElementById('add-font-error');
 
     if (nameInput) nameInput.value = '';
-    if (urlInput) urlInput.value = '';
+    if (fileInput) fileInput.value = '';
     if (errorDiv) errorDiv.classList.remove('visible');
 
     overlay.classList.remove('hidden');
@@ -370,49 +439,48 @@ const ReaderSettingsModule = (function() {
   }
 
   function closeAddFontDialog() {
-    var overlay = document.getElementById('add-font-overlay');
+    const overlay = document.getElementById('add-font-overlay');
     if (overlay) overlay.classList.add('hidden');
     addFontDialogOpen = false;
   }
 
   function handleAddFont() {
-    var nameInput = document.getElementById('add-font-name');
-    var urlInput = document.getElementById('add-font-url');
-    var errorDiv = document.getElementById('add-font-error');
+    const nameInput = document.getElementById('add-font-name');
+    const fileInput = document.getElementById('add-font-file');
+    const errorDiv = document.getElementById('add-font-error');
 
-    var name = nameInput ? nameInput.value.trim() : '';
-    var url = urlInput ? urlInput.value.trim() : '';
+    const file = fileInput && fileInput.files ? fileInput.files[0] : null;
+    let name = nameInput ? nameInput.value.trim() : '';
 
-    // 校验
+    // 校验文件
+    if (!file) {
+      if (errorDiv) {
+        errorDiv.textContent = '请选择字体文件';
+        errorDiv.classList.add('visible');
+      }
+      return;
+    }
+
+    const validTypes = ['font/woff2', 'font/woff', 'font/ttf', 'font/otf',
+                        'application/font-woff2', 'application/font-woff',
+                        'application/x-font-ttf', 'application/x-font-opentype'];
+    const validExt = /\.(woff2|woff|ttf|otf)$/i;
+    if (!validTypes.includes(file.type) && !validExt.test(file.name)) {
+      if (errorDiv) {
+        errorDiv.textContent = '仅支持 woff2/woff/ttf/otf 格式的字体文件';
+        errorDiv.classList.add('visible');
+      }
+      return;
+    }
+
+    // 名称：优先用户输入，否则取文件名（去掉扩展名）
     if (!name) {
-      if (nameInput) nameInput.classList.add('error');
-      if (errorDiv) {
-        errorDiv.textContent = '请输入字体名称';
-        errorDiv.classList.add('visible');
-      }
-      return;
+      name = file.name.replace(/\.(woff2|woff|ttf|otf)$/i, '');
     }
 
-    if (!url) {
-      if (urlInput) urlInput.classList.add('error');
-      if (errorDiv) {
-        errorDiv.textContent = '请输入字体 URL';
-        errorDiv.classList.add('visible');
-      }
-      return;
-    }
-
-    if (!url.endsWith('.woff2') && !url.endsWith('.woff') && !url.endsWith('.ttf')) {
-      if (urlInput) urlInput.classList.add('error');
-      if (errorDiv) {
-        errorDiv.textContent = '仅支持 woff2/woff/ttf 格式的字体文件';
-        errorDiv.classList.add('visible');
-      }
-      return;
-    }
-
-    var success = addCustomFont(name, url);
-    if (!success) {
+    // 检查重名
+    const exists = customFonts.some(function(cf) { return cf.name === name; });
+    if (exists) {
       if (errorDiv) {
         errorDiv.textContent = '字体名称已存在';
         errorDiv.classList.add('visible');
@@ -420,19 +488,33 @@ const ReaderSettingsModule = (function() {
       return;
     }
 
-    closeAddFontDialog();
-    renderCustomFontList();
-    renderFontOptions();
+    if (errorDiv) errorDiv.classList.remove('visible');
+
+    addCustomFontFromBlob(name, file).then(function(ok) {
+      if (ok) {
+        closeAddFontDialog();
+        renderCustomFontList();
+        renderFontOptions();
+      } else if (errorDiv) {
+        errorDiv.textContent = '添加失败，请重试';
+        errorDiv.classList.add('visible');
+      }
+    }).catch(function(err) {
+      if (errorDiv) {
+        errorDiv.textContent = '添加失败: ' + (err.message || err);
+        errorDiv.classList.add('visible');
+      }
+    });
   }
 
   // ==================== 间距调节 ====================
   function bindSlider(sliderId, valueId, onChange, formatValue) {
-    var slider = document.getElementById(sliderId);
-    var valueDisplay = document.getElementById(valueId);
+    const slider = document.getElementById(sliderId);
+    const valueDisplay = document.getElementById(valueId);
     if (!slider) return;
 
     slider.addEventListener('input', function() {
-      var val = parseFloat(this.value);
+      const val = parseFloat(this.value);
       if (valueDisplay && formatValue) {
         valueDisplay.textContent = formatValue(val);
       }
@@ -490,26 +572,26 @@ const ReaderSettingsModule = (function() {
 
   // ==================== 自定义确认弹窗 ====================
   function showCustomConfirmDialog(message, onConfirm) {
-    var existingOverlay = document.getElementById('custom-confirm-overlay');
+    const existingOverlay = document.getElementById('custom-confirm-overlay');
     if (existingOverlay) existingOverlay.remove();
 
-    var overlay = document.createElement('div');
+    const overlay = document.createElement('div');
     overlay.id = 'custom-confirm-overlay';
     overlay.className = 'theme-editor-overlay';
     overlay.style.display = 'flex';
     overlay.style.alignItems = 'center';
     overlay.style.justifyContent = 'center';
 
-    var dialog = document.createElement('div');
+    const dialog = document.createElement('div');
     dialog.className = 'theme-editor';
     dialog.style.width = '360px';
     dialog.style.textAlign = 'center';
 
-    var body = document.createElement('div');
+    const body = document.createElement('div');
     body.className = 'theme-editor-body';
     body.style.padding = '32px 24px';
 
-    var msg = document.createElement('p');
+    const msg = document.createElement('p');
     msg.style.margin = '0 0 24px';
     msg.style.color = 'var(--text-primary)';
     msg.style.fontSize = '14px';
@@ -517,18 +599,18 @@ const ReaderSettingsModule = (function() {
     msg.textContent = message;
     body.appendChild(msg);
 
-    var btnRow = document.createElement('div');
+    const btnRow = document.createElement('div');
     btnRow.style.display = 'flex';
     btnRow.style.justifyContent = 'center';
     btnRow.style.gap = '12px';
 
-    var cancelBtn = document.createElement('button');
+    const cancelBtn = document.createElement('button');
     cancelBtn.className = 'btn-secondary';
     cancelBtn.textContent = '取消';
     cancelBtn.addEventListener('click', function() { overlay.remove(); });
     btnRow.appendChild(cancelBtn);
 
-    var confirmBtn = document.createElement('button');
+    const confirmBtn = document.createElement('button');
     confirmBtn.className = 'btn-primary';
     confirmBtn.textContent = '确认';
     confirmBtn.addEventListener('click', function() {
@@ -543,7 +625,7 @@ const ReaderSettingsModule = (function() {
     document.body.appendChild(overlay);
 
     // Esc 关闭
-    var escHandler = function(e) {
+    const escHandler = function(e) {
       if (e.key === 'Escape') {
         overlay.remove();
         document.removeEventListener('keydown', escHandler);
@@ -568,9 +650,9 @@ const ReaderSettingsModule = (function() {
 
   function performReset() {
     // 清除所有 voidtext- 开头的 localStorage 键
-    var keysToRemove = [];
-    for (var i = 0; i < localStorage.length; i++) {
-      var key = localStorage.key(i);
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
       if (key && key.startsWith('voidtext-')) {
         keysToRemove.push(key);
       }
@@ -579,8 +661,17 @@ const ReaderSettingsModule = (function() {
       localStorage.removeItem(key);
     });
 
+    // 清除 IndexedDB 中的字体文件并释放 blob URL
+    customFonts.forEach(function(cf) {
+      fontDBDelete(cf.name).catch(function() {});
+      if (fontBlobUrls.has(cf.name)) {
+        URL.revokeObjectURL(fontBlobUrls.get(cf.name));
+      }
+    });
+    fontBlobUrls.clear();
+
     // 重置主题
-    ThemeModule.applyTheme('light');
+    if (typeof ThemeModule !== 'undefined') ThemeModule.applyTheme('light');
 
     // 重置字体
     applyFontFamily('默认无衬线');
@@ -595,7 +686,7 @@ const ReaderSettingsModule = (function() {
 
     // 刷新面板
     if (panelVisible) {
-      ThemeModule.renderThemeButtons();
+      if (typeof ThemeModule !== 'undefined') ThemeModule.renderThemeButtons();
       renderFontOptions();
       renderCustomFontList();
       updateSliderValues();

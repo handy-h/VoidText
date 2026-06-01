@@ -20,9 +20,15 @@ go.work
 # IDE and editor files
 .vscode/
 .idea/
+.claude/
+.codex/
+.qoder/
 *.swp
 *.swo
 *~
+
+# statics
+web/frontend/static/fonts/
 
 # OS generated files
 .DS_Store

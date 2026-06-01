@@ -509,16 +509,16 @@
         </div>
         <div class="theme-editor-body">
           <div class="font-url-input-group">
-            <label for="add-font-name">字体名称</label>
-            <input type="text" class="font-url-input" id="add-font-name"
-              placeholder="例如: MyFont" maxlength="30" />
+            <label for="add-font-file">选择字体文件</label>
+            <input type="file" class="font-url-input" id="add-font-file"
+              accept=".woff2,.woff,.ttf,.otf" />
+            <div class="font-url-hint">支持 woff2 / woff / ttf / otf 格式，文件保存在浏览器本地</div>
+            <div class="font-url-error" id="add-font-error"></div>
           </div>
           <div class="font-url-input-group">
-            <label for="add-font-url">字体文件 URL</label>
-            <input type="text" class="font-url-input" id="add-font-url"
-              placeholder="https://example.com/font.woff2" />
-            <div class="font-url-hint">仅支持 woff2/woff/ttf 格式</div>
-            <div class="font-url-error" id="add-font-error"></div>
+            <label for="add-font-name">字体显示名称（可选，默认使用文件名）</label>
+            <input type="text" class="font-url-input" id="add-font-name"
+              placeholder="留空则自动取文件名" maxlength="30" />
           </div>
         </div>
         <div class="theme-editor-footer">
@@ -532,7 +532,7 @@
     <script src="/static/js/diff-utils.js?v=6"></script>
     <!-- 模块化JS文件 -->
     <script src="/static/js/modules/theme.js?v=1"></script>
-    <script src="/static/js/modules/reader-settings.js?v=1"></script>
+    <script src="/static/js/modules/reader-settings.js?v=2"></script>
     <script src="/static/js/modules/review.js?v=6"></script>
     <script src="/static/js/modules/file-manager.js?v=5"></script>
     <script src="/static/js/modules/processing.js?v=5"></script>

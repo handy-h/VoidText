@@ -8,6 +8,7 @@ const ReviewModule = (function() {
   let pageSize = 50;
   let filtered = [];
   let statusFilter = 'pending';
+  let undoStack = []; // { id, action: 'approve'|'reject'|'edit', prevStatus, editedText? }
 
   function init() {
     bindEvents();
@@ -116,7 +117,7 @@ const ReviewModule = (function() {
       if (selectedIndex >= 0 && filtered[selectedIndex]) approveParagraph(filtered[selectedIndex].id);
     } else if (e.key === 'Escape') {
       e.preventDefault();
-      if (selectedIndex >= 0 && filtered[selectedIndex]) rejectParagraph(filtered[selectedIndex].id);
+      undoLastAction();
     } else if (e.key === 'PageDown') {
       e.preventDefault();
       const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
@@ -152,6 +153,13 @@ const ReviewModule = (function() {
         }
         paragraphs = data.paragraphs || [];
         baselineParagraphs = (data.baselineContent || '').split('\n');
+        // 同时获取全量状态用于 finalize 按钮判断，避免 render 时频繁请求
+        return AppConfig.apiRequest('/files/' + currentFileMd5 + '/status');
+      })
+      .then(function(statusData) {
+        if (statusData) {
+          window._reviewStatusCache = statusData;
+        }
         applyFilter();
         render();
         updateProgress();
@@ -195,8 +203,10 @@ const ReviewModule = (function() {
       container.innerHTML = html;
     }
 
-    document.getElementById('current-page').textContent = String(currentPage);
-    document.getElementById('total-pages').textContent = String(totalPages);
+    const currentPageEl = document.getElementById('current-page');
+    const totalPagesEl = document.getElementById('total-pages');
+    if (currentPageEl) currentPageEl.textContent = String(currentPage);
+    if (totalPagesEl) totalPagesEl.textContent = String(totalPages);
 
     bindRowEvents();
     renderSelection();
@@ -222,7 +232,7 @@ const ReviewModule = (function() {
       : '';
 
     return '' +
-      '<div class="review-row review-row-' + status + '" data-index="' + index + '" data-id="' + escapeHtml(String(p.id)) + '">' +
+      '<div class="review-row review-row-' + escapeHtml(status) + '" data-index="' + index + '" data-id="' + escapeHtml(String(p.id)) + '">' +
         '<div class="review-row-meta">#' + (p.paragraphIndex + 1) + '</div>' +
         '<div class="review-row-body">' +
           leftHtml + rightHtml + editedHtml +
@@ -232,7 +242,7 @@ const ReviewModule = (function() {
             ? '<button class="btn-approve" data-action="approve" title="保留 (Enter)">✓</button>' +
               '<button class="btn-reject" data-action="reject" title="撤销 (Esc)">✗</button>' +
               (isDuplicate ? '' : '<button class="btn-edit" data-action="edit" title="编辑">✎</button>')
-            : '<span class="status-tag status-' + status + '">' + statusLabel(status) + '</span>' +
+            : '<span class="status-tag status-' + escapeHtml(status) + '">' + statusLabel(status) + '</span>' +
               '<button class="btn-restore" data-action="restore" title="恢复待审核">↺</button>') +
         '</div>' +
       '</div>';
@@ -293,9 +303,13 @@ const ReviewModule = (function() {
   }
 
   function approveParagraph(id) {
+    const p = paragraphs.find(function(x) { return x.id === id; });
+    undoStack.push({ id: id, action: 'approve', prevStatus: p ? p.status : 'pending', prevEditedText: p ? p.editedText : '' });
     return reviewAction('/approve', { itemId: id }, '✓ 已保留');
   }
   function rejectParagraph(id) {
+    const p = paragraphs.find(function(x) { return x.id === id; });
+    undoStack.push({ id: id, action: 'reject', prevStatus: p ? p.status : 'pending', prevEditedText: p ? p.editedText : '' });
     return reviewAction('/reject', { itemId: id }, '✗ 已撤销');
   }
   function restoreParagraph(id) {
@@ -307,7 +321,55 @@ const ReviewModule = (function() {
     const def = p.suggested || p.original || '';
     const text = prompt('请输入编辑后的段落:', def);
     if (text === null) return;
+    undoStack.push({ id: id, action: 'edit', editedText: text });
     return reviewAction('/edit', { itemId: id, editedText: text }, '已保存编辑');
+  }
+
+  function undoLastAction() {
+    if (undoStack.length === 0) {
+      showFeedback('没有可撤销的操作', 'info');
+      return;
+    }
+    const last = undoStack.pop();
+    showLoading(true);
+
+    // 如果撤销前是编辑状态且保留了编辑内容，优先恢复编辑文本而非简单 restore
+    if (last.prevStatus === 'edited' && last.prevEditedText) {
+      AppConfig.apiRequest('/files/' + currentFileMd5 + '/edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ itemId: last.id, editedText: last.prevEditedText })
+      }).then(function(data) {
+        if (data.success) {
+          showFeedback('↺ 已撤销上一步操作（#' + last.id + '）', 'success');
+          loadReviewItems();
+        } else {
+          showFeedback(data.message || '撤销失败', 'error');
+        }
+      }).catch(function(err) {
+        showFeedback('撤销失败: ' + err.message, 'error');
+      }).finally(function() {
+        showLoading(false);
+      });
+      return;
+    }
+
+    AppConfig.apiRequest('/files/' + currentFileMd5 + '/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itemId: last.id })
+    }).then(function(data) {
+      if (data.success) {
+        showFeedback('↺ 已撤销上一步操作（#' + last.id + '）', 'success');
+        loadReviewItems();
+      } else {
+        showFeedback(data.message || '撤销失败', 'error');
+      }
+    }).catch(function(err) {
+      showFeedback('撤销失败: ' + err.message, 'error');
+    }).finally(function() {
+      showLoading(false);
+    });
   }
 
   function batchApproveAll() {
@@ -354,13 +416,9 @@ const ReviewModule = (function() {
     // finalize 按钮：只有当所有段都已 resolve 时才显示
     const finalizeBtn = document.getElementById('finalize-btn');
     if (finalizeBtn) {
-      // 需要查全量（pending=0），用 statusFilter 过滤的列表无法判断；额外发请求
-      AppConfig.apiRequest('/files/' + currentFileMd5 + '/status')
-        .then(function(s) {
-          const pending = (s.reviewTotal || 0) - (s.reviewResolved || 0);
-          finalizeBtn.style.display = (s.reviewTotal > 0 && pending === 0) ? '' : 'none';
-        })
-        .catch(function() {});
+      const s = window._reviewStatusCache || {};
+      const pending = (s.reviewTotal || 0) - (s.reviewResolved || 0);
+      finalizeBtn.style.display = (s.reviewTotal > 0 && pending === 0) ? '' : 'none';
     }
   }
 
@@ -377,7 +435,8 @@ const ReviewModule = (function() {
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   function showLoading(show) {
