@@ -5,8 +5,8 @@
 *.so
 *.dylib
 *.test
-voidtext
-voidtext.exe
+/voidtext
+/voidtext.exe
 
 # Output of the go coverage tool
 *.out
