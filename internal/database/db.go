@@ -79,6 +79,7 @@ func createTables() error {
 			author TEXT,
 			title TEXT,
 			file_name TEXT,
+			original_file_name TEXT,
 			file_size INTEGER,
 			file_path TEXT,
 			review_baseline_path TEXT,
@@ -227,6 +228,7 @@ func migrateSchema(db *sql.DB) {
 		{`ALTER TABLE files ADD COLUMN llm_progress_checkpoint TEXT`, "llm_progress_checkpoint"},
 		{`ALTER TABLE files ADD COLUMN cancel_flag INTEGER NOT NULL DEFAULT 0`, "cancel_flag"},
 		{`ALTER TABLE files ADD COLUMN review_baseline_path TEXT`, "review_baseline_path"},
+		{`ALTER TABLE files ADD COLUMN original_file_name TEXT`, "original_file_name"},
 	}
 	for _, m := range migrations {
 		if columnExists(db, "files", m.column) {

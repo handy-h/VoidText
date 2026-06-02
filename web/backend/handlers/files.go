@@ -48,6 +48,17 @@ func sanitizeFileName(name string) string {
 	return result
 }
 
+// safeBaseName 提取基础文件名，防止路径穿越，但保留特殊符号（用于下载时的原始文件名）
+func safeBaseName(name string) string {
+	clean := filepath.Base(filepath.Clean(name))
+	clean = strings.ReplaceAll(clean, "/", "_")
+	clean = strings.ReplaceAll(clean, "\\", "_")
+	if clean == "." || clean == ".." || clean == "" {
+		clean = "download.txt"
+	}
+	return clean
+}
+
 // UploadFile 上传文件（支持MD5识别和智能行为）
 func UploadFile(c *gin.Context) {
 	f, err := c.FormFile("file")
@@ -157,11 +168,11 @@ func UploadFile(c *gin.Context) {
 	}
 
 	if versionRecord != nil {
-		handleIntermediateVersion(c, versionRecord, tempPath, fileMd5, safeFileName)
+		handleIntermediateVersion(c, versionRecord, tempPath, fileMd5, safeFileName, f.Filename)
 		return
 	}
 
-	createNewFileRecord(c, tempPath, fileMd5, safeFileName, f.Size)
+	createNewFileRecord(c, tempPath, fileMd5, safeFileName, f.Filename, f.Size)
 }
 
 // handleExistingFile 处理已存在的文件
@@ -205,7 +216,7 @@ func handleExistingFile(c *gin.Context, existing *database.FileRecord, tempPath,
 }
 
 // handleIntermediateVersion 处理中间版本文件
-func handleIntermediateVersion(c *gin.Context, version *database.VersionRecord, tempPath, fileMd5, fileName string) {
+func handleIntermediateVersion(c *gin.Context, version *database.VersionRecord, tempPath, fileMd5, fileName string, originalFileName string) {
 	originalFile, err := database.GetFileByMd5(version.OriginalMd5)
 	if err != nil {
 		logging.Warn("查询原始文件记录失败", map[string]interface{}{
@@ -224,14 +235,15 @@ func handleIntermediateVersion(c *gin.Context, version *database.VersionRecord, 
 	parsed := file.ParseFileName(fileName)
 
 	record := &database.FileRecord{
-		Md5:         fileMd5,
-		OriginalMd5: version.OriginalMd5,
-		Author:      parsed.Author,
-		Title:       parsed.Title,
-		FileName:    fileName,
-		FilePath:    finalPath,
-		Status:      "pending",
-		CurrentStep: version.Step,
+		Md5:              fileMd5,
+		OriginalMd5:      version.OriginalMd5,
+		Author:           parsed.Author,
+		Title:            parsed.Title,
+		FileName:         fileName,
+		OriginalFileName: originalFileName,
+		FilePath:         finalPath,
+		Status:           "pending",
+		CurrentStep:      version.Step,
 	}
 
 	if originalFile != nil {
@@ -255,7 +267,7 @@ func handleIntermediateVersion(c *gin.Context, version *database.VersionRecord, 
 }
 
 // createNewFileRecord 创建新文件记录
-func createNewFileRecord(c *gin.Context, tempPath, fileMd5, fileName string, fileSize int64) {
+func createNewFileRecord(c *gin.Context, tempPath, fileMd5, fileName string, originalFileName string, fileSize int64) {
 	finalPath := filepath.Join(config.AppConfigInstance.DataDir, "uploads", fileMd5+"_"+fileName)
 	if err := os.Rename(tempPath, finalPath); err != nil {
 		os.Remove(tempPath)
@@ -272,13 +284,14 @@ func createNewFileRecord(c *gin.Context, tempPath, fileMd5, fileName string, fil
 	parsed := file.ParseFileName(fileName)
 
 	record := &database.FileRecord{
-		Md5:      fileMd5,
-		Author:   parsed.Author,
-		Title:    parsed.Title,
-		FileName: fileName,
-		FileSize: fileSize,
-		FilePath: finalPath,
-		Status:   "pending",
+		Md5:              fileMd5,
+		Author:           parsed.Author,
+		Title:            parsed.Title,
+		FileName:         fileName,
+		OriginalFileName: originalFileName,
+		FileSize:         fileSize,
+		FilePath:         finalPath,
+		Status:           "pending",
 	}
 
 	versionRecord := &database.VersionRecord{
@@ -529,7 +542,11 @@ func DownloadFile(c *gin.Context) {
 
 	// 使用 RFC 5987 编码支持中文文件名
 	// filename*=UTF-8'' 在前，浏览器优先使用；filename 作为 ASCII fallback
+	// 优先使用用户上传时的原始文件名，保留特殊符号
 	fileName := record.FileName
+	if record.OriginalFileName != "" {
+		fileName = safeBaseName(record.OriginalFileName)
+	}
 	var asciiName string
 	if isASCII(fileName) {
 		asciiName = fileName

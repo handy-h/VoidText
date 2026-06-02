@@ -14,6 +14,7 @@ type FileRecord struct {
 	Author                string `json:"author"`
 	Title                 string `json:"title"`
 	FileName              string `json:"fileName"`
+	OriginalFileName      string `json:"originalFileName"`
 	FileSize              int64  `json:"fileSize"`
 	FilePath              string `json:"filePath"`
 	ReviewBaselinePath    string `json:"reviewBaselinePath"`
@@ -33,10 +34,10 @@ type FileRecord struct {
 func CreateFile(record *FileRecord) error {
 	now := time.Now().Format(time.RFC3339)
 	result, err := db.Exec(`
-		INSERT INTO files (md5, original_md5, author, title, file_name, file_size, file_path, review_baseline_path, status, current_step, progress, rules_config, created_at, updated_at, error_msg, llm_progress_paragraph, llm_progress_checkpoint, cancel_flag)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO files (md5, original_md5, author, title, file_name, original_file_name, file_size, file_path, review_baseline_path, status, current_step, progress, rules_config, created_at, updated_at, error_msg, llm_progress_paragraph, llm_progress_checkpoint, cancel_flag)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		record.Md5, record.OriginalMd5, record.Author, record.Title,
-		record.FileName, record.FileSize, record.FilePath,
+		record.FileName, record.OriginalFileName, record.FileSize, record.FilePath,
 		record.ReviewBaselinePath,
 		record.Status, record.CurrentStep, record.Progress,
 		record.RulesConfig, now, now, record.ErrorMsg,
@@ -58,15 +59,15 @@ func CreateFile(record *FileRecord) error {
 // GetFileByMd5 根据MD5查询文件记录
 func GetFileByMd5(md5 string) (*FileRecord, error) {
 	row := db.QueryRow(`
-		SELECT id, md5, original_md5, author, title, file_name, file_size, file_path, review_baseline_path, status, current_step, progress, rules_config, created_at, updated_at, error_msg, llm_progress_paragraph, llm_progress_checkpoint, cancel_flag
+		SELECT id, md5, original_md5, author, title, file_name, original_file_name, file_size, file_path, review_baseline_path, status, current_step, progress, rules_config, created_at, updated_at, error_msg, llm_progress_paragraph, llm_progress_checkpoint, cancel_flag
 		FROM files WHERE md5 = ?`, md5)
 
 	record := &FileRecord{}
-	var errorMsg, llmCheckpoint, baselinePath sql.NullString
+	var errorMsg, llmCheckpoint, baselinePath, origFileName sql.NullString
 	var llmParagraph sql.NullInt64
 	err := row.Scan(
 		&record.ID, &record.Md5, &record.OriginalMd5, &record.Author, &record.Title,
-		&record.FileName, &record.FileSize, &record.FilePath, &baselinePath,
+		&record.FileName, &origFileName, &record.FileSize, &record.FilePath, &baselinePath,
 		&record.Status,
 		&record.CurrentStep, &record.Progress, &record.RulesConfig,
 		&record.CreatedAt, &record.UpdatedAt, &errorMsg,
@@ -79,6 +80,7 @@ func GetFileByMd5(md5 string) (*FileRecord, error) {
 		return nil, fmt.Errorf("查询文件记录失败: %w", err)
 	}
 	record.ErrorMsg = errorMsg.String
+	record.OriginalFileName = origFileName.String
 	record.ReviewBaselinePath = baselinePath.String
 	record.LlmProgressParagraph = int(llmParagraph.Int64)
 	record.LlmProgressCheckpoint = llmCheckpoint.String
@@ -88,15 +90,15 @@ func GetFileByMd5(md5 string) (*FileRecord, error) {
 // GetFileByID 根据ID查询文件记录
 func GetFileByID(id int64) (*FileRecord, error) {
 	row := db.QueryRow(`
-		SELECT id, md5, original_md5, author, title, file_name, file_size, file_path, review_baseline_path, status, current_step, progress, rules_config, created_at, updated_at, error_msg, llm_progress_paragraph, llm_progress_checkpoint, cancel_flag
+		SELECT id, md5, original_md5, author, title, file_name, original_file_name, file_size, file_path, review_baseline_path, status, current_step, progress, rules_config, created_at, updated_at, error_msg, llm_progress_paragraph, llm_progress_checkpoint, cancel_flag
 		FROM files WHERE id = ?`, id)
 
 	record := &FileRecord{}
-	var errorMsg, llmCheckpoint, baselinePath sql.NullString
+	var errorMsg, llmCheckpoint, baselinePath, origFileName sql.NullString
 	var llmParagraph sql.NullInt64
 	err := row.Scan(
 		&record.ID, &record.Md5, &record.OriginalMd5, &record.Author, &record.Title,
-		&record.FileName, &record.FileSize, &record.FilePath, &baselinePath,
+		&record.FileName, &origFileName, &record.FileSize, &record.FilePath, &baselinePath,
 		&record.Status,
 		&record.CurrentStep, &record.Progress, &record.RulesConfig,
 		&record.CreatedAt, &record.UpdatedAt, &errorMsg,
@@ -109,6 +111,7 @@ func GetFileByID(id int64) (*FileRecord, error) {
 		return nil, fmt.Errorf("查询文件记录失败: %w", err)
 	}
 	record.ErrorMsg = errorMsg.String
+	record.OriginalFileName = origFileName.String
 	record.ReviewBaselinePath = baselinePath.String
 	record.LlmProgressParagraph = int(llmParagraph.Int64)
 	record.LlmProgressCheckpoint = llmCheckpoint.String
@@ -142,7 +145,7 @@ func UpdateFileRules(md5, rulesConfig string) error {
 // ListPendingFiles 列出所有未完成的文件
 func ListPendingFiles() ([]FileRecord, error) {
 	rows, err := db.Query(`
-		SELECT id, md5, original_md5, author, title, file_name, file_size, file_path, review_baseline_path, status, current_step, progress, rules_config, created_at, updated_at, error_msg, llm_progress_paragraph, llm_progress_checkpoint, cancel_flag
+		SELECT id, md5, original_md5, author, title, file_name, original_file_name, file_size, file_path, review_baseline_path, status, current_step, progress, rules_config, created_at, updated_at, error_msg, llm_progress_paragraph, llm_progress_checkpoint, cancel_flag
 		FROM files WHERE status != 'completed' ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("查询待处理文件失败: %w", err)
@@ -160,7 +163,7 @@ func ListAllFiles(limit, offset int) ([]FileRecord, int, error) {
 	}
 
 	rows, err := db.Query(`
-		SELECT id, md5, original_md5, author, title, file_name, file_size, file_path, review_baseline_path, status, current_step, progress, rules_config, created_at, updated_at, error_msg, llm_progress_paragraph, llm_progress_checkpoint, cancel_flag
+		SELECT id, md5, original_md5, author, title, file_name, original_file_name, file_size, file_path, review_baseline_path, status, current_step, progress, rules_config, created_at, updated_at, error_msg, llm_progress_paragraph, llm_progress_checkpoint, cancel_flag
 		FROM files ORDER BY created_at DESC LIMIT ? OFFSET ?`, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("查询文件列表失败: %w", err)
@@ -211,11 +214,11 @@ func scanFileRows(rows *sql.Rows) ([]FileRecord, error) {
 	var records []FileRecord
 	for rows.Next() {
 		var record FileRecord
-		var errorMsg, llmCheckpoint, baselinePath sql.NullString
+		var errorMsg, llmCheckpoint, baselinePath, origFileName sql.NullString
 		var llmParagraph sql.NullInt64
 		err := rows.Scan(
 			&record.ID, &record.Md5, &record.OriginalMd5, &record.Author, &record.Title,
-			&record.FileName, &record.FileSize, &record.FilePath, &baselinePath,
+			&record.FileName, &origFileName, &record.FileSize, &record.FilePath, &baselinePath,
 			&record.Status,
 			&record.CurrentStep, &record.Progress, &record.RulesConfig,
 			&record.CreatedAt, &record.UpdatedAt, &errorMsg,
@@ -225,6 +228,7 @@ func scanFileRows(rows *sql.Rows) ([]FileRecord, error) {
 			return nil, fmt.Errorf("扫描文件记录失败: %w", err)
 		}
 		record.ErrorMsg = errorMsg.String
+		record.OriginalFileName = origFileName.String
 		record.ReviewBaselinePath = baselinePath.String
 		record.LlmProgressParagraph = int(llmParagraph.Int64)
 		record.LlmProgressCheckpoint = llmCheckpoint.String
