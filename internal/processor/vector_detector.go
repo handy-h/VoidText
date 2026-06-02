@@ -260,6 +260,7 @@ type vectorMagnitude struct {
 func (vd *VectorDetector) findDuplicateIndices(vectors [][]float64, paragraphs []string) []int {
 	n := len(paragraphs)
 	duplicateSet := make(map[int]bool)
+	var dupMu sync.Mutex // 保护 duplicateSet 的并发访问
 	seen := make(map[string]int) // normalized -> first index
 
 	// 预计算所有向量的模长
@@ -343,7 +344,10 @@ func (vd *VectorDetector) findDuplicateIndices(vectors [][]float64, paragraphs [
 	go func() {
 		defer close(taskChan)
 		for i := 0; i < n; i++ {
-			if duplicateSet[i] {
+			dupMu.Lock()
+			isDup := duplicateSet[i]
+			dupMu.Unlock()
+			if isDup {
 				continue
 			}
 			// 跳过短段落，避免无意义的向量比较
@@ -358,7 +362,10 @@ func (vd *VectorDetector) findDuplicateIndices(vectors [][]float64, paragraphs [
 				}
 			}
 			for j := start; j < i; j++ {
-				if duplicateSet[j] {
+				dupMu.Lock()
+				jIsDup := duplicateSet[j]
+				dupMu.Unlock()
+				if jIsDup {
 					continue
 				}
 				// 跳过短段落
@@ -382,10 +389,14 @@ func (vd *VectorDetector) findDuplicateIndices(vectors [][]float64, paragraphs [
 
 	// 处理结果（主 goroutine 消费）
 	for result := range resultChan {
+		dupMu.Lock()
 		if !duplicateSet[result.i] {
 			duplicateSet[result.i] = true
+			dupMu.Unlock()
 			log.Printf("[向量检测] 向量相似重复: 段落 %d 与 %d 相似度 %.4f",
 				result.i, result.j, result.similarity)
+		} else {
+			dupMu.Unlock()
 		}
 	}
 
