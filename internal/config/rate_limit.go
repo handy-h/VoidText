@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"strconv"
 	"time"
 )
 
@@ -71,7 +73,79 @@ func DefaultRateLimitConfig() *RateLimitConfig {
 	return config
 }
 
-// GetRateLimitConfig 获取限流配置
+// GetRateLimitConfig 获取限流配置，支持从环境变量加载
 func GetRateLimitConfig() *RateLimitConfig {
-	return DefaultRateLimitConfig()
+	cfg := DefaultRateLimitConfig()
+
+	// 从环境变量加载配置
+	if val := os.Getenv("RATE_LIMIT_ENABLED"); val != "" {
+		cfg.Enabled = val == "true" || val == "1"
+	}
+
+	// 全局限流配置
+	if val := os.Getenv("RATE_LIMIT_GLOBAL_MAX_REQUESTS"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			cfg.Global.MaxRequests = n
+		}
+	}
+	if val := os.Getenv("RATE_LIMIT_GLOBAL_WINDOW_SECONDS"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			cfg.Global.Window = time.Duration(n) * time.Second
+		}
+	}
+	if val := os.Getenv("RATE_LIMIT_GLOBAL_CLEANUP_SECONDS"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			cfg.Global.Cleanup = time.Duration(n) * time.Second
+		}
+	}
+
+	// 上传限流配置
+	if val := os.Getenv("RATE_LIMIT_UPLOAD_MAX_REQUESTS"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			cfg.Upload.MaxRequests = n
+		}
+	}
+	if val := os.Getenv("RATE_LIMIT_UPLOAD_WINDOW_SECONDS"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			cfg.Upload.Window = time.Duration(n) * time.Second
+		}
+	}
+
+	// API限流配置
+	if val := os.Getenv("RATE_LIMIT_API_MAX_REQUESTS"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			cfg.API.MaxRequests = n
+		}
+	}
+	if val := os.Getenv("RATE_LIMIT_API_WINDOW_SECONDS"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			cfg.API.Window = time.Duration(n) * time.Second
+		}
+	}
+
+	// 严格限流配置
+	if val := os.Getenv("RATE_LIMIT_STRICT_MAX_REQUESTS"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			cfg.Strict.MaxRequests = n
+		}
+	}
+	if val := os.Getenv("RATE_LIMIT_STRICT_WINDOW_SECONDS"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			cfg.Strict.Window = time.Duration(n) * time.Second
+		}
+	}
+
+	// 端点限流配置
+	if val := os.Getenv("RATE_LIMIT_ENDPOINT_MAX_REQUESTS"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			cfg.Endpoint.MaxRequests = n
+		}
+	}
+	if val := os.Getenv("RATE_LIMIT_ENDPOINT_WINDOW_SECONDS"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			cfg.Endpoint.Window = time.Duration(n) * time.Second
+		}
+	}
+
+	return cfg
 }

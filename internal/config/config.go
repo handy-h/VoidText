@@ -50,6 +50,7 @@ type AppConfig struct {
 	CompletionMaxTokens   int
 	LLMMaxOutputTokens    int // LLM 最大输出 token 数上限（防止 max_tokens 超出模型限制）
 	LLMConcurrency        int
+	LLMDisableThinking   bool // 禁用模型思维链（如 mimo-v2.5 的 thinking 模式）
 
 	EnableLlmParagraphReconstruct bool
 	ParagraphChunkSize            int
@@ -124,6 +125,7 @@ func doLoad() error {
 		CompletionMaxTokens:           getEnvInt("COMPLETION_MAX_TOKENS", 2048),
 		LLMMaxOutputTokens:            getEnvInt("LLM_MAX_OUTPUT_TOKENS", 4096),
 		LLMConcurrency:                getEnvInt("LLM_CONCURRENCY", 2),
+		LLMDisableThinking:           getEnvBool("LLM_DISABLE_THINKING", false),
 		EnableLlmParagraphReconstruct: getEnvBool("ENABLE_LLM_PARAGRAPH_RECONSTRUCT", true),
 		ParagraphChunkSize:            getEnvInt("PARAGRAPH_CHUNK_SIZE", 8000),
 		EnableLocalModel:              getEnvBool("ENABLE_LOCAL_MODEL", false),

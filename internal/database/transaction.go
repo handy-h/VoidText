@@ -114,7 +114,11 @@ func CreateFileWithVersion(fileRecord *FileRecord, versionRecord *VersionRecord)
 
 			_, err = tx.Exec(`
         INSERT INTO versions (original_md5, version_md5, parent_md5, version_type, file_path, step, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(version_md5) DO UPDATE SET
+          file_path = excluded.file_path,
+          step = excluded.step,
+          parent_md5 = excluded.parent_md5`,
 				versionRecord.OriginalMd5, versionRecord.VersionMd5, versionRecord.ParentMd5,
 				versionRecord.VersionType, versionRecord.FilePath, versionRecord.Step,
 				versionRecord.CreatedAt,

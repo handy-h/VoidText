@@ -362,6 +362,14 @@ func (mr *ModelRepairer) ReconstructParagraphs(content string) (string, error) {
 		}
 
 		repaired := strings.TrimSpace(resp.Choices[0].Message.Content)
+		repairedRunes := len([]rune(repaired))
+
+		// 内容安全检测：输出长度异常短（< 输入的 30%），很可能是 API 内容审核拒绝
+		if chunkRunes > 100 && repairedRunes < chunkRunes*3/10 {
+			log.Printf("[段落重组] 第%d块内容审核拒绝: 输出=%d字符 输入=%d字符, 回退到原始文本", i+1, repairedRunes, chunkRunes)
+			return content, fmt.Errorf("第%d块API内容审核拒绝: 输出长度不足", i+1)
+		}
+
 		if repaired == "" {
 			// 降级：使用原块
 			repaired = chunk
@@ -458,7 +466,32 @@ func (mr *ModelRepairer) reconstructChunk(chunk string) (string, error) {
 		return "", fmt.Errorf("API 输出被截断 (finish_reason=length, 输入=%d字符)", chunkRunes)
 	}
 
-	return strings.TrimSpace(resp.Choices[0].Message.Content), nil
+	output := strings.TrimSpace(resp.Choices[0].Message.Content)
+	outputRunes := len([]rune(output))
+
+	// 内容安全检测：输出长度异常短（< 输入的 30%），很可能是 API 内容审核拒绝
+	// 段落重组只调整换行，输出长度应与输入大致相当；大幅缩短说明 API 过滤了内容
+	if chunkRunes > 100 && outputRunes < chunkRunes*3/10 {
+		log.Printf("[段落重组] 内容审核拒绝检测: 输出长度=%d字符 远低于输入长度=%d字符 (比例=%.1f%%), 回退到原始文本",
+			outputRunes, chunkRunes, float64(outputRunes)/float64(chunkRunes)*100)
+		return "", fmt.Errorf("API 内容审核拒绝: 输出长度%d字符不足输入%d字符的30%%", outputRunes, chunkRunes)
+	}
+
+	// 检测常见的内容审核拒绝文本模式
+	outputLower := strings.ToLower(output)
+	rejectionPatterns := []string{
+		"high risk", "rejected", "refused", "cannot comply",
+		"not allowed", "content policy", "safety filter",
+		"违规", "拒绝", "无法处理", "不合规",
+	}
+	for _, pattern := range rejectionPatterns {
+		if strings.Contains(outputLower, pattern) && outputRunes < 200 {
+			log.Printf("[段落重组] 检测到内容审核拒绝关键词: %q, 回退到原始文本", pattern)
+			return "", fmt.Errorf("API 内容审核拒绝: 响应包含拒绝关键词 %q", pattern)
+		}
+	}
+
+	return output, nil
 }
 
 // capMaxTokens 将 maxTokens 截断到配置允许的上限

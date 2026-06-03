@@ -75,3 +75,6 @@ code-text/
 # Project-specific
 opencode.json
 .roo/mcp.json
+
+# Test output
+all_test.txt

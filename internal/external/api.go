@@ -237,6 +237,7 @@ type API struct {
 	completionTemperature float64
 	completionMaxTokens   int
 	maxOutputTokens       int // LLM 最大输出 token 数上限（防止 max_tokens 超出模型限制）
+	disableThinking       bool // 禁用模型思维链
 	retryConfig           *RetryConfig
 	isLocalModel          bool // 是否为本地模型
 }
@@ -253,6 +254,7 @@ func NewAPI() *API {
 		completionTemperature: cfg.CompletionTemperature,
 		completionMaxTokens:   cfg.CompletionMaxTokens,
 		maxOutputTokens:       cfg.LLMMaxOutputTokens,
+		disableThinking:       cfg.LLMDisableThinking,
 		retryConfig:           DefaultRetryConfig(),
 		isLocalModel:          cfg.EnableLocalModel,
 	}
@@ -333,12 +335,18 @@ type ChatMessage struct {
 	Content string `json:"content"`
 }
 
+// ThinkingParam 思维链控制参数（如 mimo-v2.5 的 thinking 模式）
+type ThinkingParam struct {
+	Type string `json:"type"` // "disabled" 关闭思维链
+}
+
 // ChatCompletionRequest 聊天完成请求
 type ChatCompletionRequest struct {
 	Model       string        `json:"model"`
 	Messages    []ChatMessage `json:"messages"`
 	MaxTokens   int           `json:"max_tokens"`
 	Temperature float64       `json:"temperature"`
+	Thinking    *ThinkingParam `json:"thinking,omitempty"`
 }
 
 // ChatCompletionResponse 聊天完成响应
@@ -809,6 +817,9 @@ func (api *API) GenerateChatCompletion(systemPrompt, userPrompt string, maxToken
 				Messages:    messages,
 				MaxTokens:   currentMaxTokens,
 				Temperature: temperature,
+			}
+			if api.disableThinking {
+				req.Thinking = &ThinkingParam{Type: "disabled"}
 			}
 
 			resp, err := api.doJSONRequestWithRetryKeyed(url, req, endpoint.APIKey)

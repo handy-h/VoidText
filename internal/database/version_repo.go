@@ -17,11 +17,15 @@ type VersionRecord struct {
 	CreatedAt   string `json:"createdAt"`
 }
 
-// CreateVersion 创建版本记录
+// CreateVersion 创建版本记录（upsert：version_md5 已存在时更新）
 func CreateVersion(record *VersionRecord) error {
 	result, err := db.Exec(`
 		INSERT INTO versions (original_md5, version_md5, parent_md5, version_type, file_path, step)
-		VALUES (?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(version_md5) DO UPDATE SET
+			file_path = excluded.file_path,
+			step = excluded.step,
+			parent_md5 = excluded.parent_md5`,
 		record.OriginalMd5, record.VersionMd5, record.ParentMd5,
 		record.VersionType, record.FilePath, record.Step)
 	if err != nil {

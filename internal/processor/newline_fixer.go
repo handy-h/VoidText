@@ -28,7 +28,7 @@ type NewlineFixer struct {
 func NewNewlineFixer() *NewlineFixer {
 	return &NewlineFixer{
 		EnableAutoFix:      true,
-		MinParagraphLength: 20,
+		MinParagraphLength: 80,
 	}
 }
 
@@ -65,7 +65,7 @@ func (nf *NewlineFixer) Fix(content string) NewlineFixResult {
 }
 
 // needsNewlineFix 检测是否需要换行符修复
-// 通过分析换行符密度来判断
+// 通过分析换行符密度和单行长度来判断
 func (nf *NewlineFixer) needsNewlineFix(content string) bool {
 	// 如果内容很短，不需要修复
 	if len(content) < 100 {
@@ -84,17 +84,37 @@ func (nf *NewlineFixer) needsNewlineFix(content string) bool {
 		charsPerNewline = totalChars / newlineCount
 	}
 
-	if charsPerNewline > densityThreshold || newlineCount == 0 {
-		// 进一步检查是否是中文小说（有句号、引号等）
-		hasChinesePunctuation := strings.Contains(content, "。") ||
-			strings.Contains(content, "」") ||
-			strings.Contains(content, "』") ||
-			strings.Contains(content, "？") ||
-			strings.Contains(content, "！")
-
-		if hasChinesePunctuation {
-			return true
+	// 检查是否有超长行（单行超过500字符说明缺少段落分隔）
+	hasLongLine := false
+	if newlineCount > 0 {
+		lines := strings.Split(content, "\n")
+		for _, line := range lines {
+			if len([]rune(strings.TrimSpace(line))) > 500 {
+				hasLongLine = true
+				break
+			}
 		}
+	}
+
+	// 检查是否是中文小说（有句号、引号等）
+	hasChinesePunctuation := strings.Contains(content, "。") ||
+		strings.Contains(content, "」") ||
+		strings.Contains(content, "』") ||
+		strings.Contains(content, "？") ||
+		strings.Contains(content, "！")
+
+	if !hasChinesePunctuation {
+		return false
+	}
+
+	// 条件1：换行密度过低 → 需要修复
+	if charsPerNewline > densityThreshold || newlineCount == 0 {
+		return true
+	}
+
+	// 条件2：存在超长行 → 需要修复（即使整体密度看似正常）
+	if hasLongLine {
+		return true
 	}
 
 	return false
@@ -142,10 +162,9 @@ func (nf *NewlineFixer) fixMissingNewlines(result NewlineFixResult) NewlineFixRe
 }
 
 // splitIntoParagraphs 将文本分割成段落
+// 使用保守的分段策略：只在章节标题、对话切换、话题转换处分割
+// 连续叙述保持在同一自然段中，避免过度切分
 func (nf *NewlineFixer) splitIntoParagraphs(content string) []string {
-	// 定义段落分割规则
-	// 优先级：章节标题 > 对话结束 > 句子结束
-
 	var paragraphs []string
 	var currentParagraph strings.Builder
 
@@ -155,35 +174,33 @@ func (nf *NewlineFixer) splitIntoParagraphs(content string) []string {
 	for i < len(runes) {
 		char := runes[i]
 
-		// 检查是否是章节标题（如 ◇ 一 ◇）
-		if i+2 < len(runes) {
-			if nf.isChapterTitle(runes, i) {
-				// 保存当前段落
-				if currentParagraph.Len() > 0 {
-					paragraphs = append(paragraphs, strings.TrimSpace(currentParagraph.String()))
-					currentParagraph.Reset()
-				}
-				// 提取章节标题
-				titleEnd := nf.findChapterTitleEnd(runes, i)
-				title := string(runes[i:titleEnd])
-				paragraphs = append(paragraphs, strings.TrimSpace(title))
-				i = titleEnd
-				continue
-			}
-		}
-
-		// 检查是否是段落分割点
-		if nf.isParagraphBreak(runes, i) {
+		// 检查是否是章节标题（如 ◇ 一 ◇、第X章、一、）
+		if titleEnd := nf.isChapterTitleAt(runes, i); titleEnd > i {
 			// 保存当前段落
 			if currentParagraph.Len() > 0 {
 				paragraphs = append(paragraphs, strings.TrimSpace(currentParagraph.String()))
 				currentParagraph.Reset()
 			}
-			i++
+			// 提取章节标题为独立段落
+			title := string(runes[i:titleEnd])
+			paragraphs = append(paragraphs, strings.TrimSpace(title))
+			i = titleEnd
 			continue
 		}
 
+		// 将当前字符添加到段落（确保句号、引号等标点不丢失）
 		currentParagraph.WriteRune(char)
+
+		// 检测是否为段落分割点，返回应跳过的字符数
+		if skip := nf.detectParagraphBreak(runes, i); skip > 0 {
+			if currentParagraph.Len() > 0 {
+				paragraphs = append(paragraphs, strings.TrimSpace(currentParagraph.String()))
+				currentParagraph.Reset()
+			}
+			i += skip
+			continue
+		}
+
 		i++
 	}
 
@@ -198,51 +215,53 @@ func (nf *NewlineFixer) splitIntoParagraphs(content string) []string {
 	return paragraphs
 }
 
-// isChapterTitle 检查指定位置是否是章节标题的开始
-func (nf *NewlineFixer) isChapterTitle(runes []rune, pos int) bool {
-	// 检查常见的章节标题格式
+// isChapterTitleAt 检查指定位置是否为章节标题的开始
+// 如果是，返回标题结束位置（不含）；否则返回 pos
+func (nf *NewlineFixer) isChapterTitleAt(runes []rune, pos int) int {
 	// 格式1：◇ 一 ◇
 	if runes[pos] == '◇' {
-		// 向后查找匹配的 ◇
 		for j := pos + 1; j < len(runes) && j < pos+20; j++ {
 			if runes[j] == '◇' {
-				return true
+				return j + 1
 			}
 		}
 	}
 
 	// 格式2：第X章、第X节等
 	if pos+1 < len(runes) && runes[pos] == '第' {
-		// 检查后面是否是数字或章节标记
 		for j := pos + 1; j < len(runes) && j < pos+10; j++ {
 			if unicode.IsDigit(runes[j]) || runes[j] == '章' || runes[j] == '节' || runes[j] == '回' {
-				return true
+				return nf.findTitleEnd(runes, pos)
 			}
 		}
 	}
 
-	// 格式3：数字+顿号（如 一、二、）
-	if pos+1 < len(runes) && (runes[pos] == '一' || runes[pos] == '二' || runes[pos] == '三' ||
-		runes[pos] == '四' || runes[pos] == '五' || runes[pos] == '六' ||
-		runes[pos] == '七' || runes[pos] == '八' || runes[pos] == '九' || runes[pos] == '十') {
-		if pos+1 < len(runes) && runes[pos+1] == '、' {
-			return true
+	// 格式3：中文数字+顿号（如 一、二、三、）
+	if pos+1 < len(runes) {
+		cnNums := "一二三四五六七八九十"
+		if strings.ContainsRune(cnNums, runes[pos]) && runes[pos+1] == '、' {
+			return nf.findTitleEnd(runes, pos)
 		}
 	}
 
-	return false
+	return pos
 }
 
-// findChapterTitleEnd 查找章节标题的结束位置
-func (nf *NewlineFixer) findChapterTitleEnd(runes []rune, start int) int {
-	// 查找行尾或特定结束标记
+// findTitleEnd 查找章节标题的结束位置
+func (nf *NewlineFixer) findTitleEnd(runes []rune, start int) int {
 	for i := start; i < len(runes) && i < start+50; i++ {
-		// 遇到换行符或另一个章节标记结束
-		if runes[i] == '\n' || (i > start && runes[i] == '◇') {
+		if runes[i] == '\n' {
+			return i + 1
+		}
+		// ◇ 闭合标记
+		if i > start && runes[i] == '◇' {
+			return i + 1
+		}
+		// 句子结束标点表示标题结束（适用于"一、标题内容。"格式）
+		if i > start+2 && (runes[i] == '。' || runes[i] == '！' || runes[i] == '？') {
 			return i + 1
 		}
 	}
-	// 默认返回起始位置+20或内容结尾
 	end := start + 20
 	if end > len(runes) {
 		end = len(runes)
@@ -250,7 +269,7 @@ func (nf *NewlineFixer) findChapterTitleEnd(runes []rune, start int) int {
 	return end
 }
 
-// skipSpaces 跳过空格，返回下一个非空格字符的位置
+// skipSpaces 跳过空格和制表符，返回下一个非空格字符的位置
 func skipSpaces(runes []rune, pos int) int {
 	for i := pos; i < len(runes); i++ {
 		if runes[i] != ' ' && runes[i] != '\t' {
@@ -260,125 +279,232 @@ func skipSpaces(runes []rune, pos int) int {
 	return len(runes)
 }
 
-// isParagraphBreak 检查指定位置是否是段落分割点
-func (nf *NewlineFixer) isParagraphBreak(runes []rune, pos int) bool {
+// detectParagraphBreak 检测位置 pos 是否为段落分割点
+// 返回值 > 0 表示是分割点，值为应跳过的字符数
+// 返回 0 表示不是分割点
+//
+// 分段信号（按优先级）：
+// 1. 章节标题（由 splitIntoParagraphs 单独处理）
+// 2. 结束标点 + 闭合引号 + 开启引号（对话切换）
+// 3. 结束标点 + 时间标记/话题转换词
+func (nf *NewlineFixer) detectParagraphBreak(runes []rune, pos int) int {
 	if pos >= len(runes) {
-		return false
+		return 0
 	}
 
 	char := runes[pos]
 
-	// 规则1：句子结束标点（句号、感叹号、问号）
+	// 处理结束标点（。！？）后的段落边界
 	if char == '。' || char == '！' || char == '？' {
-		// 跳过空格，检查后面是否是引号闭合
-		nextPos := skipSpaces(runes, pos+1)
-		if nextPos < len(runes) {
-			nextChar := runes[nextPos]
-			if nextChar == '」' || nextChar == '』' || nextChar == '"' || nextChar == '\'' {
-				// 引号闭合后，检查是否是段落结束
-				afterQuote := skipSpaces(runes, nextPos+1)
-				if afterQuote < len(runes) {
-					afterChar := runes[afterQuote]
-					// 如果后面是另一个引号开始或章节标记
-					if afterChar == '「' || afterChar == '『' || afterChar == '"' || afterChar == '\'' ||
-						nf.isChapterTitle(runes, afterQuote) {
-						return true
-					}
-				} else {
-					return true // 引号闭合后文本结束
+		skip := 1
+		afterPunct := pos + 1
+
+		// 跳过空格
+		afterPunct = skipSpaces(runes, afterPunct)
+
+		// 文本结束：最后一个句子结束，无需分割
+		if afterPunct >= len(runes) {
+			return 0
+		}
+
+		// 处理结束标点后的引号
+		// 注意：直引号 " 在中文 OCR 文本中同时用于开合引号，无法静态区分
+		// 策略：将 endPunct + " 视为潜在段落边界，通过后续上下文判断
+		if isQuoteChar(runes[afterPunct]) {
+			afterQuote := skipSpaces(runes, afterPunct+1)
+
+			if afterQuote >= len(runes) {
+				return 0 // 文本结束
+			}
+
+			// 明确闭合引号（」』）后出现开启引号 = 新对话 → 分段
+			if isUnambiguousClosingQuote(runes[afterPunct]) && isOpeningQuote(runes[afterQuote]) {
+				return afterQuote - pos
+			}
+
+			// 直引号 " 在结束标点后：视为新对话/新段落的开启
+			// 除非后面紧跟说话动词（说/问/道等），表明是 "...XXX说" 格式的对话标签
+			if isAmbiguousQuote(runes[afterPunct]) {
+				if !isDialogueTag(runes, afterQuote) {
+					return afterPunct - pos // 在引号前分段，引号归入下一段
 				}
+			}
+
+			// 引号后有时间/话题转换标记 → 分段
+			if hasTimeMarker(runes, afterQuote) || hasTopicTransition(runes, afterQuote) {
+				return afterQuote - pos
+			}
+
+			return skip
+		}
+
+		// 信号2：时间标记 → 分段（如"第二天""几个月后"）
+		if hasTimeMarker(runes, afterPunct) {
+			return afterPunct - pos
+		}
+
+		// 信号3：话题/场景转换 → 分段
+		if hasTopicTransition(runes, afterPunct) {
+			return afterPunct - pos
+		}
+
+		return skip
+	}
+
+	// 处理明确闭合引号（」』）处的段落边界
+	// 注：直引号 " 的处理已在上方结束标点块中完成
+	if isUnambiguousClosingQuote(char) && pos > 0 {
+		prevChar := runes[pos-1]
+		if prevChar == '。' || prevChar == '！' || prevChar == '？' || prevChar == '…' {
+			nextPos := skipSpaces(runes, pos+1)
+			if nextPos >= len(runes) {
+				return 0 // 文本结束
+			}
+			// 开启引号 = 新对话 → 分段
+			if isOpeningQuote(runes[nextPos]) {
+				return nextPos - pos
+			}
+			// 时间标记或话题转换 → 分段
+			if hasTimeMarker(runes, nextPos) || hasTopicTransition(runes, nextPos) {
+				return nextPos - pos
 			}
 		}
 	}
 
-	// 规则2：引号闭合 + 句子结束
-	if char == '」' || char == '』' || char == '"' || char == '\'' {
-		// 检查前面是否是句子结束标点
-		if pos > 0 {
-			prevChar := runes[pos-1]
-			if prevChar == '。' || prevChar == '！' || prevChar == '？' || prevChar == '…' {
-				// 跳过空格，检查后面是否是新段落的开始
-				nextPos := skipSpaces(runes, pos+1)
-				if nextPos < len(runes) {
-					nextChar := runes[nextPos]
-					// 如果后面是引号开始，则可能是同一段对话，不分段
-					if nextChar == '「' || nextChar == '『' || nextChar == '"' || nextChar == '\'' {
-						return false
-					}
-					return true
-				}
+	return 0
+}
+
+// isQuoteChar 检查是否为任何引号字符
+func isQuoteChar(r rune) bool {
+	return r == '"' || r == '\'' || r == '「' || r == '」' || r == '『' || r == '』'
+}
+
+// isUnambiguousClosingQuote 检查是否为明确的闭合引号（不可能是开启引号）
+func isUnambiguousClosingQuote(r rune) bool {
+	return r == '」' || r == '』'
+}
+
+// isAmbiguousQuote 检查是否为无法区分开合的直引号
+func isAmbiguousQuote(r rune) bool {
+	return r == '"' || r == '\''
+}
+
+// isOpeningQuote 检查是否为明确的开启引号
+func isOpeningQuote(r rune) bool {
+	return r == '"' || r == '「' || r == '『' || r == '\''
+}
+
+// isDialogueTag 检查 pos 处是否为说话动词（用于判断 "...XXX说" 格式的对话标签）
+// 检查前2-4个字符是否构成 "角色名+说话动词" 模式
+func isDialogueTag(runes []rune, pos int) bool {
+	saidVerbs := []rune{'说', '问', '喊', '叫', '道', '答', '骂', '笑', '哭', '吼', '叹', '嚷'}
+	for offset := 0; offset < 4 && pos+offset < len(runes); offset++ {
+		for _, v := range saidVerbs {
+			if runes[pos+offset] == v {
+				return true
 			}
 		}
+		// 遇到标点或引号停止扫描
+		if runes[pos+offset] == '，' || runes[pos+offset] == '。' || runes[pos+offset] == '！' ||
+			runes[pos+offset] == '？' || runes[pos+offset] == '"' {
+			break
+		}
 	}
+	return false
+}
 
-	// 规则3：连续的省略号后
-	if char == '…' && pos+1 < len(runes) && runes[pos+1] == '…' {
-		if pos+2 < len(runes) && runes[pos+2] == '…' {
+// hasTimeMarker 检查位置 pos 处是否有时间标记（表示新段落开始）
+func hasTimeMarker(runes []rune, pos int) bool {
+	timeMarkers := []string{
+		"第二天", "第三天", "几天后", "几天以后", "几天过去了",
+		"几个月后", "几个月以后", "一年后", "几年后", "多年以后", "多年后",
+		"那年", "那年夏天", "那年冬天", "那年秋天", "那年春天",
+		"这天", "那天", "当天", "每天", "后来",
+		"此刻", "此时", "这时", "那时", "这时侯", "这时候", "那时候",
+		"一会儿", "过了", "不久", "随即", "随后", "紧接着",
+		"终于", "最终", "最后",
+		"从此", "从那以后", "从今以后", "打那以后",
+		"转眼间", "转眼间", "一晃", "不知不觉",
+		"早晨", "中午", "下午", "傍晚", "晚上", "深夜", "半夜", "凌晨", "清晨",
+	}
+	return beginsWithAny(runes, pos, timeMarkers)
+}
+
+// hasTopicTransition 检查位置 pos 处是否有话题/场景转换标记
+// 注意：角色名不在此列表中——角色名后跟说话动词（说/问/道）
+// 是对话标签，不应触发分段；角色名后跟动作虽属新叙述，
+// 但由 MinParagraphLength 的合并机制来兜底处理
+func hasTopicTransition(runes []rune, pos int) bool {
+	transitions := []string{
+		// 叙述转换
+		"就这样", "于是", "可是", "然而", "但是", "不过",
+		"忽然", "突然", "没想到", "谁知", "没想到的是",
+		// 场景描写
+		"外面的世界", "外面",
+	}
+	return beginsWithAny(runes, pos, transitions)
+}
+
+// beginsWithAny 检查 runes[pos:] 是否以 words 中的某个词开头
+func beginsWithAny(runes []rune, pos int, words []string) bool {
+	if pos >= len(runes) {
+		return false
+	}
+	for _, word := range words {
+		wordRunes := []rune(word)
+		if pos+len(wordRunes) > len(runes) {
+			continue
+		}
+		match := true
+		for j, wr := range wordRunes {
+			if runes[pos+j] != wr {
+				match = false
+				break
+			}
+		}
+		if match {
 			return true
 		}
 	}
-
-	// 规则4：单独的句号（没有引号闭合的情况）
-	if char == '。' {
-		// 跳过空格，检查下一个非空格字符
-		nextPos := skipSpaces(runes, pos+1)
-		if nextPos >= len(runes) {
-			return true // 文本结尾
-		}
-		nextChar := runes[nextPos]
-		// 如果后面是中文字符，且不是引号，可能是段落结束
-		if unicode.Is(unicode.Han, nextChar) && nextChar != '「' && nextChar != '『' && nextChar != '"' && nextChar != '\'' {
-			// 进一步检查：如果后面是对话开始，可能是同一段
-			afterNext := skipSpaces(runes, nextPos+1)
-			if afterNext < len(runes) {
-				afterChar := runes[afterNext]
-				if afterChar == '「' || afterChar == '『' || afterChar == '"' || afterChar == '\'' {
-					return false
-				}
-			}
-			return true
-		}
-	}
-
-	// 规则5：句号 + 跳过空格 + 引号闭合 + 文本结尾
-	if char == '。' {
-		nextPos := skipSpaces(runes, pos+1)
-		if nextPos < len(runes) {
-			nextChar := runes[nextPos]
-			if nextChar == '」' || nextChar == '』' || nextChar == '"' || nextChar == '\'' {
-				if skipSpaces(runes, nextPos+1) >= len(runes) {
-					return true
-				}
-			}
-		}
-	}
-
 	return false
 }
 
 // mergeShortParagraphs 合并过短的段落
+// 策略：短段落（< MinParagraphLength）持续与后续段落合并，直到达到最小长度
+// 章节标题保持独立，不与内容合并
 func (nf *NewlineFixer) mergeShortParagraphs(paragraphs []string) []string {
 	if len(paragraphs) <= 1 {
 		return paragraphs
 	}
 
 	var merged []string
-	current := paragraphs[0]
+	i := 0
 
-	for i := 1; i < len(paragraphs); i++ {
-		next := paragraphs[i]
+	for i < len(paragraphs) {
+		current := paragraphs[i]
 
-		// 如果当前段落过短，且不是章节标题，则与下一段合并
-		if nf.isShortParagraph(current) && !nf.isChapterTitleText(current) {
-			current = current + "\n" + next
-		} else {
+		// 章节标题保持独立，不合并
+		if nf.isChapterTitleText(current) {
 			merged = append(merged, current)
-			current = next
+			i++
+			continue
 		}
-	}
 
-	// 添加最后一个段落
-	merged = append(merged, current)
+		// 过短的段落持续与后续段落合并，直到达到最小长度
+		for nf.isShortParagraph(current) && i+1 < len(paragraphs) {
+			i++
+			next := paragraphs[i]
+			// 如果下一段是章节标题，先结束合并（标题必须独立）
+			if nf.isChapterTitleText(next) {
+				i-- // 回退，让标题在下轮循环中独立处理
+				break
+			}
+			current = current + "\n" + next
+		}
+
+		merged = append(merged, current)
+		i++
+	}
 
 	return merged
 }

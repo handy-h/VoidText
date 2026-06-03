@@ -979,6 +979,15 @@ func processFinalizingStep(fileMd5, content string, record *database.FileRecord)
 		log.Printf("[最终文件] 更新文件状态失败: %v", err)
 	}
 
+	// 更新 file_path 指向最终文件，确保下载接口返回正确的文件内容
+	if err := func() error {
+		db := database.GetDB()
+		_, err := db.Exec(`UPDATE files SET file_path = ? WHERE md5 = ?`, finalPath, fileMd5)
+		return err
+	}(); err != nil {
+		log.Printf("[最终文件] 更新 file_path 失败: %v", err)
+	}
+
 	if err := database.CreateProcessingLog(&database.ProcessingLogRecord{
 		FileMd5: fileMd5,
 		Step:    StepFinalizing,

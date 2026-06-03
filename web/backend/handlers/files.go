@@ -348,11 +348,23 @@ func ResumeFile(c *gin.Context) {
 
 	switch record.Status {
 	case "completed":
+		// 查找原始上传文件路径，确保重新处理时从原始文件开始
+		originalFilePath := record.FilePath
+		versions, vErr := database.GetVersionsByOriginalMd5(md5)
+		if vErr == nil {
+			for _, v := range versions {
+				if v.Step == "upload" && v.VersionType == "original" {
+					originalFilePath = v.FilePath
+					break
+				}
+			}
+		}
+
 		// 使用事务重置文件状态并删除审核项
 		err = database.WithTransactionSimple(func(tx database.Transaction) error {
-			// 重置文件状态
-			_, err := tx.Exec("UPDATE files SET status = ?, current_step = ?, progress = ?, error_msg = ?, updated_at = ? WHERE md5 = ?",
-				"pending", "", 0, "", time.Now().Format(time.RFC3339), md5)
+			// 重置文件状态，同时恢复 file_path 到原始上传文件
+			_, err := tx.Exec("UPDATE files SET status = ?, current_step = ?, progress = ?, error_msg = ?, file_path = ?, llm_progress_paragraph = 0, llm_progress_checkpoint = '', updated_at = ? WHERE md5 = ?",
+				"pending", "", 0, "", originalFilePath, time.Now().Format(time.RFC3339), md5)
 			if err != nil {
 				return fmt.Errorf("重置文件状态失败: %w", err)
 			}
@@ -375,10 +387,22 @@ func ResumeFile(c *gin.Context) {
 		record.CurrentStep = ""
 		record.Progress = 0
 	case "failed":
-		// 使用事务重置文件状态
+		// 查找原始上传文件路径，确保重新处理时从原始文件开始
+		originalFilePath := record.FilePath
+		versions, vErr := database.GetVersionsByOriginalMd5(md5)
+		if vErr == nil {
+			for _, v := range versions {
+				if v.Step == "upload" && v.VersionType == "original" {
+					originalFilePath = v.FilePath
+					break
+				}
+			}
+		}
+
+		// 使用事务重置文件状态，同时恢复 file_path 到原始上传文件
 		err = database.WithTransactionSimple(func(tx database.Transaction) error {
-			_, err := tx.Exec("UPDATE files SET status = ?, error_msg = ?, updated_at = ? WHERE md5 = ?",
-				"pending", "", time.Now().Format(time.RFC3339), md5)
+			_, err := tx.Exec("UPDATE files SET status = ?, current_step = ?, error_msg = ?, file_path = ?, llm_progress_paragraph = 0, llm_progress_checkpoint = '', updated_at = ? WHERE md5 = ?",
+				"pending", "", "", originalFilePath, time.Now().Format(time.RFC3339), md5)
 			return err
 		})
 
@@ -388,12 +412,25 @@ func ResumeFile(c *gin.Context) {
 		}
 
 		record.Status = "pending"
+		record.CurrentStep = ""
 		record.ErrorMsg = ""
 	case "processing":
-		// 使用事务重置文件状态并清空当前步骤
+		// 查找原始上传文件路径
+		originalFilePath := record.FilePath
+		versions, vErr := database.GetVersionsByOriginalMd5(md5)
+		if vErr == nil {
+			for _, v := range versions {
+				if v.Step == "upload" && v.VersionType == "original" {
+					originalFilePath = v.FilePath
+					break
+				}
+			}
+		}
+
+		// 使用事务重置文件状态并清空当前步骤，同时恢复 file_path
 		err = database.WithTransactionSimple(func(tx database.Transaction) error {
-			_, err := tx.Exec("UPDATE files SET status = ?, current_step = ?, error_msg = ?, updated_at = ? WHERE md5 = ?",
-				"pending", "", "", time.Now().Format(time.RFC3339), md5)
+			_, err := tx.Exec("UPDATE files SET status = ?, current_step = ?, error_msg = ?, file_path = ?, llm_progress_paragraph = 0, llm_progress_checkpoint = '', updated_at = ? WHERE md5 = ?",
+				"pending", "", "", originalFilePath, time.Now().Format(time.RFC3339), md5)
 			return err
 		})
 

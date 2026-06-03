@@ -59,17 +59,29 @@ func optimizeFormat(result PostprocessResult) PostprocessResult {
 // 优化：将所有章节模式合并为一个正则，避免多次扫描文本
 func organizeChapters(result PostprocessResult) PostprocessResult {
 	// 合并所有章节模式为单一正则（优先级由高到低）
-	chapterRegex := regexp.MustCompile(`第[一二三四五六七八九十百千]+章|第[0-9]+章|Chapter [0-9]+|章节 [0-9]+`)
+	// 支持格式：第X章、第X节、Chapter X、章节 X、◇ X ◇
+	chapterRegex := regexp.MustCompile(`第[一二三四五六七八九十百千]+章|第[0-9]+章|Chapter [0-9]+|章节 [0-9]+|◇[^◇]+◇`)
 	matches := chapterRegex.FindAllStringIndex(result.Content, -1)
 
 	offset := 0 // 累积偏移量，跟踪前序插入导致的字符串位置变化
 	for _, match := range matches {
 		result.Stats["chapters"]++
 		actualPos := match[0] + offset
+		matchEnd := match[1] + offset
+
+		// 在章节标题前添加空行（如果前面没有空行）
 		if actualPos > 0 && result.Content[actualPos-1] != '\n' {
 			insertion := "\n\n"
 			result.Content = result.Content[:actualPos] + insertion + result.Content[actualPos:]
-			offset += len(insertion) // 更新偏移量
+			offset += len(insertion)
+			matchEnd += len(insertion)
+		}
+
+		// 在章节标题后添加空行（如果后面没有空行）
+		if matchEnd < len(result.Content) && result.Content[matchEnd] != '\n' {
+			insertion := "\n\n"
+			result.Content = result.Content[:matchEnd] + insertion + result.Content[matchEnd:]
+			offset += len(insertion)
 		}
 	}
 
