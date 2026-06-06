@@ -348,10 +348,10 @@ func (nf *NewlineFixer) detectParagraphBreak(runes []rune, pos int) int {
 			return afterPunct - pos
 		}
 
-		return skip
+		// 无明确段落边界信号，不分割（连续叙述保持在同一段落）
+		// 仅在检测到引号变化、时间标记或话题转换词时才分割
+		return 0
 	}
-
-	// 处理明确闭合引号（」』）处的段落边界
 	// 注：直引号 " 的处理已在上方结束标点块中完成
 	if isUnambiguousClosingQuote(char) && pos > 0 {
 		prevChar := runes[pos-1]
@@ -427,7 +427,72 @@ func hasTimeMarker(runes []rune, pos int) bool {
 		"转眼间", "转眼间", "一晃", "不知不觉",
 		"早晨", "中午", "下午", "傍晚", "晚上", "深夜", "半夜", "凌晨", "清晨",
 	}
-	return beginsWithAny(runes, pos, timeMarkers)
+	if beginsWithAny(runes, pos, timeMarkers) {
+		return true
+	}
+	// 数字格式时间标记：如"10个月后"、"3天后"、"2年后"
+	return isNumericTimeMarker(runes, pos)
+}
+
+// isNumericTimeMarker 检查是否为数字格式的时间标记
+// 匹配模式：数字 + "个"(可选) + 时间单位 + "后/以后/前/以前"
+func isNumericTimeMarker(runes []rune, pos int) bool {
+	if pos >= len(runes) {
+		return false
+	}
+	// 必须以数字开头
+	i := pos
+	for i < len(runes) && (runes[i] >= '0' && runes[i] <= '9') {
+		i++
+	}
+	if i == pos {
+		return false // 没有数字
+	}
+	// 跳过可选的"个"
+	if i < len(runes) && runes[i] == '个' {
+		i++
+	}
+	// 检查时间单位
+	timeUnits := []string{"月", "天", "年", "小时", "分钟", "星期", "周"}
+	matchedUnit := false
+	for _, unit := range timeUnits {
+		unitRunes := []rune(unit)
+		if i+len(unitRunes) <= len(runes) {
+			match := true
+			for j, ur := range unitRunes {
+				if runes[i+j] != ur {
+					match = false
+					break
+				}
+			}
+			if match {
+				i += len(unitRunes)
+				matchedUnit = true
+				break
+			}
+		}
+	}
+	if !matchedUnit {
+		return false
+	}
+	// 检查后缀
+	suffixes := []string{"以后", "后", "以前", "前"}
+	for _, suffix := range suffixes {
+		suffixRunes := []rune(suffix)
+		if i+len(suffixRunes) <= len(runes) {
+			match := true
+			for j, sr := range suffixRunes {
+				if runes[i+j] != sr {
+					match = false
+					break
+				}
+			}
+			if match {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // hasTopicTransition 检查位置 pos 处是否有话题/场景转换标记
@@ -439,8 +504,16 @@ func hasTopicTransition(runes []rune, pos int) bool {
 		// 叙述转换
 		"就这样", "于是", "可是", "然而", "但是", "不过",
 		"忽然", "突然", "没想到", "谁知", "没想到的是",
+		// 话题转换
+		"果然", "原来", "其实", "毕竟", "当然",
+		"再说", "另外", "此外", "事实上",
+		"且说", "再说", "却说", "话虽如此",
 		// 场景描写
 		"外面的世界", "外面",
+		"另一边", "与此同时",
+		// 时间推移（补充）
+		"当晚", "次日", "翌日", "那天晚上", "这天晚上",
+		"从这天起", "打这天起",
 	}
 	return beginsWithAny(runes, pos, transitions)
 }
