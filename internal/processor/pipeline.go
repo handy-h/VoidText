@@ -40,13 +40,15 @@ type PipelineResult struct {
 
 // RulesConfig 文件级规则配置
 type RulesConfig struct {
-	EnableBasicCleaning   bool              `json:"enableBasicCleaning"`
-	TraditionalToSimple   bool              `json:"traditionalToSimple"`
-	EnableVectorDetection bool              `json:"enableVectorDetection"`
-	SimilarityThreshold   float64           `json:"similarityThreshold"`
-	EnableModelRepair     bool              `json:"enableModelRepair"`
-	TypoMap               map[string]string `json:"typoMap"`
-	AdBlacklist           []string          `json:"adBlacklist"`
+	EnableBasicCleaning        bool              `json:"enableBasicCleaning"`
+	EnableAdCleaning           bool              `json:"enableAdCleaning"`
+	TraditionalToSimple        bool              `json:"traditionalToSimple"`
+	EnableVectorDetection      bool              `json:"enableVectorDetection"`
+	SimilarityThreshold        float64           `json:"similarityThreshold"`
+	EnableModelRepair          bool              `json:"enableModelRepair"`
+	EnableParagraphReconstruct bool              `json:"enableParagraphReconstruct"`
+	TypoMap                    map[string]string `json:"typoMap"`
+	AdBlacklist                []string          `json:"adBlacklist"`
 }
 
 // UnmarshalJSON 自定义反序列化，兼容 typoMap/adBlacklist 为字符串或数组/对象的格式
@@ -129,13 +131,15 @@ func parseBlacklistString(s string) []string {
 // DefaultRulesConfig 默认规则配置
 func DefaultRulesConfig() RulesConfig {
 	return RulesConfig{
-		EnableBasicCleaning:   config.AppConfigInstance.EnableBasicCleaning,
-		TraditionalToSimple:   config.AppConfigInstance.TraditionalToSimple,
-		EnableVectorDetection: config.AppConfigInstance.EnableVectorDetection,
-		SimilarityThreshold:   config.AppConfigInstance.VectorSimilarityThreshold,
-		EnableModelRepair:     config.AppConfigInstance.EnableModelRepair,
-		TypoMap:               make(map[string]string),
-		AdBlacklist:           []string{},
+		EnableBasicCleaning:        config.AppConfigInstance.EnableBasicCleaning,
+		EnableAdCleaning:           true,
+		TraditionalToSimple:        config.AppConfigInstance.TraditionalToSimple,
+		EnableVectorDetection:      config.AppConfigInstance.EnableVectorDetection,
+		SimilarityThreshold:        config.AppConfigInstance.VectorSimilarityThreshold,
+		EnableModelRepair:          config.AppConfigInstance.EnableModelRepair,
+		EnableParagraphReconstruct: config.AppConfigInstance.EnableLlmParagraphReconstruct,
+		TypoMap:                    make(map[string]string),
+		AdBlacklist:                []string{},
 	}
 }
 
@@ -294,58 +298,61 @@ func processCleaningStep(fileMd5 string, preprocessResult preprocess.PreprocessR
 	// 合并 BasicCleaner 的变更
 	allChanges = append(allChanges, cleanResult.Changes...)
 
-	// 预编译广告过滤正则，避免重复编译并降低风险
-	var compiledAdPatterns []*regexp.Regexp
-	for _, pattern := range rulesConfig.AdBlacklist {
-		if pattern == "" {
-			continue
-		}
-		re, err := regexp.Compile(pattern)
-		if err != nil {
-			log.Printf("[广告过滤] 正则表达式编译失败 (pattern=%s): %v", pattern, err)
-			continue
-		}
-		compiledAdPatterns = append(compiledAdPatterns, re)
-	}
-
-	if len(compiledAdPatterns) > 0 {
-		for _, re := range compiledAdPatterns {
-			newContent := re.ReplaceAllString(cleanResult.Content, "")
-			if newContent != cleanResult.Content {
-				allChanges = append(allChanges, preprocess.Change{Type: "ad_removal"})
-				cleanResult.Content = newContent
-			}
-		}
-	}
-
-	if len(rulesConfig.TypoMap) > 0 {
-		for wrong, correct := range rulesConfig.TypoMap {
-			if !strings.Contains(cleanResult.Content, wrong) {
+	// 广告过滤和错别字修复（受 enableAdCleaning 开关控制）
+	if rulesConfig.EnableAdCleaning {
+		// 预编译广告过滤正则，避免重复编译并降低风险
+		var compiledAdPatterns []*regexp.Regexp
+		for _, pattern := range rulesConfig.AdBlacklist {
+			if pattern == "" {
 				continue
 			}
-			// 对包含 ASCII 字符的规则使用词边界，降低子串误替换风险
-			hasASCII := false
-			for _, r := range wrong {
-				if r < 128 {
-					hasASCII = true
-					break
-				}
+			re, err := regexp.Compile(pattern)
+			if err != nil {
+				log.Printf("[广告过滤] 正则表达式编译失败 (pattern=%s): %v", pattern, err)
+				continue
 			}
-			newContent := cleanResult.Content
-			if hasASCII {
-				re, err := regexp.Compile(`\b` + regexp.QuoteMeta(wrong) + `\b`)
-				if err == nil {
-					newContent = re.ReplaceAllString(cleanResult.Content, correct)
+			compiledAdPatterns = append(compiledAdPatterns, re)
+		}
+
+		if len(compiledAdPatterns) > 0 {
+			for _, re := range compiledAdPatterns {
+				newContent := re.ReplaceAllString(cleanResult.Content, "")
+				if newContent != cleanResult.Content {
+					allChanges = append(allChanges, preprocess.Change{Type: "ad_removal"})
+					cleanResult.Content = newContent
 				}
-			} else {
-				newContent = strings.ReplaceAll(cleanResult.Content, wrong, correct)
-			}
-			if newContent != cleanResult.Content {
-				allChanges = append(allChanges, preprocess.Change{Type: "typo_fix", Original: wrong, Replacement: correct})
-				cleanResult.Content = newContent
 			}
 		}
-	}
+
+		if len(rulesConfig.TypoMap) > 0 {
+			for wrong, correct := range rulesConfig.TypoMap {
+				if !strings.Contains(cleanResult.Content, wrong) {
+					continue
+				}
+				// 对包含 ASCII 字符的规则使用词边界，降低子串误替换风险
+				hasASCII := false
+				for _, r := range wrong {
+					if r < 128 {
+						hasASCII = true
+						break
+					}
+				}
+				newContent := cleanResult.Content
+				if hasASCII {
+					re, err := regexp.Compile(`\b` + regexp.QuoteMeta(wrong) + `\b`)
+					if err == nil {
+						newContent = re.ReplaceAllString(cleanResult.Content, correct)
+					}
+				} else {
+					newContent = strings.ReplaceAll(cleanResult.Content, wrong, correct)
+				}
+				if newContent != cleanResult.Content {
+					allChanges = append(allChanges, preprocess.Change{Type: "typo_fix", Original: wrong, Replacement: correct})
+					cleanResult.Content = newContent
+				}
+			}
+		}
+	} // end EnableAdCleaning
 
 	ruleMgr := rules.NewRuleManager()
 	beforeRule := cleanResult.Content
@@ -535,7 +542,7 @@ type llmParagraphResult struct {
 
 // processLlmFixStep LLM修复步骤（支持断点恢复和取消）
 func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, record *database.FileRecord) (*PipelineResult, error) {
-	if !rulesConfig.EnableModelRepair {
+	if !rulesConfig.EnableModelRepair && !rulesConfig.EnableParagraphReconstruct {
 		nextStep := GetNextStep(StepLlmFix)
 		database.UpdateFileStatus(fileMd5, "processing", nextStep, CalculateProgress(nextStep, 0), "")
 		return &PipelineResult{
@@ -564,7 +571,8 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, record 
 	)
 
 	// 段落重组：使用LLM智能识别语义段落边界，合并被硬切断的行
-	if config.AppConfigInstance.EnableLlmParagraphReconstruct {
+	// 需要全局开关和文件级开关同时启用
+	if rulesConfig.EnableParagraphReconstruct && config.AppConfigInstance.EnableLlmParagraphReconstruct {
 		database.CreateProcessingLog(&database.ProcessingLogRecord{
 			FileMd5: fileMd5,
 			Step:    StepLlmFix,
@@ -621,6 +629,32 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, record 
 			NextStep:    nextStep,
 			Progress:    CalculateProgress(nextStep, 0),
 			Message:     "LLM修复完成，无需处理的段落",
+		}, nil
+	}
+
+	// 仅段落重组模式：不做逐段LLM修复，直接保存基线并进入下一步
+	if !rulesConfig.EnableModelRepair {
+		baselineContent := strings.Join(paragraphs, "\n")
+		if err := saveIntermediateFile(fileMd5, StepLlmFix, baselineContent); err != nil {
+			return nil, fmt.Errorf("保存中间文件失败: %w", err)
+		}
+		nextStep := GetNextStep(StepLlmFix)
+		progress := CalculateProgress(nextStep, 0)
+		if err := database.UpdateFileStatus(fileMd5, "processing", nextStep, progress, ""); err != nil {
+			log.Printf("[LLM修复] 更新文件状态失败: %v", err)
+		}
+		database.CreateProcessingLog(&database.ProcessingLogRecord{
+			FileMd5: fileMd5,
+			Step:    StepLlmFix,
+			Action:  "complete",
+			Details: "仅段落重组完成，跳过逐段LLM修复",
+			Status:  "success",
+		})
+		return &PipelineResult{
+			CurrentStep: StepLlmFix,
+			NextStep:    nextStep,
+			Progress:    progress,
+			Message:     "段落重组完成，已跳过逐段LLM修复",
 		}, nil
 	}
 

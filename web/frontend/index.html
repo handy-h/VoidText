@@ -120,37 +120,34 @@
           <div class="section-header">
             <h2>规则配置</h2>
           </div>
-          <!-- 预设模板 -->
-          <div class="preset-templates">
-            <span class="preset-label">快速模板：</span>
-            <button
-              class="preset-btn"
-              data-preset="basic"
-              onclick="RulesConfigModule.applyPreset('basic')"
-            >
-              基础清洗模式
-            </button>
-            <button
-              class="preset-btn"
-              data-preset="deep"
-              onclick="RulesConfigModule.applyPreset('deep')"
-            >
-              深度修复模式
-            </button>
-            <button
-              class="preset-btn"
-              data-preset="minimal"
-              onclick="RulesConfigModule.applyPreset('minimal')"
-            >
-              仅清洗
-            </button>
-          </div>
           <div class="rules-form">
             <div class="form-group">
               <label
                 ><input type="checkbox" id="rule-basic-cleaning" checked />
-                启用基础清洗</label
+                基础清洗（编码转换、乱码修复、换行修复）</label
               >
+            </div>
+            <div class="form-group">
+              <label
+                ><input type="checkbox" id="rule-ad-cleaning" checked />
+                广告清洗（自定义正则过滤 + 错别字替换）</label
+              >
+            </div>
+            <div class="form-group form-group-indent">
+              <label>自定义广告正则 (每行一个)</label>
+              <textarea
+                id="rule-ad-blacklist"
+                rows="3"
+                placeholder="例如:&#10;更多精彩请关注.*&#10;扫码关注.*"
+              ></textarea>
+            </div>
+            <div class="form-group form-group-indent">
+              <label>错别字映射 (每行一个: 错字=正字)</label>
+              <textarea
+                id="rule-typo-map"
+                rows="5"
+                placeholder="例如:&#10;的的地=的&#10;做坐=坐"
+              ></textarea>
             </div>
             <div class="form-group">
               <label
@@ -161,10 +158,10 @@
             <div class="form-group">
               <label
                 ><input type="checkbox" id="rule-vector-detection" checked />
-                启用向量检测</label
+                去除重复段落</label
               >
             </div>
-            <div class="form-group">
+            <div class="form-group form-group-indent">
               <label
                 >相似度阈值:
                 <input
@@ -178,31 +175,15 @@
             </div>
             <div class="form-group">
               <label
-                ><input type="checkbox" id="rule-model-repair" checked />
-                启用LLM修复</label
+                ><input type="checkbox" id="rule-paragraph-reconstruct" checked />
+                段落智能重组（LLM重排段落边界）</label
               >
             </div>
             <div class="form-group">
               <label
-                ><input type="checkbox" id="rule-newline-fix" checked />
-                换行符修复（自动补全段落分隔）</label
+                ><input type="checkbox" id="rule-model-repair" checked />
+                LLM语义修复（逐段纠错）</label
               >
-            </div>
-            <div class="form-group">
-              <label>错别字映射 (每行一个: 错字=正字)</label>
-              <textarea
-                id="rule-typo-map"
-                rows="5"
-                placeholder="例如:&#10;的的地=的&#10;做坐=坐"
-              ></textarea>
-            </div>
-            <div class="form-group">
-              <label>广告黑名单正则 (每行一个)</label>
-              <textarea
-                id="rule-ad-blacklist"
-                rows="3"
-                placeholder="例如:&#10;更多精彩请关注.*&#10;扫码关注.*"
-              ></textarea>
             </div>
             <div class="form-actions">
               <button
