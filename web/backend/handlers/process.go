@@ -203,6 +203,8 @@ func GetFileStatus(c *gin.Context) {
 		"author":      record.Author,
 		"title":       record.Title,
 		"fileName":    record.FileName,
+		"fileSize":    record.FileSize,
+		"updatedAt":   record.UpdatedAt,
 	}
 
 	if progressInfo, ok := processor.GlobalProgressTracker.GetProgress(fileMd5); ok {

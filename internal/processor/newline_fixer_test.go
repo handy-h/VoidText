@@ -125,3 +125,81 @@ func TestNewlineFixer_TimeMarker(t *testing.T) {
 		t.Logf("注意: 时间标记可能因段落合并而未独立成段，但分段逻辑已正确识别")
 	}
 }
+
+func TestNewlineFixer_DoublePunctEnding(t *testing.T) {
+	// 双标点结尾场景：叙述句（小神马说。）后紧跟引号开头的新对话
+	// 这是用户报告的核心问题：。" 作为段落结尾信号应优先于单独的 。
+	text := `"谁派你到这个地球上来的？"皮皮鲁问小神马。他觉得地球上不可能产生小神马。"我自己来的。"小神马说。嘴还挺紧，皮皮鲁心说。"从哪儿来？"皮皮鲁问。"现在不告诉你。"小神马回答。"专门来找我？"皮皮鲁又问。"不是。谁能把我变活，我就找谁。能把我变活的人智商准不低。"小神马说。`
+
+	fixer := NewNewlineFixer()
+	paragraphs := fixer.splitIntoParagraphs(text)
+	t.Logf("双标点结尾文本段落数: %d", len(paragraphs))
+	for i, p := range paragraphs {
+		t.Logf("  段落%d [%d字符]: %s", i+1, len([]rune(p)), strings.ReplaceAll(p, "\n", "|"))
+	}
+
+	// 核心验证：叙述句（小神马说。）后的新对话（"我自己来的。"）不应与叙述合并
+	// 修复前：isDialogueTag 误把新对话中的动词当作对话标签，导致不分割
+	// 修复后：isQuoteAttributionTag 区分 "动词在引号内" vs "动词在引号外"
+	for _, p := range paragraphs {
+		if strings.Contains(p, `小神马说`) && strings.Contains(p, `"我自己来的。"`) {
+			t.Errorf("双标点结尾未正确分段：叙述句（小神马说。）和新对话（\"我自己来的。\"）不应在同一段落中\n段落内容: %s", p)
+		}
+	}
+
+	// 验证：段落数应合理
+	if len(paragraphs) < 2 {
+		t.Errorf("双标点文本段落数过少: %d (期望 >= 2)", len(paragraphs))
+	}
+}
+
+func TestNewlineFixer_QuoteAttributionTag(t *testing.T) {
+	// 对话归属标签不应触发分段："皮皮鲁问。" 中的问是归属标签，不是新对话
+	text := `"你好啊朋友。"皮皮鲁问。"你叫什么名字？"小神马回答。`
+
+	fixer := NewNewlineFixer()
+	paragraphs := fixer.splitIntoParagraphs(text)
+	t.Logf("归属标签文本段落数: %d", len(paragraphs))
+	for i, p := range paragraphs {
+		t.Logf("  段落%d [%d字符]: %s", i+1, len([]rune(p)), p)
+	}
+
+	// 验证：归属标签 "皮皮鲁问。" 不应导致其前面的引号被错误分段
+	// 即 "你好啊朋友。"皮皮鲁问。 应保持在同一个段落中
+	foundCombined := false
+	for _, p := range paragraphs {
+		if strings.Contains(p, `你好啊朋友`) && strings.Contains(p, `皮皮鲁问`) {
+			foundCombined = true
+			break
+		}
+	}
+	if !foundCombined {
+		t.Errorf("归属标签被错误分段：'\"你好啊朋友。\"皮皮鲁问。' 应在同一段落中")
+	}
+}
+
+func TestIsQuoteAttributionTag(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected bool
+	}{
+		{"归属标签_问", "皮皮鲁问。后续内容", true},
+		{"归属标签_说", "小神马说。后续内容", true},
+		{"归属标签_回答", "比克答道。后续内容", true},
+		{"新对话_问", "皮皮鲁问小神马。后续内容", false},
+		{"新对话_内容", "我自己来的。后续内容", false},
+		{"新对话_长内容", "从哪儿来？后续内容", false},
+		{"空内容", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runes := []rune(tt.input)
+			result := isQuoteAttributionTag(runes, 0)
+			if result != tt.expected {
+				t.Errorf("isQuoteAttributionTag(%q) = %v, 期望 %v", tt.input, result, tt.expected)
+			}
+		})
+	}
+}

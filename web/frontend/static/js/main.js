@@ -4,6 +4,8 @@
 // =============================================
 
 let currentFileMd5 = null;
+// completed 页面当前正在查看的文件 md5（从状态响应中精确同步，不依赖轮询全局变量）
+let completedFileMd5 = null;
 
 // ========== 视图切换 ==========
 function showSection(section) {
@@ -48,7 +50,8 @@ function getCurrentFileMd5() {
 }
 
 function downloadCurrentVersion() {
-  const md5 = getCurrentFileMd5();
+  // 优先用 completed 页面同步的 md5，然后用全局回退
+  const md5 = completedFileMd5 || getCurrentFileMd5();
   if (md5) FileManager.downloadFile(md5);
 }
 
@@ -58,7 +61,8 @@ function downloadFinalFile() {
 }
 
 function viewReport() {
-  const md5 = getCurrentFileMd5();
+  // 优先用 completed 页面同步的 md5
+  const md5 = completedFileMd5 || getCurrentFileMd5();
   if (md5) FileManager.viewReport(md5);
 }
 

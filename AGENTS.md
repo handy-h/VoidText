@@ -81,7 +81,15 @@ config/prompts/                提示词文件（热重载，命名：{name}_{ve
 
 ### MCP 服务
 
-`opencode.json` 配置了 `code-context-mcp` 服务，提供语义搜索、符号查找、依赖分析功能。使用前需确保 Ollama 运行且已拉取 `nomic-embed-text:latest` 模型。
+`crush.json` 配置了 `code-context` MCP 服务，提供以下工具：
+
+- **code_search** - 语义搜索代码片段（按业务含义模糊查找）
+- **symbol_search** - 精确符号查找（函数名、变量名、类型名）
+- **impact_analysis** - 修改影响分析（删除/重命名/修改签名后的依赖分析）
+- **file_context** - 文件结构摘要（快速了解大文件结构）
+- **index_project** - 重建代码索引（当搜索结果不匹配时使用）
+
+使用前需确保 Ollama 运行且已拉取嵌入模型。**在需要搜索代码逻辑时，必须优先使用这些工具**。
 
 ## 编码约定
 

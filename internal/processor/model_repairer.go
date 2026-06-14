@@ -297,13 +297,15 @@ const paragraphReconstructPrompt = `你是一个专业的中文小说排版助�
 - 上一行以逗号、顿号、分号结尾，且两行属于同一句子
 - 合并后能形成通顺完整的中文句子
 
-判断"应分段"的信号（任意一条满足即可）：
+判断"应分段"的信号（按优先级从高到低）：
+- 双标点结尾：上一行以句号+引号（。" ！」 ？」 。」）结尾，且下一行以引号开头 → 这是强段落边界信号，必须分段
 - 出现明确的时间状语（如"第二天"、"几个月后"、"那年"）
 - 话题从描述转换为对话，或从对话转换为描述
 - 出现章节标记（如"第X章"、"◇"、分隔线"——"）
 - 叙事视角或场景发生明显变化
 
 对话处理：
+- 叙述句（如"小神马说。"）后紧跟引号开头的新对话 → 必须分段为独立段落
 - 同一人物的连续话语保持连贯
 - 对话与叙述之间适当留空行
 - 引号内的内容不要拆分或重组
@@ -573,10 +575,30 @@ func (mr *ModelRepairer) findBestSplitPoint(runes []rune, start, maxEnd int) int
 		}
 	}
 
-	// 次优先找句子结尾标点（。！？'"」）
-	sentenceEnds := map[rune]bool{'。': true, '！': true, '？': true, '"': true, '」': true}
+	// 次优先找双标点组合（。" ！」 ？」 。」 等），切割点在引号之后
+	// 双标点组合是比单标点更强的段落结尾信号
+	endPuncts := map[rune]bool{'。': true, '！': true, '？': true}
+	quoteChars := map[rune]bool{'"': true, '」': true, '』': true}
+	for i := maxEnd - 2; i >= searchStart; i-- {
+		if endPuncts[runes[i]] && quoteChars[runes[i+1]] {
+			return i + 2 // 切割点在引号之后
+		}
+	}
+
+	// 再次优先找句子结尾标点（。！？）
+	// 注意：如果标点后紧跟引号，在引号之后切割（避免将 。" 拆分到两个块中）
 	for i := maxEnd - 1; i >= searchStart; i-- {
-		if sentenceEnds[runes[i]] {
+		if endPuncts[runes[i]] {
+			if i+1 < len(runes) && quoteChars[runes[i+1]] {
+				return i + 2 // 在引号之后切割
+			}
+			return i + 1
+		}
+	}
+
+	// 最后找独立引号（前面不是结束标点的情况）
+	for i := maxEnd - 1; i >= searchStart; i-- {
+		if quoteChars[runes[i]] {
 			return i + 1
 		}
 	}

@@ -370,6 +370,9 @@ func processCleaningStep(fileMd5 string, preprocessResult preprocess.PreprocessR
 		log.Printf("[基础清洗] 换行修复完成: 段落数=%d, 修改=%d", fixResult.Stats["total_paragraphs"], len(fixResult.Changes))
 	}
 
+	// 章节标题拆分：确保章节标题（如 ◇ 第四章 ◇）作为独立段落
+	cleanResult.Content = SplitChapterTitles(cleanResult.Content)
+
 	if err := saveIntermediateFile(fileMd5, StepCleaning, cleanResult.Content); err != nil {
 		return nil, fmt.Errorf("保存中间文件失败: %w", err)
 	}
@@ -607,6 +610,8 @@ func processLlmFixStep(fileMd5, content string, rulesConfig RulesConfig, record 
 			})
 		} else {
 			content = reconstructed
+			// 章节标题后处理：防止LLM重组时将标题与正文合并
+			content = SplitChapterTitles(content)
 			log.Printf("[段落重组] 完成: 原始长度=%d字符, 重组后长度=%d字符",
 				origLen, len([]rune(reconstructed)))
 			database.CreateProcessingLog(&database.ProcessingLogRecord{

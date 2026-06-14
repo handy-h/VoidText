@@ -54,6 +54,7 @@ type AppConfig struct {
 
 	EnableLlmParagraphReconstruct bool
 	ParagraphChunkSize            int
+	MinParagraphLength            int // 换行修复：短段落合并阈值（字符数），低于此值的段落会与后续段落合并
 
 	EnableLocalModel  bool
 	LocalModelURL     string
@@ -128,6 +129,7 @@ func doLoad() error {
 		LLMDisableThinking:           getEnvBool("LLM_DISABLE_THINKING", false),
 		EnableLlmParagraphReconstruct: getEnvBool("ENABLE_LLM_PARAGRAPH_RECONSTRUCT", true),
 		ParagraphChunkSize:            getEnvInt("PARAGRAPH_CHUNK_SIZE", 8000),
+		MinParagraphLength:            getEnvInt("MIN_PARAGRAPH_LENGTH", 80),
 		EnableLocalModel:              getEnvBool("ENABLE_LOCAL_MODEL", false),
 		LocalModelURL:                 getEnvStr("LOCAL_MODEL_URL", "http://localhost:11434"),
 		LocalModelName:                getEnvStr("LOCAL_MODEL_NAME", "qwen2.5"),

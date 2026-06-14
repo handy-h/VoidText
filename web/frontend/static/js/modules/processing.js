@@ -83,6 +83,11 @@ const ProcessingModule = (function () {
 
         if (data.status === 'completed' || data.status === 'failed' || data.status === 'reviewing') {
           stopPolling();
+          // 从状态响应中同步 md5，防止全局变量 currentFileMd5 过期导致显示/下载错误的文件
+          if (data.md5 && data.md5 !== currentFileMd5) {
+            currentFileMd5 = data.md5;
+            window.currentFileMd5 = data.md5;
+          }
           if (data.status === 'reviewing') {
             if (statusChanged && isAutoNavEnabled()) {
               FileManager.showSection('review');
@@ -99,7 +104,7 @@ const ProcessingModule = (function () {
             }
           } else if (data.status === 'completed') {
             FileManager.showSection('completed');
-            updateCompletedInfo();
+            updateCompletedInfo(data);
           } else if (data.status === 'failed') {
             DomUtils.showFeedback('处理失败: ' + (data.errorMsg || data.error || '未知错误'), 'error');
             FileManager.refreshFileList();
@@ -307,36 +312,65 @@ const ProcessingModule = (function () {
     }
   }
 
-  function updateCompletedInfo() {
+  function updateCompletedInfo(data) {
     const infoDiv = document.getElementById('completed-info');
-    if (!infoDiv || !currentFileMd5) return;
+    if (!infoDiv) return;
+
+    // 优先使用传入的状态响应数据（避免额外请求 + md5 不一致风险）
+    if (data && data.status === 'completed') {
+      renderCompletedInfo(data);
+      return;
+    }
+
+    // 降级：用 currentFileMd5 请求详情
+    if (!currentFileMd5) return;
 
     AppConfig.apiRequest(`/files/${currentFileMd5}`)
-      .then((data) => {
-        if (!data.success) return;
-
-        const file = data.file;
-        const info = DomUtils.createElement('div');
-
-        const title = DomUtils.createElement('h3');
-        DomUtils.setTextContent(title, file.title || file.fileName);
-        info.appendChild(title);
-
-        const details = DomUtils.createElement('p');
-        const parts = [];
-        if (file.author) parts.push('作者: ' + file.author);
-        parts.push('大小: ' + DomUtils.formatFileSize(file.fileSize));
-        parts.push('状态: ' + DomUtils.getStatusText(file.status));
-        parts.push('完成时间: ' + DomUtils.formatTime(file.updatedAt));
-        DomUtils.setTextContent(details, parts.join(' | '));
-        info.appendChild(details);
-
-        infoDiv.innerHTML = '';
-        infoDiv.appendChild(info);
+      .then((resp) => {
+        if (!resp.success) return;
+        renderCompletedInfo(resp.file);
       })
       .catch((err) => {
         console.error('获取完成信息失败:', err);
       });
+  }
+
+  function renderCompletedInfo(file) {
+    const infoDiv = document.getElementById('completed-info');
+    if (!infoDiv || !file) return;
+
+    // 兼容两种数据格式：GetFileStatus 扁平结构 / GetFile 包裹结构
+    const src = file.file || file;
+    const titleText = (src.title || src.fileName || '').trim();
+    const authorText = (src.author || '').trim();
+    const sizeVal = src.fileSize || 0;
+    const statusVal = src.status || '';
+    const updatedAt = src.updatedAt || '';
+
+    if (!titleText) {
+      console.warn('[completed] 文件标题为空', { file, src });
+      return;
+    }
+
+    const parts = [];
+    if (authorText) parts.push('作者: ' + authorText);
+    parts.push('大小: ' + DomUtils.formatFileSize(sizeVal));
+    parts.push('状态: ' + DomUtils.getStatusText(statusVal));
+    if (updatedAt) parts.push('完成时间: ' + DomUtils.formatTime(updatedAt));
+
+    infoDiv.innerHTML = '<h3>' + escapeHtml(titleText) + '</h3><p>' + escapeHtml(parts.join(' | ')) + '</p>';
+
+    // 同步 md5 到全局
+    const md5 = file.md5 || src.md5 || currentFileMd5 || '';
+    if (md5 && window.completedFileMd5 !== undefined) {
+      window.completedFileMd5 = md5;
+    }
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
   }
 
   return {

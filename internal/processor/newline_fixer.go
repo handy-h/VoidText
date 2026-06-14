@@ -4,6 +4,7 @@ import (
 	"strings"
 	"unicode"
 
+	"voidtext/internal/config"
 	"voidtext/internal/logging"
 	"voidtext/internal/processor/preprocess"
 )
@@ -26,9 +27,13 @@ type NewlineFixer struct {
 
 // NewNewlineFixer 创建换行符修复器
 func NewNewlineFixer() *NewlineFixer {
+	minLen := config.AppConfigInstance.MinParagraphLength
+	if minLen <= 0 {
+		minLen = 80
+	}
 	return &NewlineFixer{
 		EnableAutoFix:      true,
-		MinParagraphLength: 80,
+		MinParagraphLength: minLen,
 	}
 }
 
@@ -48,10 +53,11 @@ func (nf *NewlineFixer) Fix(content string) NewlineFixResult {
 	// 检测是否需要修复换行符
 	needFix := nf.needsNewlineFix(content)
 	logging.Info("newline_fix_detect", map[string]interface{}{
-		"content_len":   len(content),
-		"rune_count":    len([]rune(content)),
-		"newline_count": strings.Count(content, "\n"),
-		"needs_fix":     needFix,
+		"content_len":         len(content),
+		"rune_count":          len([]rune(content)),
+		"newline_count":       strings.Count(content, "\n"),
+		"needs_fix":           needFix,
+		"min_paragraph_length": nf.MinParagraphLength,
 	})
 	if !needFix {
 		result.Stats["skipped"] = 1
@@ -322,11 +328,33 @@ func (nf *NewlineFixer) detectParagraphBreak(runes []rune, pos int) int {
 				return afterQuote - pos
 			}
 
-			// 直引号 " 在结束标点后：视为新对话/新段落的开启
-			// 除非后面紧跟说话动词（说/问/道等），表明是 "...XXX说" 格式的对话标签
+			// 直引号 " 在结束标点后：需区分两种本质不同的模式
+			// 模式A: "皮皮鲁问。" → 闭合引号+对话归属标签（标签在引号外，归属上一句）
+			// 模式B: 小神马说。"皮皮鲁问小神马。" → 叙述结束+新对话开始（动词在引号内）
+			// 优先级：。" > 。作为段落结尾信号
 			if isAmbiguousQuote(runes[afterPunct]) {
-				if !isDialogueTag(runes, afterQuote) {
-					return afterPunct - pos // 在引号前分段，引号归入下一段
+				afterQuoteNext := skipSpaces(runes, afterPunct+1)
+
+				if afterQuoteNext >= len(runes) {
+					return 0 // 文本结束
+				}
+
+				// 引号后紧跟另一个引号 → 当前引号是闭合引号，新引号开启新对话 → 分段
+				if isQuoteChar(runes[afterQuoteNext]) {
+					return afterPunct - pos // 在引号前分段
+				}
+
+				// 检查引号后是否为 "XXX说/问/道。" 格式的对话归属标签
+				// 该模式的动词在引号外部，是上一句引文的归属标签
+				// 排除模式B：动词在新引号内部（如 "皮皮鲁问小神马。"），属于新对话
+				if !isQuoteAttributionTag(runes, afterQuoteNext) {
+					return afterPunct - pos // 不是归属标签 → 分段
+				}
+				// 是归属标签，但需检查归属句是否已经结束
+				// "苏宁说。" → 归属句以句号结束 → 归属已完成，下一引号是新对话 → 分段
+				// "苏宁说，" → 归属句以逗号延续 → 归属未完成，下一引号是归属的延续 → 不分段
+				if attrTagEndsSentence(runes, afterQuoteNext) {
+					return afterPunct - pos // 归属标签已完成，分段
 				}
 			}
 
@@ -409,6 +437,129 @@ func isDialogueTag(runes []rune, pos int) bool {
 			runes[pos+offset] == '？' || runes[pos+offset] == '"' {
 			break
 		}
+	}
+	return false
+}
+
+// isQuoteAttributionTag 检查 pos 处是否为 "XXX说/问/道。" 格式的对话归属标签
+// 与 isDialogueTag 的关键区别：要求动词后紧跟句尾标点（。！？），
+// 确保匹配的是独立的归属短句（如 "皮皮鲁问。"），
+// 而不是新对话内部的动词（如 "皮皮鲁问小神马。" 中的 "问" 后面是角色名，不是标点）
+// 同时支持双字动词（如 "答道"、"喊道"）
+func isQuoteAttributionTag(runes []rune, pos int) bool {
+	saidVerbs := []rune{'说', '问', '喊', '叫', '道', '答', '骂', '笑', '哭', '吼', '叹', '嚷'}
+	endPuncts := []rune{'。', '！', '？'}
+	isPunctOrQuote := func(r rune) bool {
+		return r == '，' || r == '。' || r == '！' || r == '？' || r == '"'
+	}
+
+	for offset := 0; offset < 4 && pos+offset < len(runes); offset++ {
+		char := runes[pos+offset]
+		// 遇到标点或引号停止扫描（说明动词不在预期位置）
+		if isPunctOrQuote(char) {
+			break
+		}
+
+		// 检查当前字符是否为说话动词
+		isVerb := false
+		for _, v := range saidVerbs {
+			if char == v {
+				isVerb = true
+				break
+			}
+		}
+		if !isVerb {
+			continue
+		}
+
+		// 当前字符是动词，检查是否为双字动词（如 "答道"、"喊道"、"叫道"）
+		if pos+offset+1 < len(runes) {
+			nextChar := runes[pos+offset+1]
+			for _, v := range saidVerbs {
+				if nextChar == v {
+					// 双字动词，检查动词后是否紧跟句尾标点
+					verbEnd := pos + offset + 2
+					if verbEnd < len(runes) {
+						for _, p := range endPuncts {
+							if runes[verbEnd] == p {
+								return true
+							}
+						}
+					}
+					return false
+				}
+			}
+		}
+
+		// 单字动词，检查动词后是否紧跟句尾标点
+		verbEnd := pos + offset + 1
+		if verbEnd < len(runes) {
+			for _, p := range endPuncts {
+				if runes[verbEnd] == p {
+					return true
+				}
+			}
+		}
+		// 动词后不是句尾标点 → 不是归属标签
+		return false
+	}
+	return false
+}
+
+// attrTagEndsSentence 检查归属标签是否以句尾标点（。！？）结束
+// 用于区分 "苏宁说。"（归属完成，后续引号是新对话）和 "苏宁说，"（归属延续，后续引号是归属内容）
+func attrTagEndsSentence(runes []rune, pos int) bool {
+	saidVerbs := []rune{'说', '问', '喊', '叫', '道', '答', '骂', '笑', '哭', '吼', '叹', '嚷'}
+	endPuncts := []rune{'。', '！', '？'}
+
+	for offset := 0; offset < 4 && pos+offset < len(runes); offset++ {
+		char := runes[pos+offset]
+		if char == '，' || char == '。' || char == '！' || char == '？' || char == '"' {
+			break
+		}
+
+		// 检查是否为说话动词
+		isVerb := false
+		for _, v := range saidVerbs {
+			if char == v {
+				isVerb = true
+				break
+			}
+		}
+		if !isVerb {
+			continue
+		}
+
+		// 找到动词，检查动词后的标点类型
+		// 优先检查双字动词（如 "答道"、"喊道"）
+		if pos+offset+1 < len(runes) {
+			nextChar := runes[pos+offset+1]
+			for _, v := range saidVerbs {
+				if nextChar == v {
+					// 双字动词，检查动词后的标点
+					verbEnd := pos + offset + 2
+					if verbEnd < len(runes) {
+						for _, p := range endPuncts {
+							if runes[verbEnd] == p {
+								return true
+							}
+						}
+					}
+					return false
+				}
+			}
+		}
+
+		// 单字动词，检查动词后的标点
+		verbEnd := pos + offset + 1
+		if verbEnd < len(runes) {
+			for _, p := range endPuncts {
+				if runes[verbEnd] == p {
+					return true
+				}
+			}
+		}
+		return false
 	}
 	return false
 }
@@ -614,4 +765,107 @@ func (nf *NewlineFixer) isChapterTitleText(text string) bool {
 	}
 
 	return false
+}
+
+// SplitChapterTitles 从文本中分离章节标题
+// 独立于换行修复器，可在任何处理阶段后调用，确保章节标题始终独立成段
+// 检测格式：◇...◇、第X章/节/回、中文数字+顿号（一、二、三...）
+func SplitChapterTitles(content string) string {
+	runes := []rune(content)
+	if len(runes) < 5 {
+		return content
+	}
+
+	var result strings.Builder
+	i := 0
+
+	for i < len(runes) {
+		titleEnd := detectChapterTitleAt(runes, i)
+		if titleEnd <= i {
+			result.WriteRune(runes[i])
+			i++
+			continue
+		}
+
+		// 找到章节标题，确保前后有段落分隔
+		title := string(runes[i:titleEnd])
+
+		// 标题前加分隔（如果前面有内容且不以双换行结尾）
+		if result.Len() > 0 {
+			existing := result.String()
+			if !strings.HasSuffix(existing, "\n\n") {
+				if strings.HasSuffix(existing, "\n") {
+					result.WriteString("\n")
+				} else {
+					result.WriteString("\n\n")
+				}
+			}
+		}
+
+		result.WriteString(title)
+
+		// 跳过标题后的空白字符（空格、换行）
+		i = titleEnd
+		for i < len(runes) && (runes[i] == ' ' || runes[i] == '\t' || runes[i] == '\n' || runes[i] == '\r') {
+			i++
+		}
+
+		// 标题后加分隔（如果后面还有内容）
+		if i < len(runes) {
+			result.WriteString("\n\n")
+		}
+	}
+
+	return result.String()
+}
+
+// detectChapterTitleAt 检测 pos 处是否为章节标题，返回标题结束位置
+// 与 isChapterTitleAt 类似，但作为独立函数使用，不依赖 NewlineFixer 实例
+func detectChapterTitleAt(runes []rune, pos int) int {
+	if pos >= len(runes) {
+		return pos
+	}
+
+	// 格式1：◇...◇
+	if runes[pos] == '◇' {
+		for j := pos + 1; j < len(runes) && j < pos+20; j++ {
+			if runes[j] == '◇' {
+				return j + 1
+			}
+		}
+	}
+
+	// 格式2：第X章/节/回
+	if pos+1 < len(runes) && runes[pos] == '第' {
+		for j := pos + 1; j < len(runes) && j < pos+10; j++ {
+			if runes[j] == '章' || runes[j] == '节' || runes[j] == '回' {
+				return j + 1
+			}
+			if unicode.IsDigit(runes[j]) {
+				continue
+			}
+			break
+		}
+	}
+
+	// 格式3：中文数字+顿号（一、二、三...）
+	if pos+1 < len(runes) {
+		cnNums := "一二三四五六七八九十"
+		if strings.ContainsRune(cnNums, runes[pos]) && runes[pos+1] == '、' {
+			// 找到该行结束位置
+			for j := pos + 2; j < len(runes) && j < pos+30; j++ {
+				if runes[j] == '\n' {
+					return j
+				}
+			}
+			// 没有换行，取到下一个句号或内容开始处
+			for j := pos + 2; j < len(runes) && j < pos+30; j++ {
+				if runes[j] == '。' || runes[j] == '！' || runes[j] == '？' {
+					return j + 1
+				}
+			}
+		}
+	}
+
+	return pos
 }
